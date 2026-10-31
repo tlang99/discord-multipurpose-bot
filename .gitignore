@@ -1,0 +1,18 @@
+## .NET
+bin/
+obj/
+
+## User-specific
+*.user
+*.suo
+.vs/
+.idea/
+
+## Bot runtime data (local JSON stores, logs)
+data/
+*.log
+
+## Secrets - never commit real tokens
+appsettings.Development.json
+appsettings.Local.json
+.env

@@ -1,0 +1,141 @@
+# ModBot
+
+A Discord moderation bot built on [Discord.Net](https://github.com/discord-net/Discord.Net), using slash commands
+(`Discord.Net.Interactions`) and the .NET Generic Host for configuration/DI. The architecture is intentionally
+modular so new feature areas can be added later without touching moderation code.
+
+## Features
+
+**Moderation commands** (all permission-gated, see below): `/kick`, `/ban`, `/unban`, `/timeout`, `/untimeout`,
+`/warn`, `/warnings`, `/clearwarnings`, `/purge`.
+
+**Server configuration**: `/modlog set|disable|show` (where moderation actions get logged) and `/automod`, which
+controls every aspect of passive content filtering — see the table below.
+
+**Auto-moderation** runs on every incoming message (members with `Manage Messages` are exempt) and checks, in
+order:
+1. **Invite links** — optional, off by default (`/automod block-invites`).
+2. **Custom banned words** — your own list, managed with `/automod word-add|word-remove|word-list`.
+3. **Built-in profanity filter** — a curated list of common English profanity, on by default
+   (`/automod profanity-filter`).
+4. **Image/GIF content moderation** — directly-uploaded image and GIF attachments, plus raw image/GIF URLs pasted
+   in a message, are sent to [Sightengine](https://sightengine.com) for classification. Independently togglable:
+   explicit content, suggestive-but-not-explicit content, and offensive content (hate symbols, obscene gestures)
+   — see `/automod image-moderation`, `block-explicit-images`, `block-suggestive-images`, `block-offensive-images`,
+   and `scan-nsfw-channels`. Requires Sightengine API credentials (see Setup step 3) — without them this check is
+   skipped entirely.
+   > **Known gap:** pasting a Tenor/Giphy link gets re-encoded by Discord into a video (mp4) embed, which this
+   > endpoint can't read, so those aren't scanned yet. Covering that would mean hooking the `MessageUpdated` event
+   > (embeds populate after the initial send) and calling a video-capable moderation endpoint instead.
+
+Any auto-moderation removal is logged to the mod-log channel just like a manual action, with the reason noted.
+
+## Project layout
+
+```
+Configuration/     Strongly-typed options bound from appsettings/env/secrets
+Models/            Plain data types (GuildSettings, Warning, ModerationResult)
+Services/
+  Storage/         IGuildSettingsStore / IWarningStore + a JSON-file implementation
+  Moderation/      IModerationService - moderation actions, independent of Discord.Net modules
+  ContentModeration/ IImageModerationService - image/GIF classification, implemented against Sightengine
+EventHandlers/     Gateway event handlers (e.g. AutoModerationHandler for MessageReceived)
+Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
+Hosting/           DiscordBotService - owns the client lifecycle and wires events to handlers
+```
+
+### Adding a new feature later
+
+1. Add a new subfolder under `Modules/` with an `InteractionModuleBase<SocketInteractionContext>` class — it's
+   picked up automatically via assembly scanning (`AddModulesAsync`), no registration needed.
+2. If it needs state, add a model under `Models/` and a store under `Services/Storage/`, and register it in
+   `Program.cs`.
+3. If it needs business logic independent of Discord (so it's testable/reusable), put that in `Services/<Feature>/`
+   rather than directly in the module, following the pattern `IModerationService` uses.
+4. If it needs a gateway event (message edits, reactions, member joins, etc.), add a handler class under
+   `EventHandlers/` and wire the event in `DiscordBotService`.
+
+Storage is JSON-file-based for simplicity (`data/guild-settings.json`, `data/warnings.json`). To move to a real
+database later, implement `IGuildSettingsStore`/`IWarningStore` against it and swap the registration in
+`Program.cs` — nothing else needs to change.
+
+Likewise, `IImageModerationService` is a thin seam over the image/GIF moderation backend (currently Sightengine).
+Swapping providers later means writing a new implementation of that interface and changing one line in
+`Program.cs` — the auto-moderation handler and slash commands don't know which backend is behind it.
+
+## Setup
+
+### 1. Create the Discord application
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and create a new application.
+2. Under **Bot**, create a bot user and copy its token (keep this secret).
+3. Under **Bot → Privileged Gateway Intents**, enable **Server Members Intent** and **Message Content Intent**.
+   Both are required (member lookups for moderation commands, and message scanning for auto-mod).
+4. Under **OAuth2 → URL Generator**, select the `bot` and `applications.commands` scopes, and under bot
+   permissions select at least: `Kick Members`, `Ban Members`, `Moderate Members`, `Manage Messages`,
+   `View Channels`, `Send Messages`, `Read Message History`. Use the generated URL to invite the bot to your server.
+
+### 2. Configure the token
+
+Never put the real token in `appsettings.json` (it's committed to source control). Use one of:
+
+```bash
+# .NET user-secrets (recommended for local dev)
+dotnet user-secrets set "Bot:Token" "<your-token>"
+
+# or an environment variable
+set BOT_TOKEN=<your-token>          # Windows cmd
+$env:BOT_TOKEN = "<your-token>"     # PowerShell
+```
+
+For faster iteration while developing, also set a test guild so slash commands register instantly instead of
+waiting up to an hour for global propagation:
+
+```bash
+dotnet user-secrets set "Bot:TestGuildId" "<your-server-id>"
+```
+
+Remove `Bot:TestGuildId` (or leave it unset) once you're ready to register commands globally.
+
+### 3. (Optional) Configure image/GIF moderation
+
+Image and GIF scanning (`/automod image-moderation`) needs a [Sightengine](https://sightengine.com) account:
+
+1. Sign up at sightengine.com and grab your **API User** and **API Secret** from the dashboard (a free tier is
+   available; usage beyond it is billed per check, and animated GIFs cost proportionally more since every frame
+   counts as an operation).
+2. Set the credentials the same way as the bot token:
+
+```bash
+dotnet user-secrets set "Sightengine:ApiUser" "<api-user>"
+dotnet user-secrets set "Sightengine:ApiSecret" "<api-secret>"
+
+# or environment variables
+$env:SIGHTENGINE_API_USER = "<api-user>"     # PowerShell
+$env:SIGHTENGINE_API_SECRET = "<api-secret>"
+```
+
+If these aren't set, image/GIF moderation silently does nothing (text filtering and moderation commands still
+work fine) — `/automod image-moderation enable` will tell you if credentials are missing.
+
+The sensitivity thresholds (0–1, Sightengine's own recommended range for balancing false positives/negatives) can
+be tuned in `appsettings.json` under `Sightengine:ExplicitThreshold` / `SuggestiveThreshold` / `OffensiveThreshold`
+— these apply bot-wide, while which categories to actually enforce (explicit/suggestive/offensive/NSFW-channel
+exemption) is controlled per-server via `/automod`.
+
+### 4. Run it
+
+```bash
+dotnet run
+```
+
+## Permissions reference
+
+| Command | Required user permission | Required bot permission |
+|---|---|---|
+| `/kick` | Kick Members | Kick Members |
+| `/ban`, `/unban` | Ban Members | Ban Members |
+| `/timeout`, `/untimeout` | Moderate Members | Moderate Members |
+| `/warn`, `/warnings`, `/clearwarnings` | Moderate Members | — |
+| `/purge` | Manage Messages | Manage Messages |
+| `/modlog`, `/automod` | Manage Server | — |
