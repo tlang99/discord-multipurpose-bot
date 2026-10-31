@@ -30,6 +30,22 @@ order:
 
 Any auto-moderation removal is logged to the mod-log channel just like a manual action, with the reason noted.
 
+**Gaming news** (`/news`) — follow a game and new articles get posted to a channel of your choice as embeds:
+- `/news follow-game game:<game> channel:#channel` — built-in game feeds (currently Call of Duty: Modern Warfare 4,
+  via a Bing News search, which includes each article's summary snippet and thumbnail in the embed). Run it again
+  with a different channel to move it.
+- `/news follow-feed name url channel` — any other RSS/Atom feed (`https://` only).
+- `/news list`, `/news unfollow name`, `/news latest name [count]` (preview the newest articles, only visible to you).
+- `/news filter-add|filter-remove|filter-show name` — keyword filter per feed. *Include* keywords: only articles
+  whose headline or summary mentions one get posted (none = post everything). *Exclude* keywords: articles with one
+  in the headline are skipped. Built-in games start with a filter tuned for content-update news (seasons, battle
+  pass, maps, weapons, patches, events) that skips reviews, guides, loadouts, and business/politics stories.
+
+Feeds are checked every 15 minutes (`News:PollIntervalMinutes` in `appsettings.json`). Articles already in a feed
+when you follow it are skipped, so only genuinely new ones get posted; at most `News:MaxPostsPerPoll` (default 5)
+are posted per feed per check so a burst of news can't flood the channel. To add another built-in game, add an
+entry to `Services/News/NewsPresets.cs`.
+
 ## Project layout
 
 ```
@@ -39,9 +55,11 @@ Services/
   Storage/         IGuildSettingsStore / IWarningStore + a JSON-file implementation
   Moderation/      IModerationService - moderation actions, independent of Discord.Net modules
   ContentModeration/ IImageModerationService - image/GIF classification, implemented against Sightengine
+  News/            INewsFeedReader (RSS/Atom parsing), built-in game feed presets, news embed formatting
 EventHandlers/     Gateway event handlers (e.g. AutoModerationHandler for MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
 Hosting/           DiscordBotService - owns the client lifecycle and wires events to handlers
+                   NewsPollingService - background timer that posts new articles for /news subscriptions
 ```
 
 ### Adding a new feature later
@@ -73,7 +91,7 @@ Swapping providers later means writing a new implementation of that interface an
    Both are required (member lookups for moderation commands, and message scanning for auto-mod).
 4. Under **OAuth2 → URL Generator**, select the `bot` and `applications.commands` scopes, and under bot
    permissions select at least: `Kick Members`, `Ban Members`, `Moderate Members`, `Manage Messages`,
-   `View Channels`, `Send Messages`, `Read Message History`. Use the generated URL to invite the bot to your server.
+   `View Channels`, `Send Messages`, `Read Message History`, `Embed Links` (for `/news`). Use the generated URL to invite the bot to your server.
 
 ### 2. Configure the token
 
@@ -139,3 +157,4 @@ dotnet run
 | `/warn`, `/warnings`, `/clearwarnings` | Moderate Members | — |
 | `/purge` | Manage Messages | Manage Messages |
 | `/modlog`, `/automod` | Manage Server | — |
+| `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
