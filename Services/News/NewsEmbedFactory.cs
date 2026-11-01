@@ -26,11 +26,15 @@ public static class NewsEmbedFactory
             builder.WithDescription(writeUp.Text);
             if (showOriginalSummary && article.Summary is { Length: > 0 } original)
             {
-                builder.AddField($"From {source ?? "the article"}", Truncate(original, 300));
+                // The source name comes from the feed: an over-long one would make Discord.Net throw, and the article
+                // would then fail on every check.
+                builder.AddField(Truncate($"From {source ?? "the article"}", EmbedFieldBuilder.MaxFieldNameLength),
+                    Truncate(original, 300));
             }
 
             // Says plainly that the description is the bot's take, not the outlet's words.
-            builder.WithFooter($"{(source is null ? "" : source + " • ")}{feedLabel} • AI write-up by {writeUp.WriterName}");
+            builder.WithFooter(Truncate($"{(source is null ? "" : source + " • ")}{feedLabel} • AI write-up by " +
+                                        writeUp.WriterName, EmbedFooterBuilder.MaxFooterTextLength));
         }
         else
         {
@@ -39,7 +43,8 @@ public static class NewsEmbedFactory
                 builder.WithDescription(Truncate(summary, 350));
             }
 
-            builder.WithFooter(source is null ? feedLabel : $"{source} • {feedLabel}");
+            builder.WithFooter(Truncate(source is null ? feedLabel : $"{source} • {feedLabel}",
+                EmbedFooterBuilder.MaxFooterTextLength));
         }
 
         if (Uri.TryCreate(article.ImageUrl, UriKind.Absolute, out var imageUri) && imageUri.Scheme == "https")

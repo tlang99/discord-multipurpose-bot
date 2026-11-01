@@ -24,6 +24,15 @@ public partial class NewsWriter : INewsWriter
 {
     private const int MaxLength = 700;
 
+    /// <summary>Long enough for a local Ollama to load the model on the first request after being idle (about 25-40
+    /// seconds in testing), short enough that a hung model can't stall a news check for long.</summary>
+    private static readonly TimeSpan WriteUpTimeout = TimeSpan.FromSeconds(60);
+
+    private static readonly TimeSpan BackOffAfterFailure = TimeSpan.FromMinutes(5);
+
+    /// <summary>Until when write-ups are skipped after a failure, as UTC ticks (read and written atomically).</summary>
+    private long _skipUntilTicks;
+
     private const string Instructions =
         "You're posting a news update in the server's news channel. Rewrite the article below as a short post in " +
         "your own voice: 2 to 4 sentences, under 500 characters. Use ONLY the facts in the headline and summary " +
@@ -61,20 +70,32 @@ public partial class NewsWriter : INewsWriter
             return null;
         }
 
+        // Recently failed: post the site's summaries straight away instead of waiting on the model for every article.
+        if (DateTimeOffset.UtcNow.UtcTicks < Interlocked.Read(ref _skipUntilTicks))
+        {
+            return null;
+        }
+
         var systemPrompt = await _personality.IntroAsync(guildId, botName, serverName) + Instructions;
         var articleText = $"Headline: {article.Title}\n" +
                           $"Summary from the news site: {article.Summary ?? "(none - the headline is all there is)"}";
 
         string text;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(WriteUpTimeout);
         try
         {
-            text = await _chat.ReplyAsync(systemPrompt, [new ChatTurn(ChatRole.User, articleText)], cancellationToken);
+            text = await _chat.ReplyAsync(systemPrompt, [new ChatTurn(ChatRole.User, articleText)], timeout.Token);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // Anything at all: a write-up is optional, and a failure here mustn't stop the article being posted.
-            _logger.LogWarning(ex, "Couldn't write up '{Title}' for guild {GuildId}; posting the original summary.",
-                article.Title, guildId);
+            // Anything at all, including our own timeout: a write-up is optional, and a failure here mustn't stop the
+            // article being posted. Back off so a hung or down model doesn't hold up every following article (and
+            // the chat users queued behind it) for the full timeout each.
+            Interlocked.Exchange(ref _skipUntilTicks, (DateTimeOffset.UtcNow + BackOffAfterFailure).UtcTicks);
+            _logger.LogWarning(ex, "Couldn't write up '{Title}' for guild {GuildId}; posting the original summary, and " +
+                                   "skipping write-ups for {Minutes} minutes.", article.Title, guildId,
+                (int)BackOffAfterFailure.TotalMinutes);
             return null;
         }
 
@@ -110,11 +131,11 @@ public partial class NewsWriter : INewsWriter
     private static string Clean(string text)
     {
         text = text.Trim();
-        if (text.Length >= 2 && text[0] is '"' or '“' && text[^1] is '"' or '”')
+        if (text.Length >= 2 && (text[0] is '"' or '“') && (text[^1] is '"' or '”'))
         {
             text = text[1..^1].Trim();
         }
-        else if (text.Length >= 1 && text[0] is '"' or '“' && text.IndexOfAny(['"', '“', '”'], 1) < 0)
+        else if (text.Length >= 1 && (text[0] is '"' or '“') && text.IndexOfAny(['"', '“', '”'], 1) < 0)
         {
             // An opening quote that's never closed.
             text = text[1..].Trim();
@@ -132,13 +153,14 @@ public partial class NewsWriter : INewsWriter
 
     /// <summary>
     /// Anything shaped like a link, whatever the domain: http(s)://, "www.", markdown link syntax "](", an autolink
-    /// like &lt;https:, any word.word domain shape (evil.app, bit.do/x), a Discord invite, or @everyone / @here.
+    /// like &lt;https:, Discord mention syntax (&lt;@id&gt;, &lt;#id&gt;), any word.word domain shape (evil.app, bit.do/x), a Discord
+    /// invite, or @everyone / @here.
     /// Matching the shape rather than a list of domain endings means a new ending can't slip through; the price is
     /// that a write-up naming something like "Node.js" falls back to the site's summary, which is harmless.
     /// </summary>
     /// <remarks>Checked against the 10 real write-ups from testing (none rejected), 10 planted links (all caught) and
     /// text like "Season 1.5, e.g. U.S. servers" (not rejected).</remarks>
-    [GeneratedRegex(@"https?://|\bwww\.|\]\s*\(|<[a-z][a-z0-9+.-]*:|discord(?:app)?\.com/invite|@everyone|@here|\b[a-z0-9-]+\.[a-z]{2,}\b",
+    [GeneratedRegex(@"https?://|\bwww\.|\]\s*\(|<[a-z][a-z0-9+.-]*:|<[@#]|discord(?:app)?\.com/invite|@everyone|@here|\b[a-z0-9-]+\.[a-z]{2,}\b",
         RegexOptions.IgnoreCase)]
     private static partial Regex LinkOrMassMentionRegex();
 }
