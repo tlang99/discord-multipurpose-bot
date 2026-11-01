@@ -81,17 +81,18 @@ public partial class NewsWriter : INewsWriter
                           $"Summary from the news site: {article.Summary ?? "(none - the headline is all there is)"}";
 
         string text;
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(WriteUpTimeout);
         try
         {
-            text = await _chat.ReplyAsync(systemPrompt, [new ChatTurn(ChatRole.User, articleText)], timeout.Token);
+            // The timeout only counts the model's own time, not waiting behind chat for a free slot, so ordinary
+            // load can't trip the back-off below.
+            text = await _chat.ReplyAsync(systemPrompt, [new ChatTurn(ChatRole.User, articleText)], cancellationToken,
+                WriteUpTimeout);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // Anything at all, including our own timeout: a write-up is optional, and a failure here mustn't stop the
-            // article being posted. Back off so a hung or down model doesn't hold up every following article (and
-            // the chat users queued behind it) for the full timeout each.
+            // Anything at all: a write-up is optional, and a failure here mustn't stop the article being posted. Back
+            // off so a hung or down model doesn't hold up every following article (and the chat users queued behind
+            // it) for the full timeout each. One Ollama serves every server, so the back-off is shared too.
             Interlocked.Exchange(ref _skipUntilTicks, (DateTimeOffset.UtcNow + BackOffAfterFailure).UtcTicks);
             _logger.LogWarning(ex, "Couldn't write up '{Title}' for guild {GuildId}; posting the original summary, and " +
                                    "skipping write-ups for {Minutes} minutes.", article.Title, guildId,

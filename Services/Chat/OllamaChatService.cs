@@ -30,13 +30,13 @@ public class OllamaChatService : IChatService
     }
 
     public async Task<string> ReplyAsync(string systemPrompt, IReadOnlyList<ChatTurn> conversation,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, TimeSpan? timeout = null)
     {
         var messages = new List<OllamaMessage> { new("system", systemPrompt) };
         messages.AddRange(conversation.Select(t => new OllamaMessage(t.Role == ChatRole.Assistant ? "assistant" : "user",
             t.Content)));
 
-        return await SendAsync(new OllamaChatRequest(_options.Model, messages, Stream: false), cancellationToken);
+        return await SendAsync(new OllamaChatRequest(_options.Model, messages, Stream: false), cancellationToken, timeout);
     }
 
     public async Task<string> CompleteJsonAsync(string systemPrompt, string userMessage, string jsonSchema,
@@ -52,15 +52,27 @@ public class OllamaChatService : IChatService
         return await SendAsync(request, cancellationToken);
     }
 
-    private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken)
+    private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken,
+        TimeSpan? timeout = null)
     {
         // One slot per request, shared by chat and news, so a local Ollama isn't asked to do too much at once.
         using var slot = await _limiter.AcquireAsync(cancellationToken);
 
+        // The timeout starts once the slot is ours, so waiting behind other requests doesn't count against the model.
+        // Running out cancels the request; the filters below check the caller's own token, so it surfaces as a
+        // ChatServiceException like any other model failure.
+        using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (timeout is { } limit)
+        {
+            requestCts.CancelAfter(limit);
+        }
+
+        var requestToken = requestCts.Token;
+
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.PostAsJsonAsync("api/chat", request, JsonOptions, cancellationToken);
+            response = await _httpClient.PostAsJsonAsync("api/chat", request, JsonOptions, requestToken);
         }
         catch (Exception ex) when (ex is HttpRequestException ||
                                    (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
@@ -72,7 +84,7 @@ public class OllamaChatService : IChatService
         {
             if (!response.IsSuccessStatusCode)
             {
-                var error = await ReadErrorAsync(response, cancellationToken);
+                var error = await ReadErrorAsync(response, requestToken);
                 throw new ChatServiceException($"Ollama returned HTTP {(int)response.StatusCode}: {error}",
                     (int)response.StatusCode);
             }
@@ -82,7 +94,7 @@ public class OllamaChatService : IChatService
             OllamaChatResponse? payload;
             try
             {
-                payload = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(JsonOptions, cancellationToken);
+                payload = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(JsonOptions, requestToken);
             }
             catch (Exception ex) when (ex is JsonException or NotSupportedException or HttpRequestException or IOException ||
                                        (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
@@ -104,7 +116,17 @@ public class OllamaChatService : IChatService
     /// <summary>Ollama errors are usually <c>{"error": "..."}</c>; fall back to the raw body, cut short.</summary>
     private static async Task<string> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        string body;
+        try
+        {
+            body = await response.Content.ReadAsStringAsync(cancellationToken);
+        }
+        catch (Exception)
+        {
+            // Only used to describe the failure; the status code is enough on its own.
+            return "(couldn't read the error details)";
+        }
+
         try
         {
             if (JsonSerializer.Deserialize<OllamaError>(body, JsonOptions)?.Error is { Length: > 0 } message)
