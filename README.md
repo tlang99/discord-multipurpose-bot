@@ -37,9 +37,10 @@ Any auto-moderation removal is logged to the mod-log channel just like a manual 
 - `/news follow-feed name url channel` — any other RSS/Atom feed (`https://` only).
 - `/news list`, `/news unfollow name`, `/news latest name [count]` (preview the newest articles, only visible to you).
 - `/news filter-add|filter-remove|filter-show name` — keyword filter per feed. *Include* keywords: only articles
-  whose headline or summary mentions one get posted (none = post everything). *Exclude* keywords: articles with one
-  in the headline are skipped. Built-in games start with a filter tuned for content-update news (seasons, battle
-  pass, maps, weapons, patches, events) that skips reviews, guides, loadouts, and business/politics stories.
+  with one in the headline get posted (none = post everything). *Exclude* keywords: articles with one in the
+  headline are skipped. Only headlines are checked, since summaries mention update words in passing. Built-in
+  games start with a filter tuned for content-update news (seasons, battle pass, maps, weapons, patches, events)
+  that skips reviews, guides, loadouts, and business/politics stories.
 
 Feeds are checked every 15 minutes (`News:PollIntervalMinutes` in `appsettings.json`). Articles already in a feed
 when you follow it are skipped, so only genuinely new ones get posted; at most `News:MaxPostsPerPoll` (default 5)

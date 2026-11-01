@@ -8,9 +8,12 @@ namespace ModBot.Services.News;
 /// </summary>
 public static class NewsKeywordFilter
 {
-    /// <param name="includeKeywords">If non-empty, the headline or summary must contain at least one.</param>
-    /// <param name="excludeKeywords">If the headline contains any of these, the article is skipped. Only the
-    /// headline is checked, since summaries often mention words like "review" in passing.</param>
+    /// <param name="includeKeywords">If non-empty, the headline must contain at least one.</param>
+    /// <param name="excludeKeywords">If the headline contains any of these, the article is skipped.</param>
+    /// <remarks>Both lists only look at the headline. Summaries mention words like "maps", "weapons" or "review" in
+    /// passing, which let reviews and opinion pieces through when includes were also matched against the summary.
+    /// Real update news names the update in its headline ("Season 1 Brings New Maps", "Nerfs Controversial Perk").
+    /// </remarks>
     public static bool Matches(NewsArticle article, IReadOnlyCollection<string> includeKeywords,
         IReadOnlyCollection<string> excludeKeywords)
     {
@@ -19,13 +22,7 @@ public static class NewsKeywordFilter
             return false;
         }
 
-        if (includeKeywords.Count == 0)
-        {
-            return true;
-        }
-
-        var text = article.Title + "\n" + article.Summary;
-        return includeKeywords.Any(k => ContainsWord(text, k));
+        return includeKeywords.Count == 0 || includeKeywords.Any(k => ContainsWord(article.Title, k));
     }
 
     private static bool ContainsWord(string text, string keyword)

@@ -59,7 +59,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 
     public enum FilterKind
     {
-        [ChoiceDisplay("Only post articles mentioning this")]
+        [ChoiceDisplay("Only post articles with this in the headline")]
         Include,
 
         [ChoiceDisplay("Skip articles with this in the headline")]
@@ -102,7 +102,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
         list.Add(keyword);
         await _store.SaveAsync(subscription);
         await RespondAsync(type == FilterKind.Include
-            ? $"**{subscription.Name}** will now also post articles mentioning `{keyword}`."
+            ? $"**{subscription.Name}** will now also post articles with `{keyword}` in the headline."
             : $"**{subscription.Name}** will now skip articles with `{keyword}` in the headline.", ephemeral: true);
     }
 
@@ -146,7 +146,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 
         await RespondAsync(
             $"**{subscription.Name}** filter\n" +
-            $"**Posts articles mentioning:** {(subscription.IncludeKeywords.Count == 0 ? "*(anything - no filter)*" : Format(subscription.IncludeKeywords))}\n" +
+            $"**Posts headlines containing:** {(subscription.IncludeKeywords.Count == 0 ? "*(anything - no filter)*" : Format(subscription.IncludeKeywords))}\n" +
             $"**Skips headlines containing:** {Format(subscription.ExcludeKeywords)}",
             ephemeral: true);
     }

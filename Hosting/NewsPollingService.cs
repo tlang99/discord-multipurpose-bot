@@ -44,6 +44,8 @@ public class NewsPollingService : BackgroundService
 
         try
         {
+            await UpgradeLegacyFeedUrlsAsync();
+
             // Give the gateway connection a head start so the first check isn't wasted.
             await Task.Delay(StartupDelay, stoppingToken);
 
@@ -57,6 +59,33 @@ public class NewsPollingService : BackgroundService
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             // Expected on shutdown.
+        }
+    }
+
+    /// <summary>Points subscriptions made from a built-in preset at the preset's current feed URL. Seen-article history
+    /// is kept, so only articles the old feed missed get posted.</summary>
+    /// <remarks>Never throws: an exception escaping ExecuteAsync would stop news polling for good, and by default the
+    /// whole bot with it. If this fails, polling just carries on with the old URLs and it's retried next start.</remarks>
+    private async Task UpgradeLegacyFeedUrlsAsync()
+    {
+        try
+        {
+            foreach (var subscription in await _store.GetAllAsync())
+            {
+                if (NewsPresets.UpgradeLegacyFeedUrl(subscription.FeedUrl) is not { } newUrl)
+                {
+                    continue;
+                }
+
+                subscription.FeedUrl = newUrl;
+                await _store.SaveAsync(subscription);
+                _logger.LogInformation("Updated the feed URL for '{Name}' in guild {GuildId} to the date-sorted version.",
+                    subscription.Name, subscription.GuildId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Couldn't update news subscriptions to the current feed URLs; will retry next start.");
         }
     }
 
