@@ -9,6 +9,7 @@ using ModBot.EventHandlers;
 using ModBot.Hosting;
 using ModBot.Services.ContentModeration;
 using ModBot.Services.Moderation;
+using ModBot.Services.News;
 using ModBot.Services.Storage;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -39,6 +40,7 @@ if (!string.IsNullOrWhiteSpace(envSightengineSecret))
 
 builder.Services.Configure<BotOptions>(builder.Configuration.GetSection(BotOptions.SectionName));
 builder.Services.Configure<SightengineOptions>(builder.Configuration.GetSection(SightengineOptions.SectionName));
+builder.Services.Configure<NewsOptions>(builder.Configuration.GetSection(NewsOptions.SectionName));
 
 builder.Services.AddSingleton(new DiscordSocketConfig
 {
@@ -66,6 +68,7 @@ builder.Services.AddSingleton(provider => new InteractionService(
 // without touching anything that depends on IGuildSettingsStore / IWarningStore.
 builder.Services.AddSingleton<IGuildSettingsStore, JsonGuildSettingsStore>();
 builder.Services.AddSingleton<IWarningStore, JsonWarningStore>();
+builder.Services.AddSingleton<INewsSubscriptionStore, JsonNewsSubscriptionStore>();
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();
 
@@ -75,9 +78,19 @@ builder.Services.AddHttpClient<IImageModerationService, SightengineImageModerati
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
+builder.Services.AddHttpClient<INewsFeedReader, RssNewsFeedReader>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+    // Some feed hosts reject requests with no User-Agent.
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ModBot/1.0 (Discord news bot)");
+})
+// Feed URLs come from server admins, so only allow connections to the public internet.
+.ConfigurePrimaryHttpMessageHandler(PublicNetworkHttpHandler.Create);
+
 builder.Services.AddSingleton<AutoModerationHandler>();
 
 builder.Services.AddHostedService<DiscordBotService>();
+builder.Services.AddHostedService<NewsPollingService>();
 
 var host = builder.Build();
 await host.RunAsync();
