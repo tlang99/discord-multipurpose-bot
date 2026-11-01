@@ -1,0 +1,22 @@
+namespace ModBot.Configuration;
+
+public class MusicOptions
+{
+    public const string SectionName = "Music";
+
+    /// <summary>Address of the Lavalink server that does the actual audio streaming. 127.0.0.1 rather than
+    /// "localhost": Windows tries localhost over IPv6 first, and since Lavalink only listens on IPv4 that added ~2
+    /// seconds to every request.</summary>
+    public string LavalinkUrl { get; set; } = "http://127.0.0.1:2333";
+
+    /// <summary>Must match <c>lavalink.server.password</c> in <c>lavalink/application.yml</c>. Override with the
+    /// <c>LAVALINK_PASSWORD</c> environment variable or user-secrets rather than editing appsettings.json.</summary>
+    public string LavalinkPassword { get; set; } = "youshallnotpass";
+
+    /// <summary>How long the bot stays in a voice channel with nobody listening, or with nothing playing, before
+    /// leaving.</summary>
+    public int IdleTimeoutSeconds { get; set; } = 120;
+
+    /// <summary>Cap on the queue length per server, so one playlist can't queue thousands of songs.</summary>
+    public int MaxQueueLength { get; set; } = 200;
+}

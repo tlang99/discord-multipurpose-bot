@@ -55,6 +55,7 @@ public class DiscordBotService : BackgroundService
         _interactions.Log += LogAsync;
         _client.Ready += OnReadyAsync;
         _client.InteractionCreated += OnInteractionCreatedAsync;
+        _interactions.InteractionExecuted += OnInteractionExecutedAsync;
         _client.MessageReceived += OnMessageReceivedAsync;
 
         await _interactions.AddModulesAsync(Assembly.GetExecutingAssembly(), _services);
@@ -115,6 +116,50 @@ public class DiscordBotService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception while executing an interaction.");
+        }
+    }
+
+    /// <summary>
+    /// Commands run in the background (RunMode.Async), so ExecuteCommandAsync above reports success as soon as they're
+    /// started - this is where a command that actually threw or failed a precondition ends up. Log it properly, and
+    /// answer the interaction so the user sees an error instead of Discord's "The application did not respond".
+    /// </summary>
+    private async Task OnInteractionExecutedAsync(ICommandInfo? command, IInteractionContext context, IResult result)
+    {
+        if (result.IsSuccess)
+        {
+            return;
+        }
+
+        // Exceptions are already logged in full by the InteractionService's own Log event ("[App Commands]").
+        var name = command?.Name ?? "unknown";
+        if (result.Error != InteractionCommandError.Exception)
+        {
+            _logger.LogWarning("/{Command} failed: {Error} - {Reason}", name, result.Error, result.ErrorReason);
+        }
+
+        var message = result.Error switch
+        {
+            InteractionCommandError.UnmetPrecondition => result.ErrorReason,
+            InteractionCommandError.Exception => "Something went wrong running that command. The error has been logged.",
+            _ => "That command couldn't be run.",
+        };
+
+        try
+        {
+            if (context.Interaction.HasResponded)
+            {
+                await context.Interaction.FollowupAsync(message, ephemeral: true, allowedMentions: AllowedMentions.None);
+            }
+            else
+            {
+                await context.Interaction.RespondAsync(message, ephemeral: true, allowedMentions: AllowedMentions.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Most likely the interaction already expired (more than 15 minutes, or never acknowledged in 3 seconds).
+            _logger.LogDebug(ex, "Couldn't send the error reply for /{Command}.", name);
         }
     }
 

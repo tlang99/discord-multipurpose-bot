@@ -16,3 +16,9 @@ data/
 appsettings.Development.json
 appsettings.Local.json
 .env
+
+## Lavalink server (downloaded locally, see lavalink/README.md)
+lavalink/*.jar
+lavalink/plugins/
+lavalink/logs/
+lavalink/secrets.yml
