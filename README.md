@@ -102,14 +102,15 @@ pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are l
 change, delete the old post and run `/help-post` again.
 
 **AI chat** — mention the bot in a message (or reply to one of its messages) and it answers, using a model served
-by [Ollama](https://ollama.com): its cloud models by default, or your own Ollama (see Setup step 5).
+by [Ollama](https://ollama.com): on the same machine by default, or Ollama's cloud (see Setup step 5).
 - It sends the last `Chat:HistoryMessages` (default 10) messages in the channel along for context, so it can follow
-  a conversation. Those messages go to the configured Ollama server; set it to 0 to send only the question.
+  a conversation. With a local Ollama they never leave the machine; with Ollama's cloud they're sent there. Set it
+  to 0 to send only the question.
 - Questions that break the server's word filter are ignored (auto-mod removes them), and replies are checked
   against the same filter before posting.
 - Replies never ping anyone but the person who asked, and are cut to Discord's 2000-character limit.
 - Each person can ask once every `Chat:CooldownSeconds` (default 10); too soon and the bot reacts with ⏳. At most
-  `Chat:MaxConcurrentRequests` (default 2) questions go to Ollama at once; the rest wait their turn.
+  `Chat:MaxConcurrentRequests` (default 1) questions go to Ollama at once; the rest wait their turn.
 - The instructions given to the model can be replaced with `Chat:SystemPrompt` (`{botName}` and `{serverName}` are
   filled in). Turn the feature off with `Chat:Enabled: false`.
 
@@ -223,24 +224,23 @@ Music needs Java and the Lavalink server. Follow [lavalink/README.md](lavalink/R
 
 ### 5. (Optional) Set up AI chat
 
-By default the chatbot uses Ollama's cloud models, which need an API key:
+By default the chatbot uses Ollama running on the same machine as the bot. No account or key is needed:
 
-1. Create a key at [ollama.com/settings/keys](https://ollama.com/settings/keys).
-2. Set it the same way as the bot token:
+1. Install Ollama from [ollama.com/download](https://ollama.com/download). On Windows it runs in the background
+   (tray icon) and starts with Windows.
+2. Download the model: `ollama pull llama3.2` (about 2 GB; a 3B model that runs fine on a CPU, faster with a GPU).
+   To use a different model, pull it and set `Chat:Model` in `appsettings.json` to its name (`ollama list` shows
+   what you have).
 
-```bash
-dotnet user-secrets set "Chat:ApiKey" "<api-key>"
+If Ollama isn't running, the bot replies that it couldn't come up with an answer and logs why; everything else keeps
+working. The first question after Ollama has been idle for a while is slower, since it loads the model into memory
+first (`Chat:TimeoutSeconds`, default 120, allows for that).
 
-# or the environment variable the Ollama CLI also uses
-$env:OLLAMA_API_KEY = "<api-key>"     # PowerShell
-```
-
-3. Optionally pick another model with `Chat:Model` in `appsettings.json`, using a name from
-   [ollama.com/api/tags](https://ollama.com/api/tags).
-
-To use your own Ollama instead, set `Chat:OllamaUrl` to its address (e.g. `http://127.0.0.1:11434`), set
-`Chat:Model` to a model you've pulled (`ollama pull <model>`), and leave the key empty. Without a key for
-ollama.com the bot logs a warning at startup and replies that the AI isn't set up; everything else keeps working.
+**Using Ollama's cloud instead:** set `Chat:OllamaUrl` to `https://ollama.com`, set `Chat:Model` to a name from
+[ollama.com/api/tags](https://ollama.com/api/tags), and create an API key at
+[ollama.com/settings/keys](https://ollama.com/settings/keys). Set the key the same way as the bot token, with
+`dotnet user-secrets set "Chat:ApiKey" "<api-key>"` or the `OLLAMA_API_KEY` environment variable. Without a key the
+bot logs a warning at startup.
 
 ### 6. Run it
 
