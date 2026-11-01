@@ -1,6 +1,8 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
+using Lavalink4NET.Extensions;
+using Lavalink4NET.InactivityTracking.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -38,9 +40,17 @@ if (!string.IsNullOrWhiteSpace(envSightengineSecret))
     builder.Configuration[$"{SightengineOptions.SectionName}:ApiSecret"] = envSightengineSecret;
 }
 
+var envLavalinkPassword = Environment.GetEnvironmentVariable("LAVALINK_PASSWORD");
+if (!string.IsNullOrWhiteSpace(envLavalinkPassword))
+{
+    builder.Configuration[$"{MusicOptions.SectionName}:LavalinkPassword"] = envLavalinkPassword;
+}
+
 builder.Services.Configure<BotOptions>(builder.Configuration.GetSection(BotOptions.SectionName));
 builder.Services.Configure<SightengineOptions>(builder.Configuration.GetSection(SightengineOptions.SectionName));
 builder.Services.Configure<NewsOptions>(builder.Configuration.GetSection(NewsOptions.SectionName));
+builder.Services.Configure<MusicOptions>(builder.Configuration.GetSection(MusicOptions.SectionName));
+var musicOptions = builder.Configuration.GetSection(MusicOptions.SectionName).Get<MusicOptions>() ?? new MusicOptions();
 
 builder.Services.AddSingleton(new DiscordSocketConfig
 {
@@ -48,9 +58,14 @@ builder.Services.AddSingleton(new DiscordSocketConfig
         | GatewayIntents.GuildMembers
         | GatewayIntents.GuildMessages
         | GatewayIntents.MessageContent
-        | GatewayIntents.GuildBans,
+        | GatewayIntents.GuildBans
+        | GatewayIntents.GuildVoiceStates, // music: who's in which voice channel
     LogLevel = LogSeverity.Info,
     AlwaysDownloadUsers = true,
+    // Time the 3-second interaction window from when the bot received the interaction, not from Discord's creation
+    // timestamp compared to this PC's clock. With the clock running a few seconds fast, the default makes every
+    // command look expired on arrival ("Cannot defer an interaction after 3 seconds!").
+    UseInteractionSnowflakeDate = false,
 });
 
 builder.Services.AddSingleton<DiscordSocketClient>();
@@ -86,6 +101,22 @@ builder.Services.AddHttpClient<INewsFeedReader, RssNewsFeedReader>(client =>
 })
 // Feed URLs come from server admins, so only allow connections to the public internet.
 .ConfigurePrimaryHttpMessageHandler(PublicNetworkHttpHandler.Create);
+
+// Music: Lavalink (a separate Java server, see lavalink/README.md) does the streaming; Lavalink4NET talks to it
+// and registers its own hosted services. If Lavalink isn't running, only the music commands fail.
+builder.Services.AddLavalink();
+builder.Services.ConfigureLavalink(options =>
+{
+    options.BaseAddress = new Uri(musicOptions.LavalinkUrl);
+    options.Passphrase = musicOptions.LavalinkPassword;
+});
+
+// Leave the voice channel once nobody's listening or nothing has played for a while.
+builder.Services.AddInactivityTracking();
+builder.Services.ConfigureInactivityTracking(options =>
+{
+    options.DefaultTimeout = TimeSpan.FromSeconds(Math.Max(10, musicOptions.IdleTimeoutSeconds));
+});
 
 builder.Services.AddSingleton<AutoModerationHandler>();
 

@@ -46,6 +46,23 @@ when you follow it are skipped, so only genuinely new ones get posted; at most `
 are posted per feed per check so a burst of news can't flood the channel. To add another built-in game, add an
 entry to `Services/News/NewsPresets.cs`.
 
+**Music** — plays YouTube audio in a voice channel, through a [Lavalink](lavalink/README.md) server that runs
+alongside the bot (and needs a one-time sign-in with a throwaway Google account, see its README):
+- `/play query` — a song name (searches YouTube), or a YouTube song or playlist link. Joins your voice channel, or
+  adds to the end of the queue if something's already playing.
+- `/pause`, `/resume`, `/skip [count]`, `/stop` (clears the queue and leaves), `/nowplaying`, `/queue [page]`.
+- `/remove position`, `/move from to`, `/shuffle`, `/loop off|song|queue`, `/clearqueue`.
+
+Anyone can use these, but commands that change playback only work from the bot's voice channel. Each new song is
+announced in the text channel where `/play` was first used. The bot leaves after `Music:IdleTimeoutSeconds`
+(default 2 minutes) with nobody listening or nothing playing, and the queue is capped at `Music:MaxQueueLength`
+(default 200). If Lavalink isn't running, the music commands say so and everything else keeps working.
+
+> YouTube's terms of service don't allow streaming its audio outside YouTube, and YouTube changes often enough that
+> playback breaks from time to time — see [lavalink/README.md](lavalink/README.md#when-youtube-stops-working).
+> SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
+> SoundCloud links.
+
 ## Project layout
 
 ```
@@ -58,6 +75,8 @@ Services/
   News/            INewsFeedReader (RSS/Atom parsing), built-in game feed presets, news embed formatting
 EventHandlers/     Gateway event handlers (e.g. AutoModerationHandler for MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
+  Music/           Music commands plus the Lavalink player that announces songs (Lavalink4NET does the rest)
+lavalink/          Config for the Lavalink music server (the server itself is downloaded, not committed)
 Hosting/           DiscordBotService - owns the client lifecycle and wires events to handlers
                    NewsPollingService - background timer that posts new articles for /news subscriptions
 ```
@@ -91,7 +110,9 @@ Swapping providers later means writing a new implementation of that interface an
    Both are required (member lookups for moderation commands, and message scanning for auto-mod).
 4. Under **OAuth2 → URL Generator**, select the `bot` and `applications.commands` scopes, and under bot
    permissions select at least: `Kick Members`, `Ban Members`, `Moderate Members`, `Manage Messages`,
-   `View Channels`, `Send Messages`, `Read Message History`, `Embed Links` (for `/news`). Use the generated URL to invite the bot to your server.
+   `View Channels`, `Send Messages`, `Read Message History`, `Embed Links` (for `/news` and music), `Connect` and
+   `Speak` (for music). Use the generated URL to invite the bot to your server. If the bot is already in your
+   server, give its role `Connect` and `Speak` instead of re-inviting it.
 
 ### 2. Configure the token
 
@@ -141,7 +162,12 @@ be tuned in `appsettings.json` under `Sightengine:ExplicitThreshold` / `Suggesti
 — these apply bot-wide, while which categories to actually enforce (explicit/suggestive/offensive/NSFW-channel
 exemption) is controlled per-server via `/automod`.
 
-### 4. Run it
+### 4. (Optional) Set up music
+
+Music needs Java and the Lavalink server. Follow [lavalink/README.md](lavalink/README.md) once, then start Lavalink
+(`java -jar Lavalink.jar` in the `lavalink/` folder) whenever you run the bot.
+
+### 5. Run it
 
 ```bash
 dotnet run
@@ -158,3 +184,5 @@ dotnet run
 | `/purge` | Manage Messages | Manage Messages |
 | `/modlog`, `/automod` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
+| `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
+| Other music commands | — (must be in the bot's voice channel; `/queue` and `/nowplaying` work from anywhere) | — |

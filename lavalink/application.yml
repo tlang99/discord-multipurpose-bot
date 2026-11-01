@@ -1,0 +1,80 @@
+# Lavalink server config for ModBot's music commands. See lavalink/README.md for setup.
+server:
+  port: 2333
+  # Only accept connections from this machine. The bot connects locally, so nothing else needs to reach it.
+  address: 127.0.0.1
+
+lavalink:
+  plugins:
+    # YouTube support. Lavalink's built-in YouTube source is deprecated and broken; this plugin replaces it.
+    # YouTube changes often - if YouTube playback stops working, update this version first:
+    # https://github.com/lavalink-devs/youtube-source/releases
+    # Currently a SNAPSHOT (unreleased build from the plugin's main branch, Sep 17 2026): 1.18.2 can't decode
+    # YouTube's current player script ("must find sig function"), and main has IOS/TV/cipher fixes since then.
+    # Switch back to a normal version number once a release newer than 1.18.2 is out.
+    - dependency: "dev.lavalink.youtube:youtube-plugin:2be8e542d3f6f178e048dca565892684c2e40177"
+      snapshot: true
+  server:
+    # Must match the bot's Music:LavalinkPassword. To change it, set the LAVALINK_SERVER_PASSWORD environment
+    # variable before starting Lavalink, and LAVALINK_PASSWORD (same value) for the bot.
+    password: "youshallnotpass"
+    sources:
+      youtube: false   # handled by the plugin above
+      soundcloud: true
+      # Everything else is off. "http" in particular would let /play stream any URL from this machine.
+      bandcamp: false
+      twitch: false
+      vimeo: false
+      nico: false
+      http: false
+      local: false
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+    youtubePlaylistLoadLimit: 4   # pages of 100 - the bot caps the queue anyway
+    playerUpdateInterval: 5
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    gc-warnings: true
+
+plugins:
+  youtube:
+    enabled: true
+    # Tried in order until one works. The plugin's defaults (WEB_REMIX, ANDROID_VR, WEB, WEB_EMBEDDED_PLAYER) all
+    # failed playback in Nov 2026 ("requires login" / "no supported audio streams"), so more playback-capable
+    # clients are listed. MUSIC only handles YouTube Music searches; ANDROID is left out (the plugin calls it
+    # "frequently dysfunctional"). Client list and status: https://github.com/lavalink-devs/youtube-source#available-clients
+    clients:
+      - MUSIC
+      - TV               # plays using the signed-in (OAuth) account below
+      - TVHTML5_SIMPLY
+      - MWEB
+      - WEB
+      - IOS
+      - ANDROID_VR
+      - WEBEMBEDDED
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    # Sign in to YouTube so it stops answering "Sign in to confirm you're not a bot". USE A THROWAWAY GOOGLE
+    # ACCOUNT, NOT YOUR REAL ONE - the plugin warns the account can get terminated. First start: Lavalink logs a
+    # code and a Google URL; sign in there with the throwaway account and enter the code. Lavalink then logs a
+    # refresh token - put it in lavalink/secrets.yml (gitignored, see the bottom of this file) so it stays signed in.
+    oauth:
+      enabled: true
+
+# Keeps the YouTube refresh token out of git. Create lavalink/secrets.yml containing:
+#   plugins:
+#     youtube:
+#       oauth:
+#         refreshToken: "<token from the Lavalink log>"
+spring:
+  config:
+    import: "optional:file:./secrets.yml"
+
+logging:
+  file:
+    path: ./logs/
+  level:
+    root: INFO
+    lavalink: INFO
+    dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO   # shows the sign-in code and the refresh token
