@@ -21,6 +21,7 @@ public class NewsPollingService : BackgroundService
     private readonly DiscordSocketClient _client;
     private readonly INewsSubscriptionStore _store;
     private readonly INewsFeedReader _feedReader;
+    private readonly NewsWriter _writer;
     private readonly NewsOptions _options;
     private readonly ILogger<NewsPollingService> _logger;
 
@@ -28,12 +29,14 @@ public class NewsPollingService : BackgroundService
         DiscordSocketClient client,
         INewsSubscriptionStore store,
         INewsFeedReader feedReader,
+        NewsWriter writer,
         IOptions<NewsOptions> options,
         ILogger<NewsPollingService> logger)
     {
         _client = client;
         _store = store;
         _feedReader = feedReader;
+        _writer = writer;
         _options = options.Value;
         _logger = logger;
     }
@@ -157,18 +160,28 @@ public class NewsPollingService : BackgroundService
             return;
         }
 
+        var guild = (channel as SocketTextChannel)?.Guild;
+        var botName = guild?.CurrentUser.DisplayName ?? _client.CurrentUser.Username;
+        var writeUps = 0;
+
         toPost.Reverse(); // oldest first, so the newest ends up at the bottom of the channel
         foreach (var article in toPost)
         {
-            await channel.SendMessageAsync(embed: NewsEmbedFactory.Build(article, subscription.Name));
+            // The bot's own take, in the server's chatbot personality; null means post the site's summary as before.
+            var writeUp = await _writer.WriteAsync(article, subscription.GuildId, botName, guild?.Name ?? "this server",
+                cancellationToken);
+            writeUps += writeUp is null ? 0 : 1;
+
+            await channel.SendMessageAsync(embed: NewsEmbedFactory.Build(article, subscription.Name, writeUp,
+                _options.ShowOriginalSummary));
 
             // Mark one at a time so a failure mid-way (e.g. permissions revoked) retries only what wasn't sent.
             await _store.MarkSeenAsync(subscription.GuildId, subscription.Name, [article.Id]);
         }
 
-        _logger.LogInformation("News check for '{Name}' in guild {GuildId}: posted {Count} article(s) to #{Channel} " +
-            "({Filtered} filtered out, {Capped} skipped over the {Max}-per-check cap).",
-            subscription.Name, subscription.GuildId, toPost.Count, channel.Name,
+        _logger.LogInformation("News check for '{Name}' in guild {GuildId}: posted {Count} article(s) to #{Channel}, " +
+            "{WriteUps} with an AI write-up ({Filtered} filtered out, {Capped} skipped over the {Max}-per-check cap).",
+            subscription.Name, subscription.GuildId, toPost.Count, channel.Name, writeUps,
             filteredCount, cappedCount, Math.Max(1, _options.MaxPostsPerPoll));
     }
 }

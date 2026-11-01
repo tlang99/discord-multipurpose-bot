@@ -2,6 +2,8 @@ using System.Text.RegularExpressions;
 using Discord;
 using Discord.Interactions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.News;
 using ModBot.Services.Storage;
@@ -18,12 +20,17 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 
     private readonly INewsSubscriptionStore _store;
     private readonly INewsFeedReader _feedReader;
+    private readonly NewsWriter _writer;
+    private readonly NewsOptions _options;
     private readonly ILogger<NewsModule> _logger;
 
-    public NewsModule(INewsSubscriptionStore store, INewsFeedReader feedReader, ILogger<NewsModule> logger)
+    public NewsModule(INewsSubscriptionStore store, INewsFeedReader feedReader, NewsWriter writer,
+        IOptions<NewsOptions> options, ILogger<NewsModule> logger)
     {
         _store = store;
         _feedReader = feedReader;
+        _writer = writer;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -219,8 +226,15 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
             return;
         }
 
-        var embeds = articles.Take(count).Select(a => NewsEmbedFactory.Build(a, subscription.Name)).ToArray();
-        await FollowupAsync(embeds: embeds, ephemeral: true);
+        // Written up the same way the channel posts will be, so this doubles as a preview of the bot's take.
+        var embeds = new List<Embed>();
+        foreach (var article in articles.Take(count))
+        {
+            var writeUp = await _writer.WriteAsync(article, Context.Guild.Id, Context.Guild.CurrentUser.DisplayName,
+                Context.Guild.Name);
+            embeds.Add(NewsEmbedFactory.Build(article, subscription.Name, writeUp, _options.ShowOriginalSummary));
+        }
+        await FollowupAsync(embeds: embeds.ToArray(), ephemeral: true);
     }
 
     private async Task FollowAsync(string name, string feedUrl, ITextChannel channel, string displayName,

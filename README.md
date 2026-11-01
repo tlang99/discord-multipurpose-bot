@@ -49,6 +49,22 @@ when you follow it are skipped, so only genuinely new ones get posted; at most `
 are posted per feed per check so a burst of news can't flood the channel. To add another built-in game, add an
 entry to `Services/News/NewsPresets.cs`.
 
+**AI write-ups:** with the chatbot set up (see AI chat below), each article is written up by the bot in its own
+words, using the server's chatbot personality (`/chat personality`). The embed still has the headline linking to the
+article, the image and the date:
+- **Description:** the bot's write-up.
+- **"From <site>" field:** the news site's own summary, so readers can check the facts. Turn it off with
+  `News:ShowOriginalSummary: false`.
+- **Footer:** marks the description as an AI write-up by the bot.
+
+The model only sees the headline and the feed's short summary, not the full article. It's told to stick to those
+facts, but small models still embellish now and then, which is why the site's summary is shown by default.
+- **Word filter:** write-ups go through it, like chatbot replies.
+- **Fallback:** if Ollama is unreachable or a write-up breaks the filter, that article posts with the site's summary,
+  as before.
+- **Preview:** `/news latest` shows write-ups too, so it doubles as a preview.
+- **Turning it off:** `News:AiWriteUps: false`.
+
 **Music** — plays YouTube audio in a voice channel, through a [Lavalink](lavalink/README.md) server that runs
 alongside the bot (and needs a one-time sign-in with a throwaway Google account, see its README):
 - `/play query` — a song name (searches YouTube), or a YouTube song or playlist link. Joins your voice channel, or

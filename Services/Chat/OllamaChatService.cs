@@ -19,11 +19,13 @@ public class OllamaChatService : IChatService
     };
 
     private readonly HttpClient _httpClient;
+    private readonly ChatRequestLimiter _limiter;
     private readonly ChatOptions _options;
 
-    public OllamaChatService(HttpClient httpClient, IOptions<ChatOptions> options)
+    public OllamaChatService(HttpClient httpClient, ChatRequestLimiter limiter, IOptions<ChatOptions> options)
     {
         _httpClient = httpClient;
+        _limiter = limiter;
         _options = options.Value;
     }
 
@@ -52,6 +54,9 @@ public class OllamaChatService : IChatService
 
     private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken)
     {
+        // One slot per request, shared by chat and news, so a local Ollama isn't asked to do too much at once.
+        using var slot = await _limiter.AcquireAsync(cancellationToken);
+
         HttpResponseMessage response;
         try
         {
