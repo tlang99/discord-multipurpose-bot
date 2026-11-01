@@ -76,7 +76,18 @@ public class OllamaChatService : IChatService
                     (int)response.StatusCode);
             }
 
-            var payload = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(JsonOptions, cancellationToken);
+            // A malformed body, or the connection dropping mid-read, becomes the same "the model failed" error as
+            // everything else here, so callers only have one exception type to handle.
+            OllamaChatResponse? payload;
+            try
+            {
+                payload = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(JsonOptions, cancellationToken);
+            }
+            catch (Exception ex) when (ex is JsonException or NotSupportedException or HttpRequestException or IOException
+                                           or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                throw new ChatServiceException($"Couldn't read Ollama's response: {ex.Message}", inner: ex);
+            }
 
             // Reasoning models put their thinking in message.thinking, separately, so content is just the answer.
             var reply = payload?.Message?.Content?.Trim();

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModBot.Configuration;
@@ -19,7 +20,7 @@ public record NewsWriteUp(string Text, string WriterName);
 /// <remarks>Tested against llama3.2 on real feed items: it kept the facts in nearly every case, but once turned "a
 /// multiplayer disadvantage" into "a competitive edge". That's why the news site's own summary is shown alongside by
 /// default (<see cref="NewsOptions.ShowOriginalSummary"/>) and the embed says the write-up is AI-written.</remarks>
-public class NewsWriter
+public partial class NewsWriter
 {
     private const int MaxLength = 700;
 
@@ -71,8 +72,9 @@ public class NewsWriter
         {
             text = await _chat.ReplyAsync(systemPrompt, [new ChatTurn(ChatRole.User, articleText)], cancellationToken);
         }
-        catch (ChatServiceException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            // Anything at all: a write-up is optional, and a failure here mustn't stop the article being posted.
             _logger.LogWarning(ex, "Couldn't write up '{Title}' for guild {GuildId}; posting the original summary.",
                 article.Title, guildId);
             return null;
@@ -81,6 +83,15 @@ public class NewsWriter
         text = Clean(text);
         if (text.Length < 20)
         {
+            return null;
+        }
+
+        // The feed's text is untrusted and goes into the prompt, so a hostile feed could try to get a link or a mass
+        // mention into the news channel. The prompt forbids both; this makes sure.
+        if (LinkOrMassMentionRegex().IsMatch(text))
+        {
+            _logger.LogInformation("Write-up of '{Title}' contained a link or mass mention in guild {GuildId}; posting " +
+                                   "the original summary instead.", article.Title, guildId);
             return null;
         }
 
@@ -120,4 +131,10 @@ public class NewsWriter
         var lastSentence = cut.LastIndexOfAny(['.', '!', '?']);
         return lastSentence > MaxLength / 2 ? cut[..(lastSentence + 1)] : cut.TrimEnd() + "…";
     }
+
+    /// <summary>A web address (with or without http, "www." or a bare domain like evil.com/path), a Discord invite,
+    /// or @everyone / @here.</summary>
+    [GeneratedRegex(@"https?://|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|gg|io|co|ru|xyz|ly|me|tv|info|link|click|top)(?:/|\b)|discord(?:app)?\.com/invite|@everyone|@here",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex LinkOrMassMentionRegex();
 }
