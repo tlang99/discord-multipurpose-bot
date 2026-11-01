@@ -101,6 +101,18 @@ they work in), visible only to them. `/help-post` (Manage Server) posts the same
 pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
 change, delete the old post and run `/help-post` again.
 
+**AI chat** — mention the bot in a message (or reply to one of its messages) and it answers, using a model served
+by [Ollama](https://ollama.com): its cloud models by default, or your own Ollama (see Setup step 5).
+- It sends the last `Chat:HistoryMessages` (default 10) messages in the channel along for context, so it can follow
+  a conversation. Those messages go to the configured Ollama server; set it to 0 to send only the question.
+- Questions that break the server's word filter are ignored (auto-mod removes them), and replies are checked
+  against the same filter before posting.
+- Replies never ping anyone but the person who asked, and are cut to Discord's 2000-character limit.
+- Each person can ask once every `Chat:CooldownSeconds` (default 10); too soon and the bot reacts with ⏳. At most
+  `Chat:MaxConcurrentRequests` (default 2) questions go to Ollama at once; the rest wait their turn.
+- The instructions given to the model can be replaced with `Chat:SystemPrompt` (`{botName}` and `{serverName}` are
+  filled in). Turn the feature off with `Chat:Enabled: false`.
+
 ## Project layout
 
 ```
@@ -112,7 +124,8 @@ Services/
   ContentModeration/ IImageModerationService - image/GIF classification, implemented against Sightengine
   News/            INewsFeedReader (RSS/Atom parsing), built-in game feed presets, news embed formatting
   Lfg/             ILfgService - LFG post rules (join/leave/start/cancel/expiry), in memory, no Discord types
-EventHandlers/     Gateway event handlers (e.g. AutoModerationHandler for MessageReceived)
+  Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
+EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
   Music/           Music commands plus the Lavalink player that announces songs (Lavalink4NET does the rest)
   Lfg/             /lfg command, its button handlers, and the LFG card's embed/buttons
@@ -208,7 +221,28 @@ exemption) is controlled per-server via `/automod`.
 Music needs Java and the Lavalink server. Follow [lavalink/README.md](lavalink/README.md) once, then start Lavalink
 (`java -jar Lavalink.jar` in the `lavalink/` folder) whenever you run the bot.
 
-### 5. Run it
+### 5. (Optional) Set up AI chat
+
+By default the chatbot uses Ollama's cloud models, which need an API key:
+
+1. Create a key at [ollama.com/settings/keys](https://ollama.com/settings/keys).
+2. Set it the same way as the bot token:
+
+```bash
+dotnet user-secrets set "Chat:ApiKey" "<api-key>"
+
+# or the environment variable the Ollama CLI also uses
+$env:OLLAMA_API_KEY = "<api-key>"     # PowerShell
+```
+
+3. Optionally pick another model with `Chat:Model` in `appsettings.json`, using a name from
+   [ollama.com/api/tags](https://ollama.com/api/tags).
+
+To use your own Ollama instead, set `Chat:OllamaUrl` to its address (e.g. `http://127.0.0.1:11434`), set
+`Chat:Model` to a model you've pulled (`ollama pull <model>`), and leave the key empty. Without a key for
+ollama.com the bot logs a warning at startup and replies that the AI isn't set up; everything else keeps working.
+
+### 6. Run it
 
 ```bash
 dotnet run
@@ -231,6 +265,7 @@ dotnet run
 | `/lfg-setup` | Manage Server, plus Send Messages and Pin Messages in that channel | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Pin Messages to pin the panel |
 | `/help` | — | — |
 | `/help-post` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the list |
+| AI chat (mention the bot) | — | Send Messages; Read Message History for context; Add Reactions for the ⏳ cooldown hint |
 
 `/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose
 highest role is below yours (the server owner can act on anyone), and the bot's own role has to be above theirs too.

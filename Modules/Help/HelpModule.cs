@@ -17,12 +17,15 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly MusicOptions _music;
     private readonly LfgOptions _lfg;
+    private readonly ChatOptions _chat;
     private readonly ILogger<HelpModule> _logger;
 
-    public HelpModule(IOptions<MusicOptions> music, IOptions<LfgOptions> lfg, ILogger<HelpModule> logger)
+    public HelpModule(IOptions<MusicOptions> music, IOptions<LfgOptions> lfg, IOptions<ChatOptions> chat,
+        ILogger<HelpModule> logger)
     {
         _music = music.Value;
         _lfg = lfg.Value;
+        _chat = chat.Value;
         _logger = logger;
     }
 
@@ -77,7 +80,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
         var musicWhere = ChannelText(_music.ChannelName);
         var lfgWhere = ChannelText(_lfg.ChannelName);
 
-        return new EmbedBuilder()
+        var builder = new EmbedBuilder()
             .WithTitle("Bot commands")
             .WithDescription("Type `/` in the chat box to see these with their options. Use `/help` anytime to see " +
                              "this list (only you will see it).")
@@ -93,9 +96,16 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "`/pause` · `/resume` · `/skip` · `/stop`\n" +
                 "`/nowplaying` · `/queue` - see what's playing and what's next\n" +
                 "`/remove` · `/move` · `/shuffle` · `/loop` · `/clearqueue` - manage the queue\n" +
-                "Controls only work from the voice channel the bot is in.")
-            .AddField("ℹ️ Help", "`/help` - show this list")
-            .Build();
+                "Controls only work from the voice channel the bot is in.");
+
+        if (_chat.IsEnabled)
+        {
+            builder.AddField("💬 Chat with me",
+                $"Mention {Context.Guild.CurrentUser.Mention} in a message, or reply to one of mine, and I'll answer. " +
+                "I read the last few messages in the channel for context.");
+        }
+
+        return builder.AddField("ℹ️ Help", "`/help` - show this list").Build();
     }
 
     /// <summary>A clickable mention of the named channel if it exists, its plain name if not, or null when the feature
