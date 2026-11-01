@@ -38,14 +38,13 @@ public partial class ChatHandler
     private readonly MusicService _music;
     private readonly LfgPoster _lfgPoster;
     private readonly IGuildSettingsStore _settingsStore;
-    private readonly IChatSettingsStore _chatSettings;
+    private readonly ChatPersonality _personality;
     private readonly ChatOptions _options;
     private readonly ILogger<ChatHandler> _logger;
-    private readonly SemaphoreSlim _concurrency;
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
 
     public ChatHandler(IChatService chat, ChatActionParser actionParser, MusicService music, LfgPoster lfgPoster,
-        IGuildSettingsStore settingsStore, IChatSettingsStore chatSettings, IOptions<ChatOptions> options,
+        IGuildSettingsStore settingsStore, ChatPersonality personality, IOptions<ChatOptions> options,
         ILogger<ChatHandler> logger)
     {
         _chat = chat;
@@ -53,10 +52,9 @@ public partial class ChatHandler
         _music = music;
         _lfgPoster = lfgPoster;
         _settingsStore = settingsStore;
-        _chatSettings = chatSettings;
+        _personality = personality;
         _options = options.Value;
         _logger = logger;
-        _concurrency = new SemaphoreSlim(Math.Max(1, _options.MaxConcurrentRequests));
     }
 
     public async Task HandleMessageAsync(SocketMessage rawMessage)
@@ -111,7 +109,7 @@ public partial class ChatHandler
         ChatAction? action = null;
         using (channel.EnterTypingState())
         {
-            await _concurrency.WaitAsync();
+            // How many requests reach the model at once is limited inside the chat service, shared with news.
             try
             {
                 // "Play X" / "make an LFG" are done, not chatted about. Only the asker's own message is looked at.
@@ -138,11 +136,6 @@ public partial class ChatHandler
                     404 => "The AI model in my settings wasn't found - a server admin needs to check it.",
                     _ => "I couldn't come up with an answer right now - try again in a bit.",
                 };
-            }
-            finally
-            {
-                // Released before running an action: joining voice can take seconds and doesn't need the model.
-                _concurrency.Release();
             }
 
             if (action is not null && reply is null)
@@ -274,17 +267,7 @@ public partial class ChatHandler
     /// <summary>Who the bot is, then the server's personality (or the default), then the ground rules.</summary>
     private async Task<string> BuildSystemPromptAsync(SocketGuild guild, SocketGuildUser bot)
     {
-        var personality = await _chatSettings.GetPersonalityAsync(guild.Id);
-        if (string.IsNullOrWhiteSpace(personality))
-        {
-            personality = string.IsNullOrWhiteSpace(_options.Personality)
-                ? ChatOptions.DefaultPersonality
-                : _options.Personality;
-        }
-
-        return $"You are {bot.DisplayName}, the bot in the Discord server \"{guild.Name}\".\n\n" +
-               $"Your personality: {personality.Trim()}\n\n" +
-               GroundRules;
+        return await _personality.IntroAsync(guild.Id, bot.DisplayName, guild.Name) + GroundRules;
     }
 
     /// <summary>

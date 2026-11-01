@@ -24,8 +24,11 @@ public interface IChatService
 {
     /// <summary>Returns the model's reply to <paramref name="conversation"/> (oldest first, ending with the question).</summary>
     /// <exception cref="ChatServiceException">The backend failed or returned nothing usable.</exception>
+    /// <param name="timeout">How long the model itself may take, counted from when the request is actually sent (time
+    /// spent waiting for a free slot doesn't count). Null uses the client's overall timeout. Running out throws
+    /// <see cref="ChatServiceException"/>.</param>
     Task<string> ReplyAsync(string systemPrompt, IReadOnlyList<ChatTurn> conversation,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, TimeSpan? timeout = null);
 
     /// <summary>Asks for an answer that matches <paramref name="jsonSchema"/> (a JSON Schema object) and returns the
     /// raw JSON. Deterministic (temperature 0), for classifying and extracting rather than chatting.</summary>
