@@ -27,7 +27,10 @@ public static class NewsKeywordFilter
 
     private static bool ContainsWord(string text, string keyword)
     {
-        var pattern = @"\b" + Regex.Escape(keyword.Trim()).Replace(@"\ ", @"\s+") + @"s?\b";
-        return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        // "Not next to a letter/digit" rather than \b: \b needs a word character on one side, so a keyword starting
+        // or ending with a symbol (e.g. "c++", "#1") could never match.
+        var pattern = @"(?<!\w)" + Regex.Escape(keyword.Trim()).Replace(@"\ ", @"\s+") + @"s?(?!\w)";
+        return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(100));
     }
 }
