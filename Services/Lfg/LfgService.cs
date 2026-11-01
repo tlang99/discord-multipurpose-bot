@@ -15,8 +15,26 @@ public class LfgService : ILfgService
     // (which would overwrite the "squad full" card with the stale one the late clicker saw). Pruned after a day.
     private readonly Dictionary<Guid, DateTimeOffset> _closedAt = new();
 
+    // When each host's post last pinged the LFG role, for the ping cooldown. Pruned with _closedAt.
+    private readonly Dictionary<(ulong GuildId, ulong HostId), DateTimeOffset> _lastRolePing = new();
+
+    public bool TryClaimRolePing(ulong guildId, ulong hostId, TimeSpan cooldown)
+    {
+        lock (_lock)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (_lastRolePing.TryGetValue((guildId, hostId), out var last) && now - last < cooldown)
+            {
+                return false;
+            }
+
+            _lastRolePing[(guildId, hostId)] = now;
+            return true;
+        }
+    }
+
     public (LfgPost Post, bool Created) Create(ulong guildId, ulong channelId, ulong hostId, LfgMode mode, int size,
-        string? note, TimeSpan lifetime)
+        LfgDetails details, string? note, TimeSpan lifetime)
     {
         lock (_lock)
         {
@@ -33,6 +51,7 @@ public class LfgService : ILfgService
                 ChannelId = channelId,
                 HostId = hostId,
                 Mode = mode,
+                Details = details,
                 Size = size,
                 Note = note,
                 Members = [hostId],
@@ -172,6 +191,11 @@ public class LfgService : ILfgService
                 _closedAt.Remove(id);
             }
 
+            foreach (var key in _lastRolePing.Where(p => now - p.Value > RememberClosedFor).Select(p => p.Key).ToList())
+            {
+                _lastRolePing.Remove(key);
+            }
+
             return expired.Select(Snapshot).ToList();
         }
     }
@@ -196,6 +220,7 @@ public class LfgService : ILfgService
         MessageId = post.MessageId,
         HostId = post.HostId,
         Mode = post.Mode,
+        Details = post.Details,
         Size = post.Size,
         Note = post.Note,
         Members = [.. post.Members],

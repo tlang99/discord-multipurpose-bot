@@ -65,10 +65,17 @@ announced in the text channel where `/play` was first used. The bot leaves after
 > SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
 > SoundCloud links.
 
-**Looking for group** — `/lfg [players] [note]` posts a Multiplayer LFG card, e.g. `/lfg players:4 note:"ranked,
-mics on"` (squad size 2–6 including you, default 4). It only works in the channel named by `Lfg:ChannelName`
-(default `lfg-mw4`; empty allows any channel). Elsewhere it replies privately with a link to that channel. The
-card has buttons:
+**Looking for group** — `/lfg` posts a Multiplayer LFG card, e.g. `/lfg players:4 playlist:Ranked Play rank:Gold+
+mic:True`. Every option is optional:
+- `players` — squad size 2–6 including you (default 4).
+- `playlist` — Ranked Play, Hardpoint, Search & Destroy, Team Deathmatch, Domination, Kill Confirmed, Hardcore, or
+  any. `rank` — minimum Ranked Play division (picking one implies Ranked Play).
+- `mic` — whether a mic is required. `platform` — crossplay (default), PC only, or console only.
+- `note` — free text, up to 100 characters.
+
+The chosen details show as tags on the card (e.g. "🏆 Gold+ · 🎧 Mic required · 🖥️ PC only"). `/lfg` only works
+in the channel named by `Lfg:ChannelName` (default `lfg-mw4`; empty allows any channel). Elsewhere it replies
+privately with a link to that channel. The card has buttons:
 - **Join** / **Leave** — anyone. The squad list on the card updates as people come and go.
 - **Start now** — host only: close early with whoever has joined (needs at least one other player).
 - **Cancel** — the host, or a moderator (Manage Messages or Move Members) to remove anyone's post.
@@ -76,6 +83,12 @@ card has buttons:
 When the last spot fills, or the host starts early, the bot pings everyone in the squad. Posts that don't fill up
 expire after `Lfg:ExpiryMinutes` (default 60). Each person can have one open post per server. Posts are kept in
 memory only, so after the bot restarts, old posts' buttons just say the post is no longer active.
+
+**LFG pings** — run `/lfg-setup` (Manage Server) in the LFG channel once. It creates the `@LFG` role
+(`Lfg:PingRoleName`) if needed, and posts and pins a panel with **Get LFG pings** / **Stop LFG pings** buttons.
+New `/lfg` posts then ping that role, at most once every `Lfg:PingCooldownMinutes` (default 10) per person, so
+posting and cancelling repeatedly can't spam everyone. The bot needs **Manage Roles**, and its own role must be
+above `@LFG` in Server Settings → Roles.
 
 ## Project layout
 
@@ -204,3 +217,4 @@ dotnet run
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work from anywhere) | — |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
+| `/lfg-setup` | Manage Server | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Manage Messages to pin the panel |

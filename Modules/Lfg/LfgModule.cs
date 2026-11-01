@@ -30,11 +30,61 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         _logger = logger;
     }
 
+    // Slash-command choices. Kept here rather than on the Models enums so Models stays free of Discord.Net; mapped by
+    // ToDetails below.
+    public enum PlaylistChoice
+    {
+        [ChoiceDisplay("Any playlist")] Any,
+        [ChoiceDisplay("Ranked Play")] RankedPlay,
+        [ChoiceDisplay("Hardpoint")] Hardpoint,
+        [ChoiceDisplay("Search & Destroy")] SearchAndDestroy,
+        [ChoiceDisplay("Team Deathmatch")] TeamDeathmatch,
+        [ChoiceDisplay("Domination")] Domination,
+        [ChoiceDisplay("Kill Confirmed")] KillConfirmed,
+        [ChoiceDisplay("Hardcore")] Hardcore,
+    }
+
+    public enum RankChoice
+    {
+        [ChoiceDisplay("Bronze+")] Bronze,
+        [ChoiceDisplay("Silver+")] Silver,
+        [ChoiceDisplay("Gold+")] Gold,
+        [ChoiceDisplay("Platinum+")] Platinum,
+        [ChoiceDisplay("Diamond+")] Diamond,
+        [ChoiceDisplay("Crimson+")] Crimson,
+        [ChoiceDisplay("Iridescent+")] Iridescent,
+        [ChoiceDisplay("Top 250")] Top250,
+    }
+
+    public enum PlatformChoice
+    {
+        [ChoiceDisplay("Crossplay (anyone)")] Crossplay,
+        [ChoiceDisplay("PC only")] PcOnly,
+        [ChoiceDisplay("Console only")] ConsoleOnly,
+    }
+
     [SlashCommand("lfg", "Looking for a group? Post it here and let people join.")]
     public async Task LfgAsync(
         [Summary(description: "Total squad size, including you")] [MinValue(2)] [MaxValue(6)] int players = 4,
-        [Summary(description: "Anything else, e.g. \"ranked, mics on\"")] [MaxLength(MaxNoteLength)] string? note = null)
+        [Summary(description: "Which playlist")] PlaylistChoice playlist = PlaylistChoice.Any,
+        [Summary(description: "Minimum rank (Ranked Play)")] RankChoice? rank = null,
+        [Summary(description: "Do people need a mic?")] bool? mic = null,
+        [Summary(description: "Who can join")] PlatformChoice platform = PlatformChoice.Crossplay,
+        [Summary(description: "Anything else, e.g. \"chill games, no sweats\"")] [MaxLength(MaxNoteLength)] string? note = null)
     {
+        // A rank only means something in Ranked Play: picking one implies it, but not alongside another playlist.
+        if (rank is not null && playlist is not (PlaylistChoice.Any or PlaylistChoice.RankedPlay))
+        {
+            await RespondAsync("A minimum rank only applies to **Ranked Play** - pick that playlist, or leave rank empty.",
+                ephemeral: true);
+            return;
+        }
+
+        if (rank is not null)
+        {
+            playlist = PlaylistChoice.RankedPlay;
+        }
+
         if (Context.Channel is not ITextChannel channel)
         {
             await RespondAsync("LFG posts can only go in text channels.", ephemeral: true);
@@ -64,7 +114,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
         var lifetime = TimeSpan.FromMinutes(Math.Clamp(_options.ExpiryMinutes, 5, 24 * 60));
         var (post, created) = _lfg.Create(Context.Guild.Id, channel.Id, Context.User.Id, LfgMode.Multiplayer,
-            players, note, lifetime);
+            players, ToDetails(playlist, rank, mic, platform), note, lifetime);
 
         if (!created)
         {
@@ -75,12 +125,19 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
+        // Ping the opt-in LFG role, if the server has one - at most once per cooldown per host.
+        var pingRole = FindPingRole();
+        var (pingText, pingMentions) = pingRole is not null &&
+                                       _lfg.TryClaimRolePing(Context.Guild.Id, Context.User.Id, PingCooldown)
+            ? LfgMessages.RolePing(post, pingRole.Id)
+            : (null, AllowedMentions.None);
+
         // Posted as a regular message rather than the command's reply: interaction replies can only be edited for 15
         // minutes, and the post needs updating until it expires an hour later.
         try
         {
-            var message = await channel.SendMessageAsync(embed: LfgMessages.OpenEmbed(post),
-                components: LfgMessages.OpenButtons(post), allowedMentions: AllowedMentions.None);
+            var message = await channel.SendMessageAsync(text: pingText, embed: LfgMessages.OpenEmbed(post),
+                components: LfgMessages.OpenButtons(post), allowedMentions: pingMentions);
             _lfg.AttachMessage(post.Id, message.Id);
         }
         catch (Exception ex)
@@ -94,6 +151,117 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync($"Your LFG is up. It closes when the squad is full, or after " +
                            $"{(int)lifetime.TotalMinutes} minutes. Use **Start now** to go early with whoever's joined.",
             ephemeral: true);
+    }
+
+    [SlashCommand("lfg-setup", "Posts the button panel members use to opt in to LFG pings (creates the role if needed).")]
+    [RequireUserPermission(GuildPermission.ManageGuild)]
+    public async Task LfgSetupAsync()
+    {
+        var roleName = PingRoleName;
+        if (roleName.Length == 0)
+        {
+            await RespondAsync("LFG pings are turned off (`Lfg:PingRoleName` is empty).", ephemeral: true);
+            return;
+        }
+
+        var bot = Context.Guild.CurrentUser;
+        if (!bot.GuildPermissions.ManageRoles)
+        {
+            await RespondAsync("I need the **Manage Roles** permission to create and hand out the LFG ping role.",
+                ephemeral: true);
+            return;
+        }
+
+        if (Context.Channel is not ITextChannel channel ||
+            bot.GetPermissions(channel) is not { SendMessages: true, EmbedLinks: true })
+        {
+            await RespondAsync("I need **Send Messages** and **Embed Links** here to post the panel.", ephemeral: true);
+            return;
+        }
+
+        var role = FindPingRole();
+        var createdRole = role is null;
+        if (createdRole)
+        {
+            // Mentionable, so the bot can ping it without needing the broader "Mention All Roles" permission.
+            role = await Context.Guild.CreateRoleAsync(roleName, GuildPermissions.None, color: null, isHoisted: false,
+                isMentionable: true);
+        }
+
+        if (role!.Position >= bot.Hierarchy)
+        {
+            await RespondAsync($"The **@{Format.Sanitize(role.Name)}** role is above my highest role, so I can't hand it " +
+                               "out. Drag my role above it in Server Settings → Roles, then run this again.",
+                ephemeral: true);
+            return;
+        }
+
+        var panel = await channel.SendMessageAsync(embed: LfgMessages.RolePanelEmbed(role.Name),
+            components: LfgMessages.RolePanelButtons(), allowedMentions: AllowedMentions.None);
+
+        var pinned = false;
+        try
+        {
+            await panel.PinAsync();
+            pinned = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "Couldn't pin the LFG ping panel in channel {ChannelId}.", channel.Id);
+        }
+
+        await RespondAsync((createdRole ? $"Created the **@{Format.Sanitize(role.Name)}** role. " : "") +
+                           $"Posted the opt-in panel{(pinned ? " and pinned it" : " (I couldn't pin it - pin it yourself if you like)")}. " +
+                           $"New `/lfg` posts will ping the role, at most once every {(int)PingCooldown.TotalMinutes} " +
+                           "minutes per person.",
+            ephemeral: true);
+    }
+
+    [ComponentInteraction(LfgMessages.RoleOnId)]
+    public Task RoleOnAsync() => SetPingRoleAsync(wanted: true);
+
+    [ComponentInteraction(LfgMessages.RoleOffId)]
+    public Task RoleOffAsync() => SetPingRoleAsync(wanted: false);
+
+    private async Task SetPingRoleAsync(bool wanted)
+    {
+        if (FindPingRole() is not { } role || Context.User is not IGuildUser user)
+        {
+            await RespondAsync("LFG pings aren't set up right now - ask a server admin to run `/lfg-setup`.",
+                ephemeral: true);
+            return;
+        }
+
+        var has = user.RoleIds.Contains(role.Id);
+        if (has == wanted)
+        {
+            await RespondAsync(wanted ? "You already get LFG pings." : "You already don't get LFG pings.", ephemeral: true);
+            return;
+        }
+
+        try
+        {
+            if (wanted)
+            {
+                await user.AddRoleAsync(role);
+            }
+            else
+            {
+                await user.RemoveRoleAsync(role);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Couldn't {Action} the LFG ping role for user {UserId}.", wanted ? "add" : "remove",
+                user.Id);
+            await RespondAsync("I couldn't change your roles - ask a server admin to check my **Manage Roles** " +
+                               "permission and that my role is above the LFG role.", ephemeral: true);
+            return;
+        }
+
+        await RespondAsync(wanted
+            ? $"🔔 You'll be pinged for new LFG posts. Click **Stop LFG pings** to turn it off."
+            : "🔕 You won't be pinged for LFG posts anymore.", ephemeral: true);
     }
 
     [ComponentInteraction(LfgMessages.JoinPrefix + ":*")]
@@ -176,6 +344,51 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
                 break;
         }
     }
+
+    private string PingRoleName => _options.PingRoleName.Trim().TrimStart('@');
+
+    private TimeSpan PingCooldown => TimeSpan.FromMinutes(Math.Max(0, _options.PingCooldownMinutes));
+
+    private IRole? FindPingRole()
+    {
+        var name = PingRoleName;
+        return name.Length == 0
+            ? null
+            : Context.Guild.Roles.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static LfgDetails ToDetails(PlaylistChoice playlist, RankChoice? rank, bool? mic, PlatformChoice platform)
+        => new(
+            Playlist: playlist switch
+            {
+                PlaylistChoice.RankedPlay => LfgPlaylist.RankedPlay,
+                PlaylistChoice.Hardpoint => LfgPlaylist.Hardpoint,
+                PlaylistChoice.SearchAndDestroy => LfgPlaylist.SearchAndDestroy,
+                PlaylistChoice.TeamDeathmatch => LfgPlaylist.TeamDeathmatch,
+                PlaylistChoice.Domination => LfgPlaylist.Domination,
+                PlaylistChoice.KillConfirmed => LfgPlaylist.KillConfirmed,
+                PlaylistChoice.Hardcore => LfgPlaylist.Hardcore,
+                _ => LfgPlaylist.Any,
+            },
+            MinRank: rank switch
+            {
+                null => null,
+                RankChoice.Silver => LfgRank.Silver,
+                RankChoice.Gold => LfgRank.Gold,
+                RankChoice.Platinum => LfgRank.Platinum,
+                RankChoice.Diamond => LfgRank.Diamond,
+                RankChoice.Crimson => LfgRank.Crimson,
+                RankChoice.Iridescent => LfgRank.Iridescent,
+                RankChoice.Top250 => LfgRank.Top250,
+                _ => LfgRank.Bronze,
+            },
+            MicRequired: mic,
+            Platform: platform switch
+            {
+                PlatformChoice.PcOnly => LfgPlatform.PcOnly,
+                PlatformChoice.ConsoleOnly => LfgPlatform.ConsoleOnly,
+                _ => LfgPlatform.Crossplay,
+            });
 
     /// <summary>Same moderator bar as the music commands: these members can remove anyone's LFG post.</summary>
     private static bool IsModerator(IGuildUser? user)

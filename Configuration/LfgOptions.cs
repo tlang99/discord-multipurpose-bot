@@ -9,4 +9,11 @@ public class LfgOptions
 
     /// <summary>The only channel /lfg works in, by name (case-insensitive). Empty allows any channel.</summary>
     public string ChannelName { get; set; } = "lfg-mw4";
+
+    /// <summary>Opt-in role pinged by new LFG posts (created by /lfg-setup). Empty turns pings off.</summary>
+    public string PingRoleName { get; set; } = "LFG";
+
+    /// <summary>Minimum time between role pings from the same person's posts, so posting and cancelling repeatedly
+    /// can't spam everyone who opted in. The post itself is still made, just without the ping.</summary>
+    public int PingCooldownMinutes { get; set; } = 10;
 }

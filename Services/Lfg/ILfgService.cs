@@ -44,7 +44,12 @@ public interface ILfgService
     /// <summary>Creates a post with the host as its first member. Fails, returning the existing post, if the host
     /// already has an open post in this server.</summary>
     (LfgPost Post, bool Created) Create(ulong guildId, ulong channelId, ulong hostId, LfgMode mode, int size,
-        string? note, TimeSpan lifetime);
+        LfgDetails details, string? note, TimeSpan lifetime);
+
+    /// <summary>Whether a new post by this host should ping the LFG role: at most once per <paramref name="cooldown"/>
+    /// per host, so posting and cancelling repeatedly can't spam everyone who opted in. Records the ping when it
+    /// returns true.</summary>
+    bool TryClaimRolePing(ulong guildId, ulong hostId, TimeSpan cooldown);
 
     /// <summary>Records which message shows the post, once it's been sent.</summary>
     void AttachMessage(Guid postId, ulong messageId);

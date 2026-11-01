@@ -12,6 +12,10 @@ public static class LfgMessages
     public const string StartPrefix = "lfg-start";
     public const string CancelPrefix = "lfg-cancel";
 
+    // The opt-in panel's buttons. Not per post, so no ID suffix.
+    public const string RoleOnId = "lfg-role-on";
+    public const string RoleOffId = "lfg-role-off";
+
     private static readonly Color OpenColor = new(0x3BA55D);
     private static readonly Color ClosedColor = new(0x747F8D);
 
@@ -21,10 +25,58 @@ public static class LfgMessages
         _ => mode.ToString(),
     };
 
+    public static string PlaylistLabel(LfgPlaylist playlist) => playlist switch
+    {
+        LfgPlaylist.RankedPlay => "Ranked Play",
+        LfgPlaylist.Hardpoint => "Hardpoint",
+        LfgPlaylist.SearchAndDestroy => "Search & Destroy",
+        LfgPlaylist.TeamDeathmatch => "Team Deathmatch",
+        LfgPlaylist.Domination => "Domination",
+        LfgPlaylist.KillConfirmed => "Kill Confirmed",
+        LfgPlaylist.Hardcore => "Hardcore",
+        _ => "Any playlist",
+    };
+
+    public static string RankLabel(LfgRank rank) => rank == LfgRank.Top250 ? "Top 250" : rank.ToString();
+
+    public static string PlatformLabel(LfgPlatform platform) => platform switch
+    {
+        LfgPlatform.PcOnly => "PC only",
+        LfgPlatform.ConsoleOnly => "Console only",
+        _ => "Crossplay",
+    };
+
+    /// <summary>"Multiplayer · Ranked Play", or just "Multiplayer" when any playlist goes.</summary>
+    private static string Heading(LfgPost post) => post.Details.Playlist == LfgPlaylist.Any
+        ? ModeLabel(post.Mode)
+        : $"{ModeLabel(post.Mode)} · {PlaylistLabel(post.Details.Playlist)}";
+
+    /// <summary>"🏆 Gold+ · 🎧 Mic required · 🖥️ PC only" - only the details the host actually set.</summary>
+    public static string? Tags(LfgDetails details)
+    {
+        var tags = new List<string>();
+        if (details.MinRank is { } rank)
+        {
+            tags.Add(rank == LfgRank.Top250 ? "🏆 Top 250" : $"🏆 {RankLabel(rank)}+");
+        }
+
+        if (details.MicRequired is { } mic)
+        {
+            tags.Add(mic ? "🎧 Mic required" : "🔇 Mic optional");
+        }
+
+        if (details.Platform != LfgPlatform.Crossplay)
+        {
+            tags.Add($"🖥️ {PlatformLabel(details.Platform)}");
+        }
+
+        return tags.Count == 0 ? null : string.Join(" · ", tags);
+    }
+
     public static Embed OpenEmbed(LfgPost post)
     {
         var spots = post.OpenSpots == 1 ? "1 more player" : $"{post.OpenSpots} more players";
-        return Base(post, OpenColor, $"🎮 {ModeLabel(post.Mode)} — looking for {spots}")
+        return Base(post, OpenColor, $"🎮 {Heading(post)} — looking for {spots}")
             .AddField("Expires", TimestampTag.FormatFromDateTimeOffset(post.ExpiresAt, TimestampTagStyles.Relative),
                 inline: true)
             .Build();
@@ -38,14 +90,35 @@ public static class LfgMessages
         .Build();
 
     public static Embed ReadyEmbed(LfgPost post, bool full)
-        => Base(post, ClosedColor, $"✅ {ModeLabel(post.Mode)} — squad {(full ? "full" : "started")}").Build();
+        => Base(post, ClosedColor, $"✅ {Heading(post)} — squad {(full ? "full" : "started")}").Build();
 
     public static Embed CancelledEmbed(LfgPost post, bool byModerator)
-        => Base(post, ClosedColor, $"❌ {ModeLabel(post.Mode)} — {(byModerator ? "removed by a moderator" : "cancelled")}")
+        => Base(post, ClosedColor, $"❌ {Heading(post)} — {(byModerator ? "removed by a moderator" : "cancelled")}")
             .Build();
 
     public static Embed ExpiredEmbed(LfgPost post)
-        => Base(post, ClosedColor, $"⌛ {ModeLabel(post.Mode)} — expired").Build();
+        => Base(post, ClosedColor, $"⌛ {Heading(post)} — expired").Build();
+
+    /// <summary>The text above a new post that pings the LFG role. Only that role can be mentioned.</summary>
+    public static (string Text, AllowedMentions Mentions) RolePing(LfgPost post, ulong roleId)
+    {
+        var spots = post.OpenSpots == 1 ? "1 spot" : $"{post.OpenSpots} spots";
+        return ($"{MentionUtils.MentionRole(roleId)} {MentionUtils.MentionUser(post.HostId)} is looking for a " +
+                $"{Heading(post)} squad ({spots} open).",
+            new AllowedMentions(AllowedMentionTypes.None) { RoleIds = [roleId] });
+    }
+
+    public static Embed RolePanelEmbed(string roleName) => new EmbedBuilder()
+        .WithColor(OpenColor)
+        .WithTitle("🔔 LFG pings")
+        .WithDescription($"Want a ping whenever someone posts an LFG here? Grab the **@{Format.Sanitize(roleName)}** " +
+                         "role below. You can turn it off again any time.")
+        .Build();
+
+    public static MessageComponent RolePanelButtons() => new ComponentBuilder()
+        .WithButton("Get LFG pings", RoleOnId, ButtonStyle.Success, new Emoji("🔔"))
+        .WithButton("Stop LFG pings", RoleOffId, ButtonStyle.Secondary, new Emoji("🔕"))
+        .Build();
 
     /// <summary>For buttons on a post the bot no longer knows about (closed already, or from before a restart).</summary>
     public static Embed InactiveEmbed(Embed? original)
@@ -58,7 +131,7 @@ public static class LfgMessages
     public static (string Text, AllowedMentions Mentions) ReadyPing(LfgPost post, bool full)
     {
         var mentions = string.Join(" ", post.Members.Select(MentionUtils.MentionUser));
-        var text = $"{mentions}\n🎮 Your {ModeLabel(post.Mode)} squad is {(full ? "full" : "ready")} " +
+        var text = $"{mentions}\n🎮 Your {Heading(post)} squad is {(full ? "full" : "ready")} " +
                    $"({post.Members.Count}/{post.Size}) — hop in voice and get on!";
         return (text, new AllowedMentions(AllowedMentionTypes.None) { UserIds = [.. post.Members] });
     }
@@ -73,9 +146,16 @@ public static class LfgMessages
             .WithTitle(title)
             .AddField($"Squad ({post.Members.Count}/{post.Size})", members, inline: true);
 
-        if (!string.IsNullOrWhiteSpace(post.Note))
+        // Tags on the first line, the host's note under them.
+        var description = string.Join("\n", new[]
         {
-            builder.WithDescription(Format.Sanitize(post.Note));
+            Tags(post.Details),
+            string.IsNullOrWhiteSpace(post.Note) ? null : Format.Sanitize(post.Note),
+        }.Where(line => line is not null));
+
+        if (description.Length > 0)
+        {
+            builder.WithDescription(description);
         }
 
         return builder;

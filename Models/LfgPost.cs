@@ -5,6 +5,47 @@ public enum LfgMode
     Multiplayer,
 }
 
+public enum LfgPlaylist
+{
+    Any,
+    RankedPlay,
+    Hardpoint,
+    SearchAndDestroy,
+    TeamDeathmatch,
+    Domination,
+    KillConfirmed,
+    Hardcore,
+}
+
+/// <summary>Ranked Play skill divisions, lowest first, so "at least" comparisons work.</summary>
+public enum LfgRank
+{
+    Bronze,
+    Silver,
+    Gold,
+    Platinum,
+    Diamond,
+    Crimson,
+    Iridescent,
+    Top250,
+}
+
+public enum LfgPlatform
+{
+    Crossplay,
+    PcOnly,
+    ConsoleOnly,
+}
+
+/// <summary>Optional details the host picks on /lfg, shown as tags on the card.</summary>
+/// <param name="MinRank">Only meaningful for <see cref="LfgPlaylist.RankedPlay"/>.</param>
+/// <param name="MicRequired">null = not specified.</param>
+public record LfgDetails(
+    LfgPlaylist Playlist = LfgPlaylist.Any,
+    LfgRank? MinRank = null,
+    bool? MicRequired = null,
+    LfgPlatform Platform = LfgPlatform.Crossplay);
+
 /// <summary>
 /// An open "looking for group" post. Only open posts exist: once a post fills up, is started, cancelled or expires it
 /// is removed, and its buttons then just report that it's no longer active.
@@ -20,6 +61,7 @@ public class LfgPost
 
     public ulong HostId { get; init; }
     public LfgMode Mode { get; init; } = LfgMode.Multiplayer;
+    public LfgDetails Details { get; init; } = new();
 
     /// <summary>Total squad size, including the host.</summary>
     public int Size { get; init; }
