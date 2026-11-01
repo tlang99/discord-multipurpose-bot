@@ -18,7 +18,9 @@ public static class MusicFormatting
             title = title[..77] + "...";
         }
 
-        return Format.Sanitize(title);
+        // Format.Sanitize doesn't escape square brackets, and titles go inside [title](url) links: a title like
+        // "x](https://evil) [y" would otherwise break out of the link text and add a link of its own.
+        return Format.Sanitize(title).Replace("[", "\\[").Replace("]", "\\]");
     }
 
     public static string TrackLink(LavalinkTrack? track)

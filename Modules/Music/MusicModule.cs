@@ -32,7 +32,8 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     /// <summary>Hosts /play accepts links from (plus their subdomains, e.g. www., m., music.youtube.com).</summary>
     private static readonly string[] AllowedLinkHosts = ["youtube.com", "youtu.be"];
 
-    /// <summary>Per-server lock around adding to the queue. Static because a module instance is created per command.</summary>
+    /// <summary>Per-server lock around changing the queue (/play, /remove, /move, /shuffle, /clearqueue). Static because a
+    /// module instance is created per command. One small entry per server that has used music; never removed.</summary>
     private static readonly ConcurrentDictionary<ulong, SemaphoreSlim> EnqueueLocks = new();
 
     private readonly IAudioService _audioService;
@@ -117,15 +118,16 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        // One /play at a time per server from here: otherwise two at once could both see room in the queue and
-        // together go past the limit, or both think they're starting playback.
-        var enqueueLock = EnqueueLocks.GetOrAdd(Context.Guild.Id, _ => new SemaphoreSlim(1, 1));
-        await enqueueLock.WaitAsync();
+        // One queue change at a time per server from here: otherwise two /plays at once could both see room in the
+        // queue and together go past the limit, or both think they're starting playback.
+        var queueLock = await AcquireQueueLockAsync();
         List<LavalinkTrack> tracks;
         int position;
         try
         {
-            var room = _options.MaxQueueLength - player.Queue.Count;
+            // The limit is on upcoming songs (what /queue lists). When nothing is playing, the first song starts
+            // straight away rather than waiting in the queue, so there's room for one more.
+            var room = _options.MaxQueueLength - player.Queue.Count + (player.CurrentItem is null ? 1 : 0);
             if (room <= 0)
             {
                 await FollowupAsync($"The queue is full ({_options.MaxQueueLength} songs). Skip or remove some first.");
@@ -161,7 +163,7 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
         }
         finally
         {
-            enqueueLock.Release();
+            queueLock.Release();
         }
 
         var playlistNote = result.IsPlaylist
@@ -331,14 +333,24 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        if (position > player.Queue.Count)
+        LavalinkTrack? track;
+        var queueLock = await AcquireQueueLockAsync();
+        try
         {
-            await RespondAsync($"There's no song at position {position} - the queue has {player.Queue.Count}.", ephemeral: true);
-            return;
+            if (position > player.Queue.Count)
+            {
+                await RespondAsync($"There's no song at position {position} - the queue has {player.Queue.Count}.", ephemeral: true);
+                return;
+            }
+
+            track = player.Queue[position - 1].Track;
+            await player.Queue.RemoveAtAsync(position - 1);
+        }
+        finally
+        {
+            queueLock.Release();
         }
 
-        var track = player.Queue[position - 1].Track;
-        await player.Queue.RemoveAtAsync(position - 1);
         await RespondAsync($"🗑️ Removed {MusicFormatting.TrackLink(track)} from the queue.",
             allowedMentions: AllowedMentions.None, flags: MessageFlags.SuppressEmbeds);
     }
@@ -353,16 +365,26 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        if (from > player.Queue.Count)
+        ITrackQueueItem item;
+        var queueLock = await AcquireQueueLockAsync();
+        try
         {
-            await RespondAsync($"There's no song at position {from} - the queue has {player.Queue.Count}.", ephemeral: true);
-            return;
+            if (from > player.Queue.Count)
+            {
+                await RespondAsync($"There's no song at position {from} - the queue has {player.Queue.Count}.", ephemeral: true);
+                return;
+            }
+
+            to = Math.Min(to, player.Queue.Count);
+            item = player.Queue[from - 1];
+            await player.Queue.RemoveAtAsync(from - 1);
+            await player.Queue.InsertAsync(to - 1, item);
+        }
+        finally
+        {
+            queueLock.Release();
         }
 
-        to = Math.Min(to, player.Queue.Count);
-        var item = player.Queue[from - 1];
-        await player.Queue.RemoveAtAsync(from - 1);
-        await player.Queue.InsertAsync(to - 1, item);
         await RespondAsync($"↕️ Moved {MusicFormatting.TrackLink(item.Track)} to position **{to}**.",
             allowedMentions: AllowedMentions.None, flags: MessageFlags.SuppressEmbeds);
     }
@@ -375,13 +397,22 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        if (player.Queue.Count < 2)
+        var queueLock = await AcquireQueueLockAsync();
+        try
         {
-            await RespondAsync("There need to be at least 2 songs queued to shuffle.", ephemeral: true);
-            return;
+            if (player.Queue.Count < 2)
+            {
+                await RespondAsync("There need to be at least 2 songs queued to shuffle.", ephemeral: true);
+                return;
+            }
+
+            await player.Queue.ShuffleAsync();
+        }
+        finally
+        {
+            queueLock.Release();
         }
 
-        await player.Queue.ShuffleAsync();
         await RespondAsync($"🔀 {Context.User.Mention} shuffled the queue ({player.Queue.Count} songs).",
             allowedMentions: AllowedMentions.None);
     }
@@ -417,10 +448,29 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        var removed = await player.Queue.ClearAsync();
+        int removed;
+        var queueLock = await AcquireQueueLockAsync();
+        try
+        {
+            removed = await player.Queue.ClearAsync();
+        }
+        finally
+        {
+            queueLock.Release();
+        }
+
         await RespondAsync(removed == 0
             ? "The queue was already empty."
             : $"🧹 {Context.User.Mention} cleared {removed} song(s) from the queue.", allowedMentions: AllowedMentions.None);
+    }
+
+    /// <summary>Waits for this server's queue lock. Callers must <c>Release()</c> it in a <c>finally</c>, and keep the
+    /// locked section short: other music commands in the server wait on it, within Discord's 3-second reply window.</summary>
+    private async Task<SemaphoreSlim> AcquireQueueLockAsync()
+    {
+        var queueLock = EnqueueLocks.GetOrAdd(Context.Guild.Id, _ => new SemaphoreSlim(1, 1));
+        await queueLock.WaitAsync();
+        return queueLock;
     }
 
     /// <summary>Why the bot can't join the caller's voice channel to play, or null if it can.</summary>
