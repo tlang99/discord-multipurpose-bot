@@ -18,9 +18,11 @@ namespace ModBot.Modules.Music;
 /// <summary>
 /// Music playback through Lavalink. Anyone can use these, but only from the voice channel the bot is playing in, so
 /// people outside the channel can't control what everyone in it is hearing. Moderators (Move Members or Manage
-/// Messages) can control it from anywhere.
+/// Messages) can control it from anywhere. All of them only work in the music channel (see
+/// <see cref="RequireMusicChannelAttribute"/>), so they don't flood the main chat.
 /// </summary>
 [RequireContext(ContextType.Guild)]
+[RequireMusicChannel]
 public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 {
     private const int QueuePageSize = 10;

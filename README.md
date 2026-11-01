@@ -55,8 +55,10 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
 - `/remove position`, `/move from to`, `/shuffle`, `/loop off|song|queue`, `/clearqueue`.
 
 Anyone can use these, but commands that change playback only work from the bot's voice channel, except for
-moderators (Move Members or Manage Messages), who can control it from anywhere. `/play` only accepts YouTube links. Each new song is
-announced in the text channel where `/play` was first used. The bot leaves after `Music:IdleTimeoutSeconds`
+moderators (Move Members or Manage Messages), who can control it from anywhere. `/play` only accepts YouTube links. All music commands
+only work in the text channel named by `Music:ChannelName` (default `music`; empty allows any channel), so replies
+and the "Now playing" announcement for each new song stay out of the main chat. Elsewhere the bot replies privately
+pointing to that channel. The bot leaves after `Music:IdleTimeoutSeconds`
 (default 2 minutes) with nobody listening or nothing playing, and the queue is capped at `Music:MaxQueueLength`
 (default 200). If Lavalink isn't running, the music commands say so and everything else keeps working.
 
@@ -217,6 +219,6 @@ dotnet run
 | `/modlog`, `/automod` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
-| Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work from anywhere) | — |
+| Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work without being in voice; all music commands must be used in `#music`) | — |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
 | `/lfg-setup` | Manage Server | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Manage Messages to pin the panel |
