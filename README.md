@@ -24,7 +24,7 @@ order:
    in a message, are sent to [Sightengine](https://sightengine.com) for classification. Independently togglable:
    explicit content, suggestive-but-not-explicit content, and offensive content (hate symbols, obscene gestures)
    — see `/automod image-moderation`, `block-explicit-images`, `block-suggestive-images`, `block-offensive-images`,
-   and `scan-nsfw-channels`. Requires Sightengine API credentials (see Setup step 3) — without them this check is
+   and `scan-nsfw-channels`. Requires Sightengine API credentials (see Setup step 4) — without them this check is
    skipped entirely.
    > **Known gap:** pasting a Tenor/Giphy link gets re-encoded by Discord into a video (mp4) embed, which this
    > endpoint can't read, so those aren't scanned yet. Covering that would mean hooking the `MessageUpdated` event
@@ -102,7 +102,7 @@ pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are l
 change, delete the old post and run `/help-post` again.
 
 **AI chat** — mention the bot in a message (or reply to one of its messages) and it answers, using a model served
-by [Ollama](https://ollama.com): on the same machine by default, or Ollama's cloud (see Setup step 5).
+by [Ollama](https://ollama.com): on the same machine by default, or Ollama's cloud (see Setup step 6).
 - It sends the last `Chat:HistoryMessages` (default 10) messages in the channel along for context, so it can follow
   a conversation. With a local Ollama they never leave the machine; with Ollama's cloud they're sent there. Set it
   to 0 to send only the question.
@@ -176,9 +176,22 @@ Swapping providers later means writing a new implementation of that interface an
    `Speak` (for music). Use the generated URL to invite the bot to your server. If the bot is already in your
    server, give its role `Connect` and `Speak` instead of re-inviting it.
 
-### 2. Configure the token
+### 2. Create your settings file
 
-Never put the real token in `appsettings.json` (it's committed to source control). Use one of:
+Settings live in `appsettings.json`, which is **not** committed, so your own values (chatbot personality, channel
+names, model) stay on your machine. The committed template is `appsettings.example.json`:
+
+```powershell
+Copy-Item appsettings.example.json appsettings.json
+```
+
+Edit `appsettings.json` from then on. When a new setting is added to the template, copy it across. Without the
+file the bot runs on built-in defaults and logs a warning at startup.
+
+### 3. Configure the token
+
+Even though `appsettings.json` isn't committed, keep the token out of it (it's easy to share by accident). Use one
+of:
 
 ```bash
 # .NET user-secrets (recommended for local dev)
@@ -198,7 +211,7 @@ dotnet user-secrets set "Bot:TestGuildId" "<your-server-id>"
 
 Remove `Bot:TestGuildId` (or leave it unset) once you're ready to register commands globally.
 
-### 3. (Optional) Configure image/GIF moderation
+### 4. (Optional) Configure image/GIF moderation
 
 Image and GIF scanning (`/automod image-moderation`) needs a [Sightengine](https://sightengine.com) account:
 
@@ -224,12 +237,12 @@ be tuned in `appsettings.json` under `Sightengine:ExplicitThreshold` / `Suggesti
 — these apply bot-wide, while which categories to actually enforce (explicit/suggestive/offensive/NSFW-channel
 exemption) is controlled per-server via `/automod`.
 
-### 4. (Optional) Set up music
+### 5. (Optional) Set up music
 
 Music needs Java and the Lavalink server. Follow [lavalink/README.md](lavalink/README.md) once, then start Lavalink
 (`java -jar Lavalink.jar` in the `lavalink/` folder) whenever you run the bot.
 
-### 5. (Optional) Set up AI chat
+### 6. (Optional) Set up AI chat
 
 By default the chatbot uses Ollama running on the same machine as the bot. No account or key is needed:
 
@@ -249,7 +262,7 @@ first (`Chat:TimeoutSeconds`, default 120, allows for that).
 `dotnet user-secrets set "Chat:ApiKey" "<api-key>"` or the `OLLAMA_API_KEY` environment variable. Without a key the
 bot logs a warning at startup.
 
-### 6. Run it
+### 7. Run it
 
 ```bash
 dotnet run

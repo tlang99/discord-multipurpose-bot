@@ -13,6 +13,8 @@ data/
 *.log
 
 ## Secrets - never commit real tokens
+# Your own settings. Copy appsettings.example.json (the committed template) to appsettings.json and edit that.
+appsettings.json
 appsettings.Development.json
 appsettings.Local.json
 .env
