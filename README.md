@@ -94,6 +94,11 @@ above `@LFG` in Server Settings → Roles. Because members give themselves `@LFG
 gains any permission beyond `@everyone`'s, or a channel override that grants something, the bot refuses to hand
 it out (in `/lfg-setup` and the panel) until that's fixed. Removing the role always works.
 
+**Command list** — `/help` shows members the commands they can use (LFG and music, with links to the channels
+they work in), visible only to them. `/help-post` (Manage Server) posts the same list in the current channel and
+pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
+change, delete the old post and run `/help-post` again.
+
 ## Project layout
 
 ```
