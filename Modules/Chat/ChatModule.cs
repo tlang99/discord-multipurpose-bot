@@ -1,6 +1,5 @@
 using Discord;
 using Discord.Interactions;
-using Discord.WebSocket;
 using Microsoft.Extensions.Options;
 using ModBot.Configuration;
 using ModBot.Services.Storage;
@@ -51,12 +50,12 @@ public class ChatModule : InteractionModuleBase<SocketInteractionContext>
             await RespondWithModalAsync(modal);
         }
 
-        // ignoreGroupNames: the modal's ID is a plain string, not prefixed with "chat personality".
+        // ignoreGroupNames: the modal's ID is a plain string, not prefixed with "chat personality". Discord.Net requires
+        // a modal handler to take its values as an IModal parameter; it refuses to start otherwise.
         [ModalInteraction(ModalId, ignoreGroupNames: true)]
-        public async Task OnSubmittedAsync()
+        public async Task OnSubmittedAsync(PersonalityModal modal)
         {
-            var data = ((SocketModal)Context.Interaction).Data;
-            var text = data.Components.FirstOrDefault(c => c.CustomId == InputId)?.Value?.Trim() ?? string.Empty;
+            var text = modal.Personality?.Trim() ?? string.Empty;
 
             if (text.Length == 0)
             {
@@ -112,5 +111,17 @@ public class ChatModule : InteractionModuleBase<SocketInteractionContext>
             .WithDescription(text)
             .WithFooter(footer)
             .Build();
+    }
+
+    /// <summary>The values submitted from the personality pop-up. The pop-up itself is built in
+    /// <see cref="PersonalityModule.SetAsync"/> (so it can be pre-filled); this only reads it back, matching the text
+    /// box by its custom ID.</summary>
+    public class PersonalityModal : IModal
+    {
+        public string Title => "Chatbot personality";
+
+        [InputLabel("How should the bot talk and behave?")]
+        [ModalTextInput("personality", TextInputStyle.Paragraph, maxLength: ChatOptions.MaxPersonalityLength)]
+        public string? Personality { get; set; }
     }
 }
