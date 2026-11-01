@@ -21,4 +21,10 @@ public class Reminder
     public DateTimeOffset DueAt { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Failed delivery attempts so far.</summary>
+    public int Attempts { get; set; }
+
+    /// <summary>After a failed delivery, when to try again (backing off). Null until the first failure.</summary>
+    public DateTimeOffset? NextAttemptAt { get; set; }
 }

@@ -35,6 +35,12 @@ public class ReminderService
         _options = options.Value;
         _logger = logger;
         TimeZone = ResolveTimeZone(_options.TimeZone, logger);
+
+        if (_options.MaxPerUser < 1 || _options.MaxDays < 1)
+        {
+            logger.LogWarning("Reminders:MaxPerUser ({MaxPerUser}) and Reminders:MaxDays ({MaxDays}) must be at least 1; " +
+                              "using 1 for any that aren't.", _options.MaxPerUser, _options.MaxDays);
+        }
     }
 
     /// <summary>The time zone clock times ("at 5pm") are read in.</summary>
@@ -77,9 +83,9 @@ public class ReminderService
             return new(false, "Reminders need to be at least a minute away.");
         }
 
-        if (dueAt > now.AddDays(Math.Max(1, _options.MaxDays)))
+        if (dueAt > now.AddDays(MaxDays))
         {
-            return new(false, $"Reminders can be at most {_options.MaxDays} days away.");
+            return new(false, $"Reminders can be at most {MaxDays} days away.");
         }
 
         // The text is posted publicly later, so it follows the server's word rules now, while the person can fix it.
@@ -92,16 +98,8 @@ public class ReminderService
             }
         }
 
-        var existing = await _store.GetForUserAsync(guildId, userId);
-        if (existing.Count >= Math.Max(1, _options.MaxPerUser))
-        {
-            return new(false, $"You already have {existing.Count} reminders here (the most is {_options.MaxPerUser}). " +
-                              "Cancel one with `/reminders cancel` first.");
-        }
-
         var reminder = new Reminder
         {
-            Id = await NewIdAsync(),
             GuildId = guildId,
             ChannelId = channelId,
             UserId = userId,
@@ -110,7 +108,22 @@ public class ReminderService
             DueAt = dueAt,
             CreatedAt = now,
         };
-        await _store.AddAsync(reminder);
+
+        // The cap and the ID are checked in the same step as the add, so two requests at once can't both get in over
+        // the limit, or share an ID and overwrite each other. A taken ID just means trying another.
+        ReminderAddResult added;
+        do
+        {
+            reminder.Id = NewId();
+            added = await _store.TryAddAsync(reminder, MaxPerUser);
+        }
+        while (added == ReminderAddResult.IdTaken);
+
+        if (added == ReminderAddResult.LimitReached)
+        {
+            return new(false, $"You already have {MaxPerUser} reminders here, the most allowed. Cancel one with " +
+                              "`/reminders cancel` first.");
+        }
 
         return new(true, $"⏰ Got it - I'll remind you {Relative(dueAt)} ({Absolute(dueAt)}): {text}\n" +
                          $"-# Cancel it with `/reminders cancel id:{reminder.Id}`.", reminder);
@@ -136,24 +149,18 @@ public class ReminderService
 
     public static string Absolute(DateTimeOffset time) => $"<t:{time.ToUnixTimeSeconds()}:f>";
 
-    private async Task<string> NewIdAsync()
-    {
-        while (true)
+    private static string NewId()
+        => string.Create(4, 0, (chars, _) =>
         {
-            var id = string.Create(4, 0, (chars, _) =>
+            for (var i = 0; i < chars.Length; i++)
             {
-                for (var i = 0; i < chars.Length; i++)
-                {
-                    chars[i] = IdAlphabet[RandomNumberGenerator.GetInt32(IdAlphabet.Length)];
-                }
-            });
-
-            if (!await _store.ExistsAsync(id))
-            {
-                return id;
+                chars[i] = IdAlphabet[RandomNumberGenerator.GetInt32(IdAlphabet.Length)];
             }
-        }
-    }
+        });
+
+    private int MaxPerUser => Math.Max(1, _options.MaxPerUser);
+
+    private int MaxDays => Math.Max(1, _options.MaxDays);
 
     private static TimeZoneInfo ResolveTimeZone(string name, ILogger logger)
     {

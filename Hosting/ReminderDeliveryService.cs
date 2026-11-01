@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Discord;
 using Discord.WebSocket;
 using Microsoft.Extensions.Hosting;
@@ -11,8 +10,9 @@ namespace ModBot.Hosting;
 
 /// <summary>
 /// Posts reminders when they're due, in the channel they were set in (as a reply to the chat message that asked, if
-/// any), pinging only the person. Reminders that came due while the bot was offline are delivered on the first check
-/// after it connects, marked as late. If the channel can't be used, it tries a DM instead.
+/// any), pinging only the person. Reminders that came due while the bot was offline are delivered once it's ready
+/// again, marked as late. If the channel can't be used, it tries a DM instead; if that fails too, it retries with a
+/// growing gap before giving up.
 /// </summary>
 public class ReminderDeliveryService : BackgroundService
 {
@@ -21,14 +21,23 @@ public class ReminderDeliveryService : BackgroundService
     /// <summary>A reminder more than this late gets a note saying so (the bot was offline when it came due).</summary>
     private static readonly TimeSpan LateAfter = TimeSpan.FromMinutes(2);
 
-    /// <summary>How many checks in a row a reminder may fail to deliver before it's dropped, so a reminder for a deleted
-    /// channel with DMs closed doesn't retry forever.</summary>
-    private const int MaxAttempts = 5;
+    /// <summary>Retry gaps double from 2 minutes up to this, so a Discord outage of a few minutes doesn't drop
+    /// anything.</summary>
+    private static readonly TimeSpan MaxRetryGap = TimeSpan.FromHours(1);
+
+    /// <summary>Gives up after this many failed attempts, or once a reminder is this overdue, whichever comes first
+    /// (e.g. its channel was deleted and the person's DMs are closed).</summary>
+    private const int MaxAttempts = 10;
+
+    private static readonly TimeSpan GiveUpAfter = TimeSpan.FromDays(1);
 
     private readonly DiscordSocketClient _client;
     private readonly IReminderStore _store;
     private readonly ILogger<ReminderDeliveryService> _logger;
-    private readonly ConcurrentDictionary<string, int> _failedAttempts = new();
+
+    /// <summary>Set once the client has its guilds and channels. Straight after connecting, channels can look missing,
+    /// which would send overdue reminders to DMs instead of where they were set.</summary>
+    private volatile bool _ready;
 
     public ReminderDeliveryService(DiscordSocketClient client, IReminderStore store,
         ILogger<ReminderDeliveryService> logger)
@@ -36,6 +45,18 @@ public class ReminderDeliveryService : BackgroundService
         _client = client;
         _store = store;
         _logger = logger;
+
+        // Constructed before the bot logs in, so the first Ready isn't missed. Ready fires again after reconnects.
+        _client.Ready += () =>
+        {
+            _ready = true;
+            return Task.CompletedTask;
+        };
+        _client.Disconnected += _ =>
+        {
+            _ready = false;
+            return Task.CompletedTask;
+        };
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -45,7 +66,7 @@ public class ReminderDeliveryService : BackgroundService
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                if (_client.ConnectionState != ConnectionState.Connected)
+                if (!_ready || _client.ConnectionState != ConnectionState.Connected)
                 {
                     continue;
                 }
@@ -72,38 +93,45 @@ public class ReminderDeliveryService : BackgroundService
 
     private async Task DeliverAsync(Reminder reminder)
     {
-        // Claim it first, so a /reminders cancel at the same moment either wins (and nothing is sent) or loses
-        // cleanly, and a slow send can't be picked up twice.
-        if (!await _store.RemoveAsync(reminder.Id))
+        // Cancelled since the list was read? Then don't send it.
+        if (!await _store.ExistsAsync(reminder.Id))
         {
             return;
         }
 
-        var late = DateTimeOffset.UtcNow - reminder.DueAt > LateAfter
+        var now = DateTimeOffset.UtcNow;
+        var late = now - reminder.DueAt > LateAfter
             ? $"\n-# This was due {ReminderService.Relative(reminder.DueAt)} - I was offline then."
             : "";
-        var mentions = new AllowedMentions(AllowedMentionTypes.None) { UserIds = [reminder.UserId] };
 
-        if (await TrySendInChannelAsync(reminder, late, mentions) || await TrySendDmAsync(reminder, late))
+        // Send first, remove after. If the bot stops in between, the reminder is sent again on restart (marked late),
+        // which beats losing it.
+        if (await TrySendInChannelAsync(reminder, late) || await TrySendDmAsync(reminder, late))
         {
-            _failedAttempts.TryRemove(reminder.Id, out _);
+            await _store.RemoveAsync(reminder.Id);
             return;
         }
 
-        var attempts = _failedAttempts.AddOrUpdate(reminder.Id, 1, (_, count) => count + 1);
-        if (attempts >= MaxAttempts)
+        var attempts = reminder.Attempts + 1;
+        if (attempts >= MaxAttempts || now - reminder.DueAt > GiveUpAfter)
         {
-            _failedAttempts.TryRemove(reminder.Id, out _);
+            await _store.RemoveAsync(reminder.Id);
             _logger.LogWarning("Dropping reminder {Id} for user {UserId} after {Attempts} failed deliveries.",
                 reminder.Id, reminder.UserId, attempts);
             return;
         }
 
-        // Put it back for the next check (e.g. Discord had a hiccup).
-        await _store.AddAsync(reminder);
+        var gap = TimeSpan.FromMinutes(Math.Min(Math.Pow(2, attempts), MaxRetryGap.TotalMinutes));
+        await _store.UpdateAsync(reminder.Id, r =>
+        {
+            r.Attempts = attempts;
+            r.NextAttemptAt = now + gap;
+        });
+        _logger.LogInformation("Couldn't deliver reminder {Id}; trying again in {Minutes} minutes (attempt {Attempt}).",
+            reminder.Id, (int)gap.TotalMinutes, attempts);
     }
 
-    private async Task<bool> TrySendInChannelAsync(Reminder reminder, string late, AllowedMentions mentions)
+    private async Task<bool> TrySendInChannelAsync(Reminder reminder, string late)
     {
         if (_client.GetChannel(reminder.ChannelId) is not IMessageChannel channel)
         {
@@ -114,10 +142,12 @@ public class ReminderDeliveryService : BackgroundService
         {
             await channel.SendMessageAsync(
                 $"⏰ <@{reminder.UserId}>, you asked me to remind you: {reminder.Text}{late}",
-                allowedMentions: mentions,
+                allowedMentions: new AllowedMentions(AllowedMentionTypes.None) { UserIds = [reminder.UserId] },
                 messageReference: reminder.SourceMessageId is { } source
                     ? new MessageReference(source, reminder.ChannelId, reminder.GuildId, failIfNotExists: false)
-                    : null);
+                    : null,
+                // The text is whatever the person typed; don't let a link in it unfurl into a preview.
+                flags: MessageFlags.SuppressEmbeds);
             return true;
         }
         catch (Exception ex)
@@ -140,7 +170,8 @@ public class ReminderDeliveryService : BackgroundService
             var server = _client.GetGuild(reminder.GuildId)?.Name ?? "a server";
             var dm = await user.CreateDMChannelAsync();
             await dm.SendMessageAsync($"⏰ Reminder you set in **{Format.Sanitize(server)}** (I couldn't post it there): " +
-                                      $"{reminder.Text}{late}", allowedMentions: AllowedMentions.None);
+                                      $"{reminder.Text}{late}", allowedMentions: AllowedMentions.None,
+                flags: MessageFlags.SuppressEmbeds);
             return true;
         }
         catch (Exception ex)

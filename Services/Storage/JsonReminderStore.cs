@@ -6,13 +6,36 @@ public class JsonReminderStore : IReminderStore
 {
     private readonly JsonFileRepository<Reminder> _repository;
 
-    public JsonReminderStore()
+    public JsonReminderStore() : this(Path.Combine("data", "reminders.json"))
     {
-        _repository = new JsonFileRepository<Reminder>(Path.Combine("data", "reminders.json"));
     }
 
-    public Task AddAsync(Reminder reminder)
-        => _repository.MutateAsync(data => data[reminder.Id] = reminder);
+    /// <summary>For tests: a store backed by a file of your choosing.</summary>
+    public JsonReminderStore(string filePath)
+    {
+        _repository = new JsonFileRepository<Reminder>(filePath);
+    }
+
+    public async Task<ReminderAddResult> TryAddAsync(Reminder reminder, int maxPerUser)
+    {
+        var result = ReminderAddResult.Added;
+        await _repository.MutateAsync(data =>
+        {
+            if (data.ContainsKey(reminder.Id))
+            {
+                result = ReminderAddResult.IdTaken;
+            }
+            else if (data.Values.Count(r => r.GuildId == reminder.GuildId && r.UserId == reminder.UserId) >= maxPerUser)
+            {
+                result = ReminderAddResult.LimitReached;
+            }
+            else
+            {
+                data[reminder.Id] = reminder;
+            }
+        });
+        return result;
+    }
 
     public async Task<IReadOnlyList<Reminder>> GetForUserAsync(ulong guildId, ulong userId)
         => (await _repository.GetAllAsync())
@@ -21,9 +44,26 @@ public class JsonReminderStore : IReminderStore
             .ToList();
 
     public async Task<IReadOnlyList<Reminder>> GetDueAsync(DateTimeOffset now)
-        => (await _repository.GetAllAsync()).Where(r => r.DueAt <= now).OrderBy(r => r.DueAt).ToList();
+        => (await _repository.GetAllAsync())
+            .Where(r => r.DueAt <= now && (r.NextAttemptAt is null || r.NextAttemptAt <= now))
+            .OrderBy(r => r.DueAt)
+            .ToList();
 
     public async Task<bool> ExistsAsync(string id) => await _repository.GetAsync(id) is not null;
+
+    public async Task<bool> UpdateAsync(string id, Action<Reminder> update)
+    {
+        var found = false;
+        await _repository.MutateAsync(data =>
+        {
+            if (data.TryGetValue(id, out var reminder))
+            {
+                found = true;
+                update(reminder);
+            }
+        });
+        return found;
+    }
 
     public async Task<bool> RemoveAsync(string id)
     {

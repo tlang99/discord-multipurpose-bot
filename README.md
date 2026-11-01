@@ -127,7 +127,12 @@ it out (in `/lfg-setup` and the panel) until that's fixed. Removing the role alw
 - **Safety:** the text goes through the word filter when set (auto-mod on, moderators exempt), and the reminder only
   pings its owner.
 - **Persistence:** reminders are saved in `data/reminders.json`. Ones that came due while the bot was offline are
-  delivered when it's back, marked late. If the channel can't be used any more, the bot DMs the person instead.
+  delivered once it's back and ready, marked late. If the channel can't be used any more, the bot DMs the person
+  instead.
+- **Retries:** if neither works (say Discord is having a moment), it retries with growing gaps of 2, 4, 8… minutes, up
+  to an hour. It gives up after 10 attempts or a day.
+- **Duplicates over losses:** a reminder is only removed after it's sent. If the bot stops at exactly that moment, the
+  reminder is sent again on restart rather than lost.
 
 **Command list** — `/help` shows members the commands they can use (LFG and music, with links to the channels
 they work in), visible only to them. `/help-post` (Manage Server) posts the same list in the current channel and
@@ -189,6 +194,7 @@ Modules/           Slash-command modules, grouped by feature folder (auto-discov
   Music/           Music commands plus the Lavalink player that announces songs (Lavalink4NET does the rest)
   Lfg/             /lfg command, its button handlers, and the LFG card's embed/buttons
 lavalink/          Config for the Lavalink music server (the server itself is downloaded, not committed)
+tests/            ModBot.Tests (xUnit): text readers, reminder rules, news write-up checks
 Hosting/           DiscordBotService - owns the client lifecycle and wires events to handlers
                    NewsPollingService - background timer that posts new articles for /news subscriptions
                    LfgExpiryService - closes LFG posts that didn't fill up in time
@@ -318,6 +324,18 @@ bot logs a warning at startup.
 ```bash
 dotnet run
 ```
+
+### Tests
+
+The tests in `tests/ModBot.Tests` cover the logic that's easy to get subtly wrong: reading times, reminder requests
+and LFG details from text, the reminder rules, and the news write-up checks. Run them with:
+
+```bash
+dotnet test tests/ModBot.Tests
+```
+
+While the bot is running its build output is locked; add `--artifacts-path ../modbot-test-build` to build the tests
+somewhere else.
 
 ## Permissions reference
 
