@@ -20,7 +20,7 @@ public record NewsWriteUp(string Text, string WriterName);
 /// <remarks>Tested against llama3.2 on real feed items: it kept the facts in nearly every case, but once turned "a
 /// multiplayer disadvantage" into "a competitive edge". That's why the news site's own summary is shown alongside by
 /// default (<see cref="NewsOptions.ShowOriginalSummary"/>) and the embed says the write-up is AI-written.</remarks>
-public partial class NewsWriter
+public partial class NewsWriter : INewsWriter
 {
     private const int MaxLength = 700;
 
@@ -61,9 +61,7 @@ public partial class NewsWriter
             return null;
         }
 
-        var systemPrompt = $"You are {botName}, the bot in the Discord server \"{serverName}\".\n\n" +
-                           $"Your personality: {await _personality.GetAsync(guildId)}\n\n" +
-                           Instructions;
+        var systemPrompt = await _personality.IntroAsync(guildId, botName, serverName) + Instructions;
         var articleText = $"Headline: {article.Title}\n" +
                           $"Summary from the news site: {article.Summary ?? "(none - the headline is all there is)"}";
 
@@ -132,9 +130,15 @@ public partial class NewsWriter
         return lastSentence > MaxLength / 2 ? cut[..(lastSentence + 1)] : cut.TrimEnd() + "…";
     }
 
-    /// <summary>A web address (with or without http, "www." or a bare domain like evil.com/path), a Discord invite,
-    /// or @everyone / @here.</summary>
-    [GeneratedRegex(@"https?://|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|gg|io|co|ru|xyz|ly|me|tv|info|link|click|top)(?:/|\b)|discord(?:app)?\.com/invite|@everyone|@here",
+    /// <summary>
+    /// Anything shaped like a link, whatever the domain: http(s)://, "www.", markdown link syntax "](", an autolink
+    /// like &lt;https:, any word.word domain shape (evil.app, bit.do/x), a Discord invite, or @everyone / @here.
+    /// Matching the shape rather than a list of domain endings means a new ending can't slip through; the price is
+    /// that a write-up naming something like "Node.js" falls back to the site's summary, which is harmless.
+    /// </summary>
+    /// <remarks>Checked against the 10 real write-ups from testing (none rejected), 10 planted links (all caught) and
+    /// text like "Season 1.5, e.g. U.S. servers" (not rejected).</remarks>
+    [GeneratedRegex(@"https?://|\bwww\.|\]\s*\(|<[a-z][a-z0-9+.-]*:|discord(?:app)?\.com/invite|@everyone|@here|\b[a-z0-9-]+\.[a-z]{2,}\b",
         RegexOptions.IgnoreCase)]
     private static partial Regex LinkOrMassMentionRegex();
 }

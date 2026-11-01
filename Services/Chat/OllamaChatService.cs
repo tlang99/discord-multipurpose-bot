@@ -62,7 +62,8 @@ public class OllamaChatService : IChatService
         {
             response = await _httpClient.PostAsJsonAsync("api/chat", request, JsonOptions, cancellationToken);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is HttpRequestException ||
+                                   (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             throw new ChatServiceException($"Couldn't reach Ollama at {_httpClient.BaseAddress}: {ex.Message}", inner: ex);
         }
@@ -83,8 +84,8 @@ public class OllamaChatService : IChatService
             {
                 payload = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(JsonOptions, cancellationToken);
             }
-            catch (Exception ex) when (ex is JsonException or NotSupportedException or HttpRequestException or IOException
-                                           or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (ex is JsonException or NotSupportedException or HttpRequestException or IOException ||
+                                       (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
             {
                 throw new ChatServiceException($"Couldn't read Ollama's response: {ex.Message}", inner: ex);
             }

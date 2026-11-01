@@ -59,8 +59,11 @@ article, the image and the date:
 
 The model only sees the headline and the feed's short summary, not the full article. It's told to stick to those
 facts, but small models still embellish now and then, which is why the site's summary is shown by default.
-- **Word filter:** write-ups go through it, like chatbot replies.
-- **Fallback:** if Ollama is unreachable or a write-up breaks the filter, that article posts with the site's summary,
+- **Word filter:** while auto-mod is on (`/automod enable`), write-ups go through the server's word filter, like
+  chatbot replies.
+- **Links:** write-ups containing anything shaped like a link (a URL, a bare domain, a markdown link) or
+  `@everyone`/`@here` are always discarded, since the feed text going into the prompt is untrusted.
+- **Fallback:** if Ollama is unreachable, or a write-up breaks the filter or contains a link, that article posts with the site's summary,
   as before.
 - **Preview:** `/news latest` shows write-ups too, so it doubles as a preview.
 - **Turning it off:** `News:AiWriteUps: false`.

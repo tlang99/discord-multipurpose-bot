@@ -21,7 +21,7 @@ public class NewsPollingService : BackgroundService
     private readonly DiscordSocketClient _client;
     private readonly INewsSubscriptionStore _store;
     private readonly INewsFeedReader _feedReader;
-    private readonly NewsWriter _writer;
+    private readonly INewsWriter _writer;
     private readonly NewsOptions _options;
     private readonly ILogger<NewsPollingService> _logger;
 
@@ -29,7 +29,7 @@ public class NewsPollingService : BackgroundService
         DiscordSocketClient client,
         INewsSubscriptionStore store,
         INewsFeedReader feedReader,
-        NewsWriter writer,
+        INewsWriter writer,
         IOptions<NewsOptions> options,
         ILogger<NewsPollingService> logger)
     {

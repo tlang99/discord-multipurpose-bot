@@ -161,7 +161,7 @@ builder.Services.AddSingleton<AutoModerationHandler>();
 builder.Services.AddSingleton<ChatRequestLimiter>();
 builder.Services.AddSingleton<ChatPersonality>();
 builder.Services.AddSingleton<ChatActionParser>();
-builder.Services.AddSingleton<NewsWriter>();
+builder.Services.AddSingleton<INewsWriter, NewsWriter>();
 builder.Services.AddSingleton<ChatHandler>();
 
 builder.Services.AddHostedService<DiscordBotService>();

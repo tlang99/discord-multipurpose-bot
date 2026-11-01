@@ -267,9 +267,7 @@ public partial class ChatHandler
     /// <summary>Who the bot is, then the server's personality (or the default), then the ground rules.</summary>
     private async Task<string> BuildSystemPromptAsync(SocketGuild guild, SocketGuildUser bot)
     {
-        return $"You are {bot.DisplayName}, the bot in the Discord server \"{guild.Name}\".\n\n" +
-               $"Your personality: {await _personality.GetAsync(guild.Id)}\n\n" +
-               GroundRules;
+        return await _personality.IntroAsync(guild.Id, bot.DisplayName, guild.Name) + GroundRules;
     }
 
     /// <summary>

@@ -20,11 +20,11 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 
     private readonly INewsSubscriptionStore _store;
     private readonly INewsFeedReader _feedReader;
-    private readonly NewsWriter _writer;
+    private readonly INewsWriter _writer;
     private readonly NewsOptions _options;
     private readonly ILogger<NewsModule> _logger;
 
-    public NewsModule(INewsSubscriptionStore store, INewsFeedReader feedReader, NewsWriter writer,
+    public NewsModule(INewsSubscriptionStore store, INewsFeedReader feedReader, INewsWriter writer,
         IOptions<NewsOptions> options, ILogger<NewsModule> logger)
     {
         _store = store;
@@ -226,15 +226,15 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
             return;
         }
 
-        // Written up the same way the channel posts will be, so this doubles as a preview of the bot's take.
-        var embeds = new List<Embed>();
-        foreach (var article in articles.Take(count))
+        // Written up the same way the channel posts will be, so this doubles as a preview of the bot's take. Started
+        // together; the shared limiter decides how many actually reach the model at once. WhenAll keeps the order.
+        var embeds = await Task.WhenAll(articles.Take(count).Select(async article =>
         {
             var writeUp = await _writer.WriteAsync(article, Context.Guild.Id, Context.Guild.CurrentUser.DisplayName,
                 Context.Guild.Name);
-            embeds.Add(NewsEmbedFactory.Build(article, subscription.Name, writeUp, _options.ShowOriginalSummary));
-        }
-        await FollowupAsync(embeds: embeds.ToArray(), ephemeral: true);
+            return NewsEmbedFactory.Build(article, subscription.Name, writeUp, _options.ShowOriginalSummary);
+        }));
+        await FollowupAsync(embeds: embeds, ephemeral: true);
     }
 
     private async Task FollowAsync(string name, string feedUrl, ITextChannel channel, string displayName,
