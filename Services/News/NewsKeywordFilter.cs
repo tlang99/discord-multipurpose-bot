@@ -30,7 +30,6 @@ public static class NewsKeywordFilter
         // "Not next to a letter/digit" rather than \b: \b needs a word character on one side, so a keyword starting
         // or ending with a symbol (e.g. "c++", "#1") could never match.
         var pattern = @"(?<!\w)" + Regex.Escape(keyword.Trim()).Replace(@"\ ", @"\s+") + @"s?(?!\w)";
-        return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-            TimeSpan.FromMilliseconds(100));
+        return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 }

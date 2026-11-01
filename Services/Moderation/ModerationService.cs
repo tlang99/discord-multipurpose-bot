@@ -186,8 +186,9 @@ public class ModerationService : IModerationService
             return $"I can't {verb} myself.";
         }
 
-        // Not in the server (e.g. banning someone who already left): there's no role to outrank.
-        if (await guild.GetUserAsync(targetId) is not { } target)
+        // Not in the server (e.g. banning someone who already left): there's no role to outrank. AllowDownload asks
+        // Discord when the member isn't cached, so a cache miss can't skip the check.
+        if (await guild.GetUserAsync(targetId, CacheMode.AllowDownload) is not { } target)
         {
             return null;
         }

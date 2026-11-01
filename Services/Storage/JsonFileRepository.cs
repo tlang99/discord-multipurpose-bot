@@ -59,16 +59,18 @@ public class JsonFileRepository<TValue>
         }
     }
 
-    /// <summary>Runs <paramref name="mutation"/> on the live data under the lock, then saves. Don't keep references
-    /// to the values it touches after it returns.</summary>
+    /// <summary>Runs <paramref name="mutation"/> under the lock, then saves. It works on a copy that only replaces the
+    /// cached data once the file is written, so if the mutation throws partway or the save fails (e.g. disk full),
+    /// nothing changes - memory never holds data the file doesn't. Don't keep references to the values it touches
+    /// after it returns.</summary>
     public async Task MutateAsync(Action<Dictionary<string, TValue>> mutation)
     {
         await _lock.WaitAsync();
         try
         {
-            var data = await LoadInternalAsync();
-            mutation(data);
-            await SaveInternalAsync(data);
+            var working = Clone(await LoadInternalAsync());
+            mutation(working);
+            await SaveInternalAsync(working);
         }
         finally
         {
@@ -76,8 +78,8 @@ public class JsonFileRepository<TValue>
         }
     }
 
-    private static TValue Clone(TValue value)
-        => JsonSerializer.Deserialize<TValue>(JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions),
+    private static T Clone<T>(T value)
+        => JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions),
             SerializerOptions)!;
 
     private async Task<Dictionary<string, TValue>> LoadInternalAsync()
@@ -101,8 +103,6 @@ public class JsonFileRepository<TValue>
 
     private async Task SaveInternalAsync(Dictionary<string, TValue> data)
     {
-        _cache = data;
-
         // Write a temp file and swap it in, so a crash or full disk mid-write can't leave a truncated file that
         // fails to load on every later start.
         var tempPath = _filePath + ".tmp";
@@ -112,5 +112,6 @@ public class JsonFileRepository<TValue>
         }
 
         File.Move(tempPath, _filePath, overwrite: true);
+        _cache = data;
     }
 }
