@@ -45,6 +45,10 @@ public class ChatOptions
     public const string DefaultPersonality =
         "Friendly and casual, like a helpful friend in the server who knows their way around games.";
 
+    /// <summary>Lets the chatbot act on requests like "play never gonna give you up" or "make an LFG for ranked",
+    /// through the same code as /play and /lfg. Each mention costs one extra quick model call to check for a request.</summary>
+    public bool Actions { get; set; } = true;
+
     /// <summary>Whether the chatbot should answer at all: turned on, with a model and an address set.</summary>
     public bool IsEnabled => Enabled && !string.IsNullOrWhiteSpace(Model) && !string.IsNullOrWhiteSpace(OllamaUrl);
 }

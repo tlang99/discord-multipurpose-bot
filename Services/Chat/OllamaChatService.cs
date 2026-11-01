@@ -34,11 +34,28 @@ public class OllamaChatService : IChatService
         messages.AddRange(conversation.Select(t => new OllamaMessage(t.Role == ChatRole.Assistant ? "assistant" : "user",
             t.Content)));
 
+        return await SendAsync(new OllamaChatRequest(_options.Model, messages, Stream: false), cancellationToken);
+    }
+
+    public async Task<string> CompleteJsonAsync(string systemPrompt, string userMessage, string jsonSchema,
+        CancellationToken cancellationToken = default)
+    {
+        // Ollama's structured outputs: "format" takes a JSON Schema and the model's answer is constrained to it.
+        using var schema = JsonDocument.Parse(jsonSchema);
+        var request = new OllamaChatRequest(_options.Model,
+            [new("system", systemPrompt), new("user", userMessage)],
+            Stream: false,
+            Format: schema.RootElement.Clone(),
+            Options: new OllamaRequestOptions(Temperature: 0));
+        return await SendAsync(request, cancellationToken);
+    }
+
+    private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken)
+    {
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.PostAsJsonAsync("api/chat",
-                new OllamaChatRequest(_options.Model, messages, Stream: false), JsonOptions, cancellationToken);
+            response = await _httpClient.PostAsJsonAsync("api/chat", request, JsonOptions, cancellationToken);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
@@ -88,7 +105,10 @@ public class OllamaChatService : IChatService
 
     private record OllamaMessage(string Role, string Content);
 
-    private record OllamaChatRequest(string Model, IReadOnlyList<OllamaMessage> Messages, bool Stream);
+    private record OllamaChatRequest(string Model, IReadOnlyList<OllamaMessage> Messages, bool Stream,
+        JsonElement? Format = null, OllamaRequestOptions? Options = null);
+
+    private record OllamaRequestOptions(double? Temperature = null);
 
     private record OllamaChatResponse(OllamaMessage? Message);
 

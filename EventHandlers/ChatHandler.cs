@@ -5,6 +5,8 @@ using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModBot.Configuration;
+using ModBot.Modules.Lfg;
+using ModBot.Modules.Music;
 using ModBot.Services.Chat;
 using ModBot.Services.Moderation;
 using ModBot.Services.Storage;
@@ -27,10 +29,14 @@ public partial class ChatHandler
         "Whatever your personality, always follow these rules: Keep answers short: usually a few sentences, and well " +
         "under 1,500 characters unless someone asks for detail. Reply only as yourself, in your own words. Never " +
         "start your reply with a name and a colon, and never write lines for anyone else. Use Discord markdown " +
-        "sparingly. Never write @everyone or @here, and don't try to ping people. You can't take actions in the " +
-        "server; for the bot's commands (LFG posts, music), point people to /help.";
+        "sparingly. Never write @everyone or @here, and don't try to ping people. Never claim you played a song or " +
+        "posted an LFG: those requests are handled separately, so if someone asks how, tell them to ask you directly " +
+        "(e.g. \"play <song>\" or \"make an LFG for ranked\") or see /help.";
 
     private readonly IChatService _chat;
+    private readonly ChatActionParser _actionParser;
+    private readonly MusicService _music;
+    private readonly LfgPoster _lfgPoster;
     private readonly IGuildSettingsStore _settingsStore;
     private readonly IChatSettingsStore _chatSettings;
     private readonly ChatOptions _options;
@@ -38,10 +44,14 @@ public partial class ChatHandler
     private readonly SemaphoreSlim _concurrency;
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
 
-    public ChatHandler(IChatService chat, IGuildSettingsStore settingsStore, IChatSettingsStore chatSettings,
-        IOptions<ChatOptions> options, ILogger<ChatHandler> logger)
+    public ChatHandler(IChatService chat, ChatActionParser actionParser, MusicService music, LfgPoster lfgPoster,
+        IGuildSettingsStore settingsStore, IChatSettingsStore chatSettings, IOptions<ChatOptions> options,
+        ILogger<ChatHandler> logger)
     {
         _chat = chat;
+        _actionParser = actionParser;
+        _music = music;
+        _lfgPoster = lfgPoster;
         _settingsStore = settingsStore;
         _chatSettings = chatSettings;
         _options = options.Value;
@@ -97,16 +107,26 @@ public partial class ChatHandler
             return;
         }
 
-        string reply;
+        string? reply = null;
+        ChatAction? action = null;
         using (channel.EnterTypingState())
         {
             await _concurrency.WaitAsync();
             try
             {
-                var (prompt, speakers) = await BuildPromptAsync(channel, message, guild, bot, question);
-                reply = await _chat.ReplyAsync(await BuildSystemPromptAsync(guild, bot),
-                    [new ChatTurn(ChatRole.User, prompt)]);
-                reply = RemoveScriptedLines(reply, speakers);
+                // "Play X" / "make an LFG" are done, not chatted about. Only the asker's own message is looked at.
+                if (_options.Actions && message.Author is SocketGuildUser)
+                {
+                    action = await _actionParser.ParseAsync(question);
+                }
+
+                if (action is null)
+                {
+                    var (prompt, speakers) = await BuildPromptAsync(channel, message, guild, bot, question);
+                    reply = await _chat.ReplyAsync(await BuildSystemPromptAsync(guild, bot),
+                        [new ChatTurn(ChatRole.User, prompt)]);
+                    reply = RemoveScriptedLines(reply, speakers);
+                }
             }
             catch (ChatServiceException ex)
             {
@@ -121,9 +141,41 @@ public partial class ChatHandler
             }
             finally
             {
+                // Released before running an action: joining voice can take seconds and doesn't need the model.
                 _concurrency.Release();
             }
+
+            if (action is not null && reply is null)
+            {
+                string text;
+                var suppressEmbeds = false;
+                try
+                {
+                    (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)message.Author, channel);
+                }
+                catch (Exception ex)
+                {
+                    // Lavalink or Discord failing mid-action: say so instead of leaving the request unanswered.
+                    _logger.LogWarning(ex, "Chat action {Action} failed in guild {GuildId}.", action.GetType().Name, guild.Id);
+                    text = "Something went wrong doing that - try again in a bit, or use the slash command.";
+                }
+
+                // Song and playlist titles are third-party text, so action replies follow the word rules too.
+                if (settings.AutoModEnabled && TextFilter.FindViolation(text, settings) is not null)
+                {
+                    text = action is PlayMusicAction
+                        ? "My reply named a song whose title breaks this server's word filter, so I won't repeat it " +
+                          "here. Check `/queue` to see what happened."
+                        : "My reply broke this server's word filter, so I'm keeping the details to myself.";
+                    suppressEmbeds = false;
+                }
+
+                await ReplyAsync(message, text, suppressEmbeds);
+                return;
+            }
         }
+
+        reply ??= "I couldn't come up with an answer right now - try again in a bit.";
 
         if (reply.Length > DiscordMessageLimit)
         {
@@ -138,6 +190,65 @@ public partial class ChatHandler
         }
 
         await ReplyAsync(message, reply);
+    }
+
+    /// <summary>
+    /// Does what the message asked, as the person who asked, through the same code as /play and /lfg (so the same
+    /// rules apply: in a voice channel to play, one open LFG each). Music and LFG posts go to their own channels
+    /// wherever the request was made. Returns the reply, and whether to hide link previews in it.
+    /// </summary>
+    private async Task<(string Text, bool SuppressEmbeds)> RunActionAsync(ChatAction action, SocketGuildUser asker,
+        SocketTextChannel channel)
+    {
+        var guild = channel.Guild;
+        switch (action)
+        {
+            case PlayMusicAction play:
+            {
+                var musicChannel = _music.ChannelName.Length == 0 ? channel : _music.FindChannel(guild);
+                if (musicChannel is null)
+                {
+                    return ($"Music goes in **#{_music.ChannelName}**, but this server doesn't have that channel yet.", false);
+                }
+
+                var result = await _music.PlayAsync(asker, musicChannel, play.Query, replyShowsNowPlaying: false);
+                var where = result.Success && musicChannel.Id != channel.Id ? $" (in {musicChannel.Mention})" : "";
+                return ((result.Text ?? "Done.") + where, result.SuppressEmbeds);
+            }
+
+            case CreateLfgAction lfg:
+            {
+                var lfgChannel = _lfgPoster.ChannelName.Length == 0 ? channel : _lfgPoster.FindChannel(guild);
+                if (lfgChannel is null)
+                {
+                    return ($"LFG posts go in **#{_lfgPoster.ChannelName}**, but this server doesn't have that channel yet.",
+                        false);
+                }
+
+                // Posting for someone is only allowed where they could post themselves.
+                var askerPermissions = asker.GetPermissions(lfgChannel);
+                var askerCanSend = lfgChannel is IThreadChannel
+                    ? askerPermissions.SendMessagesInThreads
+                    : askerPermissions.SendMessages;
+                if (!askerPermissions.ViewChannel || !askerCanSend)
+                {
+                    return ($"You can't post in {lfgChannel.Mention}, so I can't post an LFG there for you.", false);
+                }
+
+                // No note from chat: free text on a public card is left to /lfg.
+                var result = await _lfgPoster.PostAsync(asker, lfgChannel, lfg.Players, lfg.Details, note: null);
+                return result.Success && result.CardLink is not null
+                    ? ($"{result.Message}\n[Go to your LFG in #{lfgChannel.Name}]({result.CardLink}) - use `/lfg` " +
+                       "if you want to add a note.", true)
+                    : (result.Message, false);
+            }
+
+            case UnclearSongAction:
+                return ("I couldn't tell which song you want - try \"play <song name>\", or use `/play`.", false);
+
+            default:
+                return ("I'm not sure how to do that yet.", false);
+        }
     }
 
     /// <summary>Records the question if the person is allowed to ask now; true if they have to wait.</summary>
@@ -317,13 +428,14 @@ public partial class ChatHandler
     private static string DisplayName(IUser user, SocketGuild guild)
         => guild.GetUser(user.Id)?.DisplayName ?? user.GlobalName ?? user.Username;
 
-    private async Task ReplyAsync(SocketUserMessage message, string text)
+    private async Task ReplyAsync(SocketUserMessage message, string text, bool suppressEmbeds = false)
     {
         try
         {
             // Only the asker can be pinged, however the model's text is worded.
             await message.ReplyAsync(text,
-                allowedMentions: new AllowedMentions(AllowedMentionTypes.None) { MentionRepliedUser = true });
+                allowedMentions: new AllowedMentions(AllowedMentionTypes.None) { MentionRepliedUser = true },
+                flags: suppressEmbeds ? MessageFlags.SuppressEmbeds : MessageFlags.None);
         }
         catch (Exception ex)
         {

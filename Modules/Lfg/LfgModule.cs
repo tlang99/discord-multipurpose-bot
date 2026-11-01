@@ -18,16 +18,16 @@ namespace ModBot.Modules.Lfg;
 [RequireContext(ContextType.Guild)]
 public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 {
-    private const int MaxNoteLength = 100;
+    private const int MaxNoteLength = LfgPoster.MaxNoteLength;
 
     private readonly ILfgService _lfg;
-    private readonly LfgOptions _options;
+    private readonly LfgPoster _poster;
     private readonly ILogger<LfgModule> _logger;
 
-    public LfgModule(ILfgService lfg, IOptions<LfgOptions> options, ILogger<LfgModule> logger)
+    public LfgModule(ILfgService lfg, LfgPoster poster, ILogger<LfgModule> logger)
     {
         _lfg = lfg;
-        _options = options.Value;
+        _poster = poster;
         _logger = logger;
     }
 
@@ -95,7 +95,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        var lfgChannelName = _options.ChannelName.Trim().TrimStart('#');
+        var lfgChannelName = _poster.ChannelName;
         if (lfgChannelName.Length > 0 && !channel.Name.Equals(lfgChannelName, StringComparison.OrdinalIgnoreCase))
         {
             var lfgChannel = Context.Guild.TextChannels.FirstOrDefault(c =>
@@ -107,86 +107,14 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        var botPermissions = Context.Guild.CurrentUser.GetPermissions(channel);
-        if (!botPermissions.ViewChannel || !botPermissions.SendMessages || !botPermissions.EmbedLinks)
+        if (Context.User is not SocketGuildUser host)
         {
-            await FollowupAsync($"I need **View Channel**, **Send Messages**, and **Embed Links** in {channel.Mention} " +
-                               "to post LFGs here.", ephemeral: true);
+            await FollowupAsync("Couldn't work out who you are in this server - try again.", ephemeral: true);
             return;
         }
 
-        note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
-        var lifetime = TimeSpan.FromMinutes(Math.Clamp(_options.ExpiryMinutes, 5, 24 * 60));
-        var (post, created) = _lfg.Create(Context.Guild.Id, channel.Id, Context.User.Id, LfgMode.Multiplayer,
-            players, ToDetails(playlist, rank, mic, platform), note, lifetime);
-
-        if (!created)
-        {
-            var where = post.MessageId == 0
-                ? "already"
-                : $"already ([here](https://discord.com/channels/{post.GuildId}/{post.ChannelId}/{post.MessageId}))";
-            await FollowupAsync($"You {where} have an open LFG post. Start or cancel that one first.", ephemeral: true);
-            return;
-        }
-
-        // Ping the opt-in LFG role, if the server has one - at most once per cooldown per host. When it doesn't ping,
-        // say why in the host's confirmation instead of skipping silently.
-        var pingRole = FindPingRole();
-        string? pingText = null;
-        var pingMentions = AllowedMentions.None;
-        string? pingStatus = null;
-        if (pingRole is null)
-        {
-            pingStatus = PingRoleName.Length == 0
-                ? null
-                : "No @LFG ping: pings aren't set up yet - a server admin can run `/lfg-setup`.";
-        }
-        else if (!CanPing(pingRole))
-        {
-            _logger.LogWarning("Can't ping LFG role {RoleId} in guild {GuildId}: it isn't mentionable and the bot lacks " +
-                               "Mention All Roles. Running /lfg-setup again fixes it.", pingRole.Id, Context.Guild.Id);
-            pingStatus = $"No @{pingRole.Name} ping: that role isn't mentionable. A server admin can run `/lfg-setup` " +
-                         "again to fix it.";
-        }
-        else if (!_lfg.TryClaimRolePing(Context.Guild.Id, Context.User.Id, PingCooldown))
-        {
-            pingStatus = $"No @{pingRole.Name} ping this time: your last post pinged it less than " +
-                         $"{(int)PingCooldown.TotalMinutes} minutes ago.";
-        }
-        else
-        {
-            (pingText, pingMentions) = LfgMessages.RolePing(post, pingRole.Id);
-            pingStatus = (Context.User as IGuildUser)?.RoleIds.Contains(pingRole.Id) == true
-                ? $"Pinged @{pingRole.Name} (Discord doesn't notify you about your own post, but everyone else with the role is)."
-                : $"Pinged @{pingRole.Name}.";
-        }
-
-        // Posted as a regular message rather than the command's reply: interaction replies can only be edited for 15
-        // minutes, and the post needs updating until it expires an hour later.
-        try
-        {
-            var message = await channel.SendMessageAsync(text: pingText, embed: LfgMessages.OpenEmbed(post),
-                components: LfgMessages.OpenButtons(post), allowedMentions: pingMentions);
-            _lfg.AttachMessage(post.Id, message.Id);
-        }
-        catch (Exception ex)
-        {
-            _lfg.Discard(post.Id);
-            if (pingText is not null)
-            {
-                // Nobody was pinged, so don't make the host wait out the cooldown.
-                _lfg.ReleaseRolePing(Context.Guild.Id, Context.User.Id);
-            }
-
-            _logger.LogWarning(ex, "Couldn't post an LFG in channel {ChannelId}.", channel.Id);
-            await FollowupAsync("Couldn't post your LFG in this channel.", ephemeral: true);
-            return;
-        }
-
-        await FollowupAsync($"Your LFG is up. It closes when the squad is full, or after " +
-                           $"{(int)lifetime.TotalMinutes} minutes. Use **Start now** to go early with whoever's joined." +
-                           (pingStatus is null ? "" : $"\n{pingStatus}"),
-            ephemeral: true, allowedMentions: AllowedMentions.None);
+        var result = await _poster.PostAsync(host, channel, players, ToDetails(playlist, rank, mic, platform), note);
+        await FollowupAsync(result.Message, ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 
     [SlashCommand("lfg-setup", "Posts the button panel members use to opt in to LFG pings (creates the role if needed).")]
@@ -427,9 +355,9 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         }
     }
 
-    private string PingRoleName => _options.PingRoleName.Trim().TrimStart('@');
+    private string PingRoleName => _poster.PingRoleName;
 
-    private TimeSpan PingCooldown => TimeSpan.FromMinutes(Math.Max(0, _options.PingCooldownMinutes));
+    private TimeSpan PingCooldown => _poster.PingCooldown;
 
     /// <summary>
     /// Why members must not be able to give themselves this role, or null if it's safe. The panel lets anyone take the
@@ -458,16 +386,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         return grantingChannel is null ? null : $"grants permissions in #{grantingChannel.Name}";
     }
 
-    /// <summary>Whether a mention of this role will actually notify its members.</summary>
-    private bool CanPing(IRole role) => role.IsMentionable || Context.Guild.CurrentUser.GuildPermissions.MentionEveryone;
-
-    private IRole? FindPingRole()
-    {
-        var name = PingRoleName;
-        return name.Length == 0
-            ? null
-            : Context.Guild.Roles.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-    }
+    private IRole? FindPingRole() => _poster.FindPingRole(Context.Guild);
 
     private static LfgDetails ToDetails(PlaylistChoice playlist, RankChoice? rank, bool? mic, PlatformChoice platform)
         => new(

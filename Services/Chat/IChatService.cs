@@ -26,4 +26,10 @@ public interface IChatService
     /// <exception cref="ChatServiceException">The backend failed or returned nothing usable.</exception>
     Task<string> ReplyAsync(string systemPrompt, IReadOnlyList<ChatTurn> conversation,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Asks for an answer that matches <paramref name="jsonSchema"/> (a JSON Schema object) and returns the
+    /// raw JSON. Deterministic (temperature 0), for classifying and extracting rather than chatting.</summary>
+    /// <exception cref="ChatServiceException">The backend failed or returned nothing usable.</exception>
+    Task<string> CompleteJsonAsync(string systemPrompt, string userMessage, string jsonSchema,
+        CancellationToken cancellationToken = default);
 }
