@@ -82,6 +82,23 @@ public sealed class ReminderServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Cannot_cancel_a_reminder_mid_delivery_and_a_cancel_first_stops_delivery()
+    {
+        var sending = (await _service.CreateAsync(1, 10, 100, "1h", "being sent", true)).Reminder!;
+        var now = DateTimeOffset.UtcNow;
+
+        // Delivery claims it: a cancel now is refused rather than falsely reported as done.
+        Assert.True(await _temp.Store.TryClaimAsync(sending.Id, now, now.AddMinutes(2)));
+        Assert.False(await _temp.Store.TryClaimAsync(sending.Id, now, now.AddMinutes(2))); // only one delivery wins
+        Assert.False((await _service.CancelAsync(1, 100, sending.Id)).Success);
+
+        // Cancelled first: the delivery's claim fails, so nothing is sent.
+        var cancelled = (await _service.CreateAsync(1, 10, 100, "2h", "cancel me", true)).Reminder!;
+        Assert.True((await _service.CancelAsync(1, 100, cancelled.Id)).Success);
+        Assert.False(await _temp.Store.TryClaimAsync(cancelled.Id, now, now.AddMinutes(2)));
+    }
+
+    [Fact]
     public async Task Survives_a_reload()
     {
         await _service.CreateAsync(1, 10, 100, "1h", "persisted", true);

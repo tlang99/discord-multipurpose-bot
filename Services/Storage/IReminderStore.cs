@@ -13,6 +13,17 @@ public enum ReminderAddResult
     LimitReached,
 }
 
+public enum ReminderCancelResult
+{
+    Cancelled,
+
+    /// <summary>No such reminder, or it isn't theirs.</summary>
+    NotFound,
+
+    /// <summary>It's being delivered right now, so cancelling would be a lie.</summary>
+    InFlight,
+}
+
 public interface IReminderStore
 {
     /// <summary>Adds the reminder unless its ID is taken or the user is at <paramref name="maxPerUser"/>, checked and
@@ -22,14 +33,22 @@ public interface IReminderStore
     /// <summary>The user's pending reminders in a server, soonest first.</summary>
     Task<IReadOnlyList<Reminder>> GetForUserAsync(ulong guildId, ulong userId);
 
-    /// <summary>Reminders to deliver now: due, and not waiting out a retry back-off. Soonest first.</summary>
+    /// <summary>Reminders to deliver now: due, not waiting out a retry back-off, and not being delivered already.
+    /// Soonest first.</summary>
     Task<IReadOnlyList<Reminder>> GetDueAsync(DateTimeOffset now);
 
-    Task<bool> ExistsAsync(string id);
+    /// <summary>Marks a reminder as being delivered until <paramref name="claimUntil"/>. False if it's gone or another
+    /// delivery holds an unexpired claim. Checked and set in one step, so only one delivery can win.</summary>
+    Task<bool> TryClaimAsync(string id, DateTimeOffset now, DateTimeOffset claimUntil);
+
+    /// <summary>Removes the user's reminder unless it's being delivered right now, checked in one step with the
+    /// delivery's claim. Returns the removed reminder on success.</summary>
+    Task<(ReminderCancelResult Result, Reminder? Reminder)> TryCancelAsync(string id, ulong guildId, ulong userId,
+        DateTimeOffset now);
 
     /// <summary>Changes a stored reminder; false if it's gone.</summary>
     Task<bool> UpdateAsync(string id, Action<Reminder> update);
 
-    /// <summary>Removes a reminder; false if it was already gone (delivered or cancelled).</summary>
+    /// <summary>Removes a reminder; false if it was already gone.</summary>
     Task<bool> RemoveAsync(string id);
 }

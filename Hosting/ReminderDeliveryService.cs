@@ -31,6 +31,9 @@ public class ReminderDeliveryService : BackgroundService
 
     private static readonly TimeSpan GiveUpAfter = TimeSpan.FromDays(1);
 
+    /// <summary>How long a delivery holds its claim: longer than a send (channel plus DM fallback) takes.</summary>
+    private static readonly TimeSpan ClaimFor = TimeSpan.FromMinutes(2);
+
     private readonly DiscordSocketClient _client;
     private readonly IReminderStore _store;
     private readonly ILogger<ReminderDeliveryService> _logger;
@@ -93,16 +96,19 @@ public class ReminderDeliveryService : BackgroundService
 
     private async Task DeliverAsync(Reminder reminder)
     {
-        // Cancelled since the list was read? Then don't send it.
-        if (!await _store.ExistsAsync(reminder.Id))
+        // Claim it in one step with the existence check: a cancel from now on is told it's too late, and one that got
+        // in first means this fails and nothing is sent. The claim expires, so a crash mid-send means a retry.
+        var now = DateTimeOffset.UtcNow;
+        if (!await _store.TryClaimAsync(reminder.Id, now, now + ClaimFor))
         {
             return;
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var late = now - reminder.DueAt > LateAfter
-            ? $"\n-# This was due {ReminderService.Relative(reminder.DueAt)} - I was offline then."
-            : "";
+        // Only a first attempt that's late means the bot was offline; a retried one was late because sending failed.
+        var late = now - reminder.DueAt <= LateAfter ? ""
+            : reminder.Attempts == 0
+                ? $"\n-# This was due {ReminderService.Relative(reminder.DueAt)} - I was offline then."
+                : $"\n-# This was due {ReminderService.Relative(reminder.DueAt)}.";
 
         // Send first, remove after. If the bot stops in between, the reminder is sent again on restart (marked late),
         // which beats losing it.
@@ -126,6 +132,7 @@ public class ReminderDeliveryService : BackgroundService
         {
             r.Attempts = attempts;
             r.NextAttemptAt = now + gap;
+            r.ClaimedUntil = null; // cancellable again while it waits
         });
         _logger.LogInformation("Couldn't deliver reminder {Id}; trying again in {Minutes} minutes (attempt {Attempt}).",
             reminder.Id, (int)gap.TotalMinutes, attempts);

@@ -135,13 +135,15 @@ public class ReminderService
     public async Task<ReminderResult> CancelAsync(ulong guildId, ulong userId, string id)
     {
         id = id.Trim().ToLowerInvariant();
-        var reminder = (await _store.GetForUserAsync(guildId, userId)).FirstOrDefault(r => r.Id == id);
-        if (reminder is null || !await _store.RemoveAsync(id))
-        {
-            return new(false, $"You don't have a reminder `{id}` here - check `/reminders list`.");
-        }
 
-        return new(true, $"Cancelled `{id}`: {reminder.Text}", reminder);
+        // Checked in one step with the delivery's claim, so "cancelled" is never said about a reminder mid-send.
+        var (result, reminder) = await _store.TryCancelAsync(id, guildId, userId, DateTimeOffset.UtcNow);
+        return result switch
+        {
+            ReminderCancelResult.Cancelled => new(true, $"Cancelled `{id}`: {reminder!.Text}", reminder),
+            ReminderCancelResult.InFlight => new(false, $"`{id}` is being delivered right now, so it's too late to cancel."),
+            _ => new(false, $"You don't have a reminder `{id}` here - check `/reminders list`."),
+        };
     }
 
     /// <summary>Discord timestamp markup: shown to each viewer in their own time zone.</summary>

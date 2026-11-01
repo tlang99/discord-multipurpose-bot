@@ -27,4 +27,8 @@ public class Reminder
 
     /// <summary>After a failed delivery, when to try again (backing off). Null until the first failure.</summary>
     public DateTimeOffset? NextAttemptAt { get; set; }
+
+    /// <summary>Set while a delivery is sending it, so a cancel can't report success for a reminder that's about to
+    /// arrive anyway. It expires on its own, so a crash mid-send just means a retry.</summary>
+    public DateTimeOffset? ClaimedUntil { get; set; }
 }
