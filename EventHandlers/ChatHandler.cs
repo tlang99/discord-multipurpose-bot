@@ -9,6 +9,7 @@ using ModBot.Modules.Lfg;
 using ModBot.Modules.Music;
 using ModBot.Services.Chat;
 using ModBot.Services.Moderation;
+using ModBot.Services.Reminders;
 using ModBot.Services.Storage;
 
 namespace ModBot.EventHandlers;
@@ -29,14 +30,16 @@ public partial class ChatHandler
         "Whatever your personality, always follow these rules: Keep answers short: usually a few sentences, and well " +
         "under 1,500 characters unless someone asks for detail. Reply only as yourself, in your own words. Never " +
         "start your reply with a name and a colon, and never write lines for anyone else. Use Discord markdown " +
-        "sparingly. Never write @everyone or @here, and don't try to ping people. Never claim you played a song or " +
-        "posted an LFG: those requests are handled separately, so if someone asks how, tell them to ask you directly " +
-        "(e.g. \"play <song>\" or \"make an LFG for ranked\") or see /help.";
+        "sparingly. Never write @everyone or @here, and don't try to ping people. Never claim you played a song, " +
+        "posted an LFG or set a reminder: those requests are handled separately, so if someone asks how, tell them " +
+        "to ask you directly (e.g. \"play <song>\", \"make an LFG for ranked\" or \"remind me in 20 minutes to check " +
+        "the oven\" - reminders need a time) or see /help.";
 
     private readonly IChatService _chat;
     private readonly ChatActionParser _actionParser;
     private readonly MusicService _music;
     private readonly LfgPoster _lfgPoster;
+    private readonly ReminderService _reminders;
     private readonly IGuildSettingsStore _settingsStore;
     private readonly ChatPersonality _personality;
     private readonly ChatOptions _options;
@@ -44,6 +47,7 @@ public partial class ChatHandler
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
 
     public ChatHandler(IChatService chat, ChatActionParser actionParser, MusicService music, LfgPoster lfgPoster,
+        ReminderService reminders,
         IGuildSettingsStore settingsStore, ChatPersonality personality, IOptions<ChatOptions> options,
         ILogger<ChatHandler> logger)
     {
@@ -51,6 +55,7 @@ public partial class ChatHandler
         _actionParser = actionParser;
         _music = music;
         _lfgPoster = lfgPoster;
+        _reminders = reminders;
         _settingsStore = settingsStore;
         _personality = personality;
         _options = options.Value;
@@ -144,7 +149,8 @@ public partial class ChatHandler
                 var suppressEmbeds = false;
                 try
                 {
-                    (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)message.Author, channel);
+                    (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)message.Author, channel,
+                        message.Id);
                 }
                 catch (Exception ex)
                 {
@@ -186,12 +192,13 @@ public partial class ChatHandler
     }
 
     /// <summary>
-    /// Does what the message asked, as the person who asked, through the same code as /play and /lfg (so the same
-    /// rules apply: in a voice channel to play, one open LFG each). Music and LFG posts go to their own channels
-    /// wherever the request was made. Returns the reply, and whether to hide link previews in it.
+    /// Does what the message asked, as the person who asked, through the same code as /play, /lfg and /remind (so the
+    /// same rules apply: in a voice channel to play, one open LFG each, the reminder limits). Music and LFG posts go to
+    /// their own channels wherever the request was made; reminders are delivered here, replying to the request.
+    /// Returns the reply, and whether to hide link previews in it.
     /// </summary>
     private async Task<(string Text, bool SuppressEmbeds)> RunActionAsync(ChatAction action, SocketGuildUser asker,
-        SocketTextChannel channel)
+        SocketTextChannel channel, ulong requestMessageId)
     {
         var guild = channel.Guild;
         switch (action)
@@ -234,6 +241,20 @@ public partial class ChatHandler
                     ? ($"{result.Message}\n[Go to your LFG in #{lfgChannel.Name}]({result.CardLink}) - use `/lfg` " +
                        "if you want to add a note.", true)
                     : (result.Message, false);
+            }
+
+            case SetReminderAction reminder:
+            {
+                if (reminder.Text.Length == 0)
+                {
+                    return ("What should I remind you about? Try \"remind me in 20 minutes to check the oven\".", false);
+                }
+
+                // Same exemption as auto-mod: moderators aren't held to the word filter.
+                var result = await _reminders.CreateAtAsync(guild.Id, channel.Id, asker.Id, reminder.DueAt,
+                    reminder.Text, applyWordFilter: !asker.GuildPermissions.ManageMessages,
+                    sourceMessageId: requestMessageId);
+                return (result.Message, false);
             }
 
             case UnclearSongAction:

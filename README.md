@@ -164,6 +164,10 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
   - **Details:** the model turns requests like "put on some lofi beats" into a search, and YouTube links are used as
     written. LFG details (squad size, mode, rank, mic, PC/console only) are read with fixed keyword rules, because the
     small model invented details. Notes aren't read from chat; use `/lfg` for those.
+  - **Reminders:** "@bot remind me in 20 minutes to check the oven" sets a reminder like `/remind`, with the same
+    limits, delivered as a reply to that message. It's recognised without the model: a reminder phrase ("remind me",
+    "set a reminder", "ping me") plus a time the reminder parser understands. Without a time ("remind me to eat") it's
+    just chat, and the bot explains how to ask. Adding reminders to the model's check made it worse at the others.
   - **Turning it off:** `Chat:Actions: false`. Each mention then skips the extra check and just chats.
 - Turn the feature off with `Chat:Enabled: false`.
 

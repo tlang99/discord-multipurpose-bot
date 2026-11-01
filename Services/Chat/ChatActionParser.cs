@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using ModBot.Models;
+using ModBot.Services.Reminders;
 
 namespace ModBot.Services.Chat;
 
@@ -16,8 +17,12 @@ public record CreateLfgAction(int Players, LfgDetails Details) : ChatAction;
 /// <summary>The message asked for music, but which song couldn't be worked out.</summary>
 public record UnclearSongAction : ChatAction;
 
+/// <param name="Text">What to remind about; empty if the message didn't say ("remind me in 10 minutes").</param>
+public record SetReminderAction(DateTimeOffset DueAt, string Text) : ChatAction;
+
 /// <summary>
-/// Works out whether a chat message is asking the bot to play music or post an LFG, and with what details.
+/// Works out whether a chat message is asking the bot to play music, post an LFG or set a reminder, and with what
+/// details.
 /// </summary>
 /// <remarks>
 /// Decided by testing against llama3.2:
@@ -29,6 +34,8 @@ public record UnclearSongAction : ChatAction;
 /// from the message as written, since the model rewrote them into song names.</item>
 /// <item>LFG details: <see cref="LfgRequestReader"/>'s keyword rules, since the model invented ranks and mic rules
 /// nobody asked for.</item>
+/// <item>Reminders: <see cref="ReminderRequestReader"/>, checked before the model is asked anything. Adding them as a
+/// fourth answer to the request check made the model worse at the other three.</item>
 /// </list>
 /// Only ever sees the asker's own message, never the channel history, so nothing someone else wrote earlier can make
 /// the bot act. No Discord types: running the action is the caller's job.
@@ -53,11 +60,13 @@ public partial class ChatActionParser
         "didn't ask for.";
 
     private readonly IChatService _chat;
+    private readonly ReminderService _reminders;
     private readonly ILogger<ChatActionParser> _logger;
 
-    public ChatActionParser(IChatService chat, ILogger<ChatActionParser> logger)
+    public ChatActionParser(IChatService chat, ReminderService reminders, ILogger<ChatActionParser> logger)
     {
         _chat = chat;
+        _reminders = reminders;
         _logger = logger;
     }
 
@@ -65,6 +74,12 @@ public partial class ChatActionParser
     /// reached, so the caller falls back to chatting).</summary>
     public async Task<ChatAction?> ParseAsync(string message, CancellationToken cancellationToken = default)
     {
+        // A reminder phrase plus a time is unambiguous, so it's settled without the model.
+        if (ReminderRequestReader.Read(message, DateTimeOffset.UtcNow, _reminders.TimeZone) is { } reminder)
+        {
+            return new SetReminderAction(reminder.Time.DueAt, reminder.Text);
+        }
+
         string kind;
         try
         {
