@@ -2,7 +2,7 @@ namespace ModBot.Services.Moderation;
 
 /// <summary>
 /// A small curated list of common English profanity, used as the built-in text filter
-/// (toggled per-guild via <c>/automod enable</c> on <see cref="Models.GuildSettings.ProfanityFilterEnabled"/>).
+/// (toggled per-guild via <c>/automod profanity-filter</c> on <see cref="Models.GuildSettings.ProfanityFilterEnabled"/>).
 /// It is deliberately conservative and generic — slurs or community-specific terms should
 /// be added per-guild via <c>/automod word-add</c> instead of growing this list, since what
 /// counts as a slur or how aggressively to filter varies a lot by community.

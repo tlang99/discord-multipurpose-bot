@@ -20,6 +20,11 @@ public class ModerationService : IModerationService
 
     public async Task<ModerationResult> KickAsync(IGuildUser target, IUser moderator, string reason)
     {
+        if (await GetHierarchyProblemAsync(target.Guild, target.Id, moderator, "kick") is { } problem)
+        {
+            return ModerationResult.Fail(problem);
+        }
+
         try
         {
             await target.KickAsync(reason);
@@ -35,6 +40,11 @@ public class ModerationService : IModerationService
 
     public async Task<ModerationResult> BanAsync(IGuild guild, IUser target, IUser moderator, string reason, int pruneDays)
     {
+        if (await GetHierarchyProblemAsync(guild, target.Id, moderator, "ban") is { } problem)
+        {
+            return ModerationResult.Fail(problem);
+        }
+
         try
         {
             await guild.AddBanAsync(target, pruneDays, reason);
@@ -71,6 +81,11 @@ public class ModerationService : IModerationService
 
     public async Task<ModerationResult> TimeoutAsync(IGuildUser target, IUser moderator, TimeSpan duration, string reason)
     {
+        if (await GetHierarchyProblemAsync(target.Guild, target.Id, moderator, "time out") is { } problem)
+        {
+            return ModerationResult.Fail(problem);
+        }
+
         try
         {
             await target.SetTimeOutAsync(duration, new RequestOptions { AuditLogReason = reason });
@@ -86,6 +101,11 @@ public class ModerationService : IModerationService
 
     public async Task<ModerationResult> RemoveTimeoutAsync(IGuildUser target, IUser moderator, string reason)
     {
+        if (await GetHierarchyProblemAsync(target.Guild, target.Id, moderator, "remove the timeout for") is { } problem)
+        {
+            return ModerationResult.Fail(problem);
+        }
+
         try
         {
             await target.RemoveTimeOutAsync(new RequestOptions { AuditLogReason = reason });
@@ -145,6 +165,47 @@ public class ModerationService : IModerationService
         {
             _logger.LogWarning(ex, "Failed to write mod-log entry for guild {GuildId}", guild.Id);
         }
+    }
+
+    /// <summary>
+    /// Why <paramref name="moderator"/> can't act on the target, or null if they can. Discord only lets members act
+    /// on people whose highest role is below their own, but the bot's role is usually near the top, so without this
+    /// a moderator could use the bot to kick, ban or time out someone who outranks them (an admin, say).
+    /// </summary>
+    /// <param name="verb">For the message, e.g. "kick" or "time out".</param>
+    private static async Task<string?> GetHierarchyProblemAsync(IGuild guild, ulong targetId, IUser moderator, string verb)
+    {
+        if (targetId == moderator.Id)
+        {
+            return $"You can't {verb} yourself.";
+        }
+
+        var bot = await guild.GetCurrentUserAsync();
+        if (targetId == bot.Id)
+        {
+            return $"I can't {verb} myself.";
+        }
+
+        // Not in the server (e.g. banning someone who already left): there's no role to outrank. AllowDownload asks
+        // Discord when the member isn't cached, so a cache miss can't skip the check.
+        if (await guild.GetUserAsync(targetId, CacheMode.AllowDownload) is not { } target)
+        {
+            return null;
+        }
+
+        // Hierarchy is the position of the member's highest role, and int.MaxValue for the server owner.
+        if (moderator is not IGuildUser guildModerator || guildModerator.Hierarchy <= target.Hierarchy)
+        {
+            return $"You can only {verb} members whose highest role is below yours.";
+        }
+
+        if (bot.Hierarchy <= target.Hierarchy)
+        {
+            return $"I can't {verb} **{target}**: their highest role is at or above mine. Move my role higher in " +
+                   "Server Settings → Roles.";
+        }
+
+        return null;
     }
 
     private static string FormatDuration(TimeSpan duration)

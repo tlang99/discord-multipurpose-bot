@@ -34,7 +34,7 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     /// <summary>Hosts /play accepts links from (plus their subdomains, e.g. www., m., music.youtube.com).</summary>
     private static readonly string[] AllowedLinkHosts = ["youtube.com", "youtu.be"];
 
-    /// <summary>Per-server lock around changing the queue (/play, /remove, /move, /shuffle, /clearqueue). Static because a
+    /// <summary>Per-server lock around changing the queue (/play, /skip, /remove, /move, /shuffle, /clearqueue). Static because a
     /// module instance is created per command. One small entry per server that has used music; never removed.</summary>
     private static readonly ConcurrentDictionary<ulong, SemaphoreSlim> EnqueueLocks = new();
 
@@ -231,9 +231,21 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        var skipped = player.CurrentTrack;
-        count = Math.Min(count, player.Queue.Count + 1);
-        await player.SkipAsync(count);
+        // Under the queue lock, so a /play or /remove at the same moment can't change the queue between counting it
+        // and skipping.
+        LavalinkTrack? skipped;
+        var queueLock = await AcquireQueueLockAsync();
+        try
+        {
+            skipped = player.CurrentTrack;
+            count = Math.Min(count, player.Queue.Count + 1);
+            await player.SkipAsync(count);
+        }
+        finally
+        {
+            queueLock.Release();
+        }
+
 
         var what = count == 1 ? MusicFormatting.TrackLink(skipped) : $"**{count}** songs";
         var next = player.CurrentTrack is { } current ? $" Now playing {MusicFormatting.TrackLink(current)}." : " The queue is empty.";

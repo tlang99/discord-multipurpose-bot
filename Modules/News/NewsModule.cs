@@ -14,6 +14,7 @@ namespace ModBot.Modules.News;
 public partial class NewsModule : InteractionModuleBase<SocketInteractionContext>
 {
     private const int MaxSubscriptionsPerGuild = 10;
+    private const int MaxKeywordsPerList = 100;
 
     private readonly INewsSubscriptionStore _store;
     private readonly INewsFeedReader _feedReader;
@@ -79,31 +80,35 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
             return;
         }
 
-        var subscription = await _store.GetAsync(Context.Guild.Id, name.Trim());
-        if (subscription is null)
+        string? problem = null;
+        var feedName = name.Trim();
+        var found = await _store.UpdateAsync(Context.Guild.Id, feedName, subscription =>
+        {
+            feedName = subscription.Name;
+            var list = type == FilterKind.Include ? subscription.IncludeKeywords : subscription.ExcludeKeywords;
+            if (list.Contains(keyword))
+            {
+                problem = $"`{keyword}` is already on that list.";
+            }
+            else if (list.Count >= MaxKeywordsPerList)
+            {
+                problem = $"That list is full ({MaxKeywordsPerList} keywords).";
+            }
+            else
+            {
+                list.Add(keyword);
+            }
+        });
+
+        if (!found)
         {
             await RespondAsync("No followed feed has that name - check `/news list`.", ephemeral: true);
             return;
         }
 
-        var list = type == FilterKind.Include ? subscription.IncludeKeywords : subscription.ExcludeKeywords;
-        if (list.Contains(keyword))
-        {
-            await RespondAsync($"`{keyword}` is already on that list.", ephemeral: true);
-            return;
-        }
-
-        if (list.Count >= 100)
-        {
-            await RespondAsync("That list is full (100 keywords).", ephemeral: true);
-            return;
-        }
-
-        list.Add(keyword);
-        await _store.SaveAsync(subscription);
-        await RespondAsync(type == FilterKind.Include
-            ? $"**{subscription.Name}** will now also post articles with `{keyword}` in the headline."
-            : $"**{subscription.Name}** will now skip articles with `{keyword}` in the headline.", ephemeral: true);
+        await RespondAsync(problem ?? (type == FilterKind.Include
+            ? $"**{feedName}** will now also post articles with `{keyword}` in the headline."
+            : $"**{feedName}** will now skip articles with `{keyword}` in the headline."), ephemeral: true);
     }
 
     [SlashCommand("filter-remove", "Removes a keyword from a feed's filter.")]
@@ -112,23 +117,30 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
         [Summary(description: "The keyword to remove")] string keyword)
     {
         keyword = keyword.Trim().ToLowerInvariant();
-        var subscription = await _store.GetAsync(Context.Guild.Id, name.Trim());
-        if (subscription is null)
+        var removed = false;
+        var noIncludesLeft = false;
+        var feedName = name.Trim();
+        var found = await _store.UpdateAsync(Context.Guild.Id, feedName, subscription =>
+        {
+            feedName = subscription.Name;
+            removed = subscription.IncludeKeywords.Remove(keyword) | subscription.ExcludeKeywords.Remove(keyword);
+            noIncludesLeft = subscription.IncludeKeywords.Count == 0;
+        });
+
+        if (!found)
         {
             await RespondAsync("No followed feed has that name - check `/news list`.", ephemeral: true);
             return;
         }
 
-        var removed = subscription.IncludeKeywords.Remove(keyword) | subscription.ExcludeKeywords.Remove(keyword);
         if (!removed)
         {
             await RespondAsync($"`{keyword}` isn't in that feed's filter - check `/news filter-show`.", ephemeral: true);
             return;
         }
 
-        await _store.SaveAsync(subscription);
-        await RespondAsync($"Removed `{keyword}` from **{subscription.Name}**'s filter." +
-            (subscription.IncludeKeywords.Count == 0 ? " (No include keywords left, so every article will be posted.)" : ""),
+        await RespondAsync($"Removed `{keyword}` from **{feedName}**'s filter." +
+            (noIncludesLeft ? " (No include keywords left, so every article will be posted.)" : ""),
             ephemeral: true);
     }
 
@@ -261,26 +273,31 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
             return;
         }
 
-        var subscription = existing ?? new NewsSubscription { GuildId = Context.Guild.Id, Name = name };
-        subscription.FeedUrl = feedUrl;
-        subscription.ChannelId = channel.Id;
-
-        // Apply the preset's default filter to new subscriptions, and to existing ones that have no filter yet -
-        // but never overwrite keywords a server has customised.
-        if (preset is not null && subscription.IncludeKeywords.Count == 0 && subscription.ExcludeKeywords.Count == 0)
+        var created = false;
+        var hasIncludes = false;
+        await _store.UpsertAsync(Context.Guild.Id, name, (subscription, isNew) =>
         {
-            subscription.IncludeKeywords = preset.IncludeKeywords.ToList();
-            subscription.ExcludeKeywords = preset.ExcludeKeywords.ToList();
-        }
+            created = isNew;
+            subscription.FeedUrl = feedUrl;
+            subscription.ChannelId = channel.Id;
 
-        await _store.SaveAsync(subscription);
-        await _store.MarkSeenAsync(Context.Guild.Id, name, articles.Select(a => a.Id));
+            // Apply the preset's default filter to new subscriptions, and to existing ones that have no filter yet -
+            // but never overwrite keywords a server has customised.
+            if (preset is not null && subscription.IncludeKeywords.Count == 0 && subscription.ExcludeKeywords.Count == 0)
+            {
+                subscription.IncludeKeywords = preset.IncludeKeywords.ToList();
+                subscription.ExcludeKeywords = preset.ExcludeKeywords.ToList();
+            }
 
-        var verb = existing is null ? "Now following" : "Updated";
+            // In the same save as creating it, so a poll can't run in between and post these as new.
+            subscription.MarkSeen(articles.Select(a => a.Id));
+            hasIncludes = subscription.IncludeKeywords.Count > 0;
+        });
+
         await FollowupAsync(
-            $"{verb} **{displayName}** - new articles will be posted in {channel.Mention}. " +
+            $"{(created ? "Now following" : "Updated")} **{displayName}** - new articles will be posted in {channel.Mention}. " +
             $"Use `/news latest {name}` to see what's out right now" +
-            (subscription.IncludeKeywords.Count > 0 ? $", and `/news filter-show {name}` to see what gets posted." : "."),
+            (hasIncludes ? $", and `/news filter-show {name}` to see what gets posted." : "."),
             ephemeral: true);
     }
 

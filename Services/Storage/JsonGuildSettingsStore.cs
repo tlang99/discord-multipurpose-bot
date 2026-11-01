@@ -17,6 +17,16 @@ public class JsonGuildSettingsStore : IGuildSettingsStore
         return settings ?? new GuildSettings { GuildId = guildId };
     }
 
-    public Task SaveAsync(GuildSettings settings)
-        => _repository.SetAsync(settings.GuildId.ToString(), settings);
+    public Task UpdateAsync(ulong guildId, Action<GuildSettings> update)
+        => _repository.MutateAsync(data =>
+        {
+            var key = guildId.ToString();
+            if (!data.TryGetValue(key, out var settings))
+            {
+                settings = new GuildSettings { GuildId = guildId };
+                data[key] = settings;
+            }
+
+            update(settings);
+        });
 }

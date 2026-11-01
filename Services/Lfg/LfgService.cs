@@ -99,6 +99,11 @@ public class LfgService : ILfgService
                 return Missing(postId);
             }
 
+            if (post.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                return Expired();
+            }
+
             if (post.Members.Contains(userId))
             {
                 return new(LfgOutcome.AlreadyJoined, Snapshot(post));
@@ -129,6 +134,11 @@ public class LfgService : ILfgService
                 return Missing(postId);
             }
 
+            if (post.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                return Expired();
+            }
+
             if (userId == post.HostId)
             {
                 return new(LfgOutcome.HostCantLeave, Snapshot(post));
@@ -147,6 +157,11 @@ public class LfgService : ILfgService
             if (!_posts.TryGetValue(postId, out var post))
             {
                 return Missing(postId);
+            }
+
+            if (post.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                return Expired();
             }
 
             if (userId != post.HostId)
@@ -171,6 +186,11 @@ public class LfgService : ILfgService
             if (!_posts.TryGetValue(postId, out var post))
             {
                 return Missing(postId);
+            }
+
+            if (post.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                return Expired();
             }
 
             if (userId != post.HostId && !isModerator)
@@ -218,6 +238,13 @@ public class LfgService : ILfgService
     /// <summary>Call with the lock held.</summary>
     private LfgResult Missing(Guid postId)
         => new(_closedAt.ContainsKey(postId) ? LfgOutcome.AlreadyClosed : LfgOutcome.NotFound, null);
+
+    /// <summary>
+    /// For a click on a post past its expiry time that the 30-second sweep hasn't closed yet. Without this, joining in
+    /// that window could still fill the squad and ping everyone. The post is left for the sweep, which marks its card
+    /// as expired; the clicker is told it's closed.
+    /// </summary>
+    private static LfgResult Expired() => new(LfgOutcome.AlreadyClosed, null);
 
     /// <summary>A copy for callers to read outside the lock, so they never see the member list mid-change.</summary>
     private static LfgPost Snapshot(LfgPost post) => new()
