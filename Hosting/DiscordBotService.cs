@@ -22,6 +22,7 @@ public class DiscordBotService : BackgroundService
     private readonly InteractionService _interactions;
     private readonly IServiceProvider _services;
     private readonly AutoModerationHandler _autoModerationHandler;
+    private readonly ChatHandler _chatHandler;
     private readonly BotOptions _options;
     private readonly ILogger<DiscordBotService> _logger;
 
@@ -30,6 +31,7 @@ public class DiscordBotService : BackgroundService
         InteractionService interactions,
         IServiceProvider services,
         AutoModerationHandler autoModerationHandler,
+        ChatHandler chatHandler,
         IOptions<BotOptions> options,
         ILogger<DiscordBotService> logger)
     {
@@ -37,6 +39,7 @@ public class DiscordBotService : BackgroundService
         _interactions = interactions;
         _services = services;
         _autoModerationHandler = autoModerationHandler;
+        _chatHandler = chatHandler;
         _options = options.Value;
         _logger = logger;
     }
@@ -174,6 +177,19 @@ public class DiscordBotService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unhandled exception in auto-moderation handler.");
+            }
+        });
+
+        // Separately, since waiting on the AI can take many seconds and mustn't hold up auto-mod.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _chatHandler.HandleMessageAsync(message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unhandled exception in chat handler.");
             }
         });
 

@@ -24,10 +24,6 @@ namespace ModBot.EventHandlers;
 /// </summary>
 public class AutoModerationHandler
 {
-    private static readonly Regex InviteLinkRegex = new(
-        @"(discord\.gg|discord(?:app)?\.com/invite)/\S+",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
     private static readonly Regex DirectImageUrlRegex = new(
         @"https?://\S+\.(?:png|jpe?g|gif|webp)(?:\?\S*)?",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -83,7 +79,7 @@ public class AutoModerationHandler
             return;
         }
 
-        var violationReason = DetermineTextViolation(message.Content, settings.BannedWords, settings.ProfanityFilterEnabled, settings.BlockInviteLinks);
+        var violationReason = TextFilter.FindViolation(message.Content, settings);
 
         if (violationReason is null &&
             settings.ImageModerationEnabled &&
@@ -128,34 +124,6 @@ public class AutoModerationHandler
         }
     }
 
-    private static string? DetermineTextViolation(
-        string content, IReadOnlyCollection<string> bannedWords, bool profanityFilterEnabled, bool blockInvites)
-    {
-        if (blockInvites && InviteLinkRegex.IsMatch(content))
-        {
-            return "contained a server invite link";
-        }
-
-        var normalizedContent = TextNormalizer.Normalize(content);
-
-        if (bannedWords.Count > 0 && bannedWords.Any(word => ContainsNormalized(normalizedContent, word)))
-        {
-            return "contained a banned word or phrase";
-        }
-
-        if (profanityFilterEnabled && ProfanityWordList.Default.Any(word => ContainsNormalized(normalizedContent, word)))
-        {
-            return "contained profanity";
-        }
-
-        return null;
-    }
-
-    private static bool ContainsNormalized(string normalizedContent, string word)
-    {
-        var normalizedWord = TextNormalizer.Normalize(word);
-        return normalizedWord.Length > 0 && normalizedContent.Contains(normalizedWord, StringComparison.Ordinal);
-    }
 
     private async Task<string?> DetermineImageViolationAsync(SocketUserMessage message, Models.GuildSettings settings)
     {

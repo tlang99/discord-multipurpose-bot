@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using ModBot.Configuration;
 using ModBot.EventHandlers;
 using ModBot.Hosting;
+using ModBot.Services.Chat;
 using ModBot.Services.ContentModeration;
 using ModBot.Services.Lfg;
 using ModBot.Services.Moderation;
@@ -22,6 +24,10 @@ var builder = Host.CreateApplicationBuilder(args);
 // appsettings.{Environment}.json, environment variables, and command-line args.
 // User secrets need to be added explicitly so a token works outside Development too.
 builder.Configuration.AddUserSecrets<BotOptions>(optional: true);
+
+// appsettings.json is not committed (it holds each person's own settings); the template is appsettings.example.json.
+// Without it the bot still runs on the built-in defaults, but say so in case the copy step was missed.
+var missingAppSettings = !File.Exists(Path.Combine(builder.Environment.ContentRootPath, "appsettings.json"));
 
 // Allow plain env vars as a convenient alternative to the Section__Key syntax.
 var envToken = Environment.GetEnvironmentVariable("BOT_TOKEN");
@@ -48,7 +54,15 @@ if (!string.IsNullOrWhiteSpace(envLavalinkPassword))
     builder.Configuration[$"{MusicOptions.SectionName}:LavalinkPassword"] = envLavalinkPassword;
 }
 
+// Ollama's own name for the variable, so a key already set up for the Ollama CLI works here too.
+var envOllamaKey = Environment.GetEnvironmentVariable("OLLAMA_API_KEY");
+if (!string.IsNullOrWhiteSpace(envOllamaKey))
+{
+    builder.Configuration[$"{ChatOptions.SectionName}:ApiKey"] = envOllamaKey;
+}
+
 builder.Services.Configure<BotOptions>(builder.Configuration.GetSection(BotOptions.SectionName));
+builder.Services.Configure<ChatOptions>(builder.Configuration.GetSection(ChatOptions.SectionName));
 builder.Services.Configure<SightengineOptions>(builder.Configuration.GetSection(SightengineOptions.SectionName));
 builder.Services.Configure<NewsOptions>(builder.Configuration.GetSection(NewsOptions.SectionName));
 builder.Services.Configure<MusicOptions>(builder.Configuration.GetSection(MusicOptions.SectionName));
@@ -87,6 +101,7 @@ builder.Services.AddSingleton(provider => new InteractionService(
 builder.Services.AddSingleton<IGuildSettingsStore, JsonGuildSettingsStore>();
 builder.Services.AddSingleton<IWarningStore, JsonWarningStore>();
 builder.Services.AddSingleton<INewsSubscriptionStore, JsonNewsSubscriptionStore>();
+builder.Services.AddSingleton<IChatSettingsStore, JsonChatSettingsStore>();
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();
 
@@ -124,7 +139,24 @@ builder.Services.ConfigureInactivityTracking(options =>
     options.DefaultTimeout = TimeSpan.FromSeconds(Math.Max(10, musicOptions.IdleTimeoutSeconds));
 });
 
+// Chatbot: Ollama (ollama.com or self-hosted, see Chat:OllamaUrl) behind IChatService.
+var chatOptions = builder.Configuration.GetSection(ChatOptions.SectionName).Get<ChatOptions>() ?? new ChatOptions();
+builder.Services.AddHttpClient<IChatService, OllamaChatService>(client =>
+{
+    if (Uri.TryCreate(chatOptions.OllamaUrl.TrimEnd('/') + "/", UriKind.Absolute, out var ollamaUri))
+    {
+        client.BaseAddress = ollamaUri;
+    }
+
+    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(chatOptions.TimeoutSeconds, 5, 300));
+    if (!string.IsNullOrWhiteSpace(chatOptions.ApiKey))
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", chatOptions.ApiKey);
+    }
+});
+
 builder.Services.AddSingleton<AutoModerationHandler>();
+builder.Services.AddSingleton<ChatHandler>();
 
 builder.Services.AddHostedService<DiscordBotService>();
 builder.Services.AddHostedService<NewsPollingService>();
@@ -141,6 +173,23 @@ if (musicOptions.LavalinkPassword == new MusicOptions().LavalinkPassword &&
         "Lavalink at {Url} is not on this machine but still uses the default password. Set the same new password " +
         "with LAVALINK_SERVER_PASSWORD for Lavalink and LAVALINK_PASSWORD for the bot (see lavalink/README.md).",
         musicOptions.LavalinkUrl);
+}
+
+if (missingAppSettings)
+{
+    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot").LogWarning(
+        "No appsettings.json found in {Path}, so the built-in defaults are used. Copy appsettings.example.json to " +
+        "appsettings.json to change settings.", builder.Environment.ContentRootPath);
+}
+
+if (chatOptions.IsEnabled &&
+    Uri.TryCreate(chatOptions.OllamaUrl, UriKind.Absolute, out var ollamaUrl) &&
+    ollamaUrl.Host.EndsWith("ollama.com", StringComparison.OrdinalIgnoreCase) &&
+    string.IsNullOrWhiteSpace(chatOptions.ApiKey))
+{
+    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Chat").LogWarning(
+        "The chatbot uses {Url} but no API key is set, so every reply will fail. Create one at " +
+        "https://ollama.com/settings/keys and set it with OLLAMA_API_KEY (see README).", chatOptions.OllamaUrl);
 }
 
 await host.RunAsync();

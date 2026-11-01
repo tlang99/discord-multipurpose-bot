@@ -24,7 +24,7 @@ order:
    in a message, are sent to [Sightengine](https://sightengine.com) for classification. Independently togglable:
    explicit content, suggestive-but-not-explicit content, and offensive content (hate symbols, obscene gestures)
    — see `/automod image-moderation`, `block-explicit-images`, `block-suggestive-images`, `block-offensive-images`,
-   and `scan-nsfw-channels`. Requires Sightengine API credentials (see Setup step 3) — without them this check is
+   and `scan-nsfw-channels`. Requires Sightengine API credentials (see Setup step 4) — without them this check is
    skipped entirely.
    > **Known gap:** pasting a Tenor/Giphy link gets re-encoded by Discord into a video (mp4) embed, which this
    > endpoint can't read, so those aren't scanned yet. Covering that would mean hooking the `MessageUpdated` event
@@ -101,6 +101,26 @@ they work in), visible only to them. `/help-post` (Manage Server) posts the same
 pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
 change, delete the old post and run `/help-post` again.
 
+**AI chat** — mention the bot in a message (or reply to one of its messages) and it answers, using a model served
+by [Ollama](https://ollama.com): on the same machine by default, or Ollama's cloud (see Setup step 6).
+- It sends the last `Chat:HistoryMessages` (default 10) messages in the channel along for context, so it can follow
+  a conversation. With a local Ollama they never leave the machine; with Ollama's cloud they're sent there. Set it
+  to 0 to send only the question.
+- Questions that break the server's word filter are ignored (auto-mod removes them), and replies are checked
+  against the same filter before posting.
+- Replies never ping anyone but the person who asked, and are cut to Discord's 2000-character limit.
+- Each person can ask once every `Chat:CooldownSeconds` (default 10); too soon and the bot reacts with ⏳. At most
+  `Chat:MaxConcurrentRequests` (default 1) questions go to Ollama at once; the rest wait their turn.
+- **Personality:** `Chat:Personality` in `appsettings.json` is the default (tone, character, interests). Each server
+  can replace it without a restart:
+  - `/chat personality set` (Manage Server) opens a pop-up filled in with the current personality to edit, up to
+    1000 characters. Leaving it empty goes back to the default.
+  - `/chat personality show` shows the current one, and `/chat personality reset` goes back to the default.
+  - Server personalities are saved in `data/chat-settings.json`.
+  - The bot's ground rules always apply on top of any personality: short replies, reply only as itself, no pings,
+    point to `/help` for commands.
+- Turn the feature off with `Chat:Enabled: false`.
+
 ## Project layout
 
 ```
@@ -112,7 +132,8 @@ Services/
   ContentModeration/ IImageModerationService - image/GIF classification, implemented against Sightengine
   News/            INewsFeedReader (RSS/Atom parsing), built-in game feed presets, news embed formatting
   Lfg/             ILfgService - LFG post rules (join/leave/start/cancel/expiry), in memory, no Discord types
-EventHandlers/     Gateway event handlers (e.g. AutoModerationHandler for MessageReceived)
+  Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
+EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
   Music/           Music commands plus the Lavalink player that announces songs (Lavalink4NET does the rest)
   Lfg/             /lfg command, its button handlers, and the LFG card's embed/buttons
@@ -155,9 +176,22 @@ Swapping providers later means writing a new implementation of that interface an
    `Speak` (for music). Use the generated URL to invite the bot to your server. If the bot is already in your
    server, give its role `Connect` and `Speak` instead of re-inviting it.
 
-### 2. Configure the token
+### 2. Create your settings file
 
-Never put the real token in `appsettings.json` (it's committed to source control). Use one of:
+Settings live in `appsettings.json`, which is **not** committed, so your own values (chatbot personality, channel
+names, model) stay on your machine. The committed template is `appsettings.example.json`:
+
+```powershell
+Copy-Item appsettings.example.json appsettings.json
+```
+
+Edit `appsettings.json` from then on. When a new setting is added to the template, copy it across. Without the
+file the bot runs on built-in defaults and logs a warning at startup.
+
+### 3. Configure the token
+
+Even though `appsettings.json` isn't committed, keep the token out of it (it's easy to share by accident). Use one
+of:
 
 ```bash
 # .NET user-secrets (recommended for local dev)
@@ -177,7 +211,7 @@ dotnet user-secrets set "Bot:TestGuildId" "<your-server-id>"
 
 Remove `Bot:TestGuildId` (or leave it unset) once you're ready to register commands globally.
 
-### 3. (Optional) Configure image/GIF moderation
+### 4. (Optional) Configure image/GIF moderation
 
 Image and GIF scanning (`/automod image-moderation`) needs a [Sightengine](https://sightengine.com) account:
 
@@ -203,12 +237,32 @@ be tuned in `appsettings.json` under `Sightengine:ExplicitThreshold` / `Suggesti
 — these apply bot-wide, while which categories to actually enforce (explicit/suggestive/offensive/NSFW-channel
 exemption) is controlled per-server via `/automod`.
 
-### 4. (Optional) Set up music
+### 5. (Optional) Set up music
 
 Music needs Java and the Lavalink server. Follow [lavalink/README.md](lavalink/README.md) once, then start Lavalink
 (`java -jar Lavalink.jar` in the `lavalink/` folder) whenever you run the bot.
 
-### 5. Run it
+### 6. (Optional) Set up AI chat
+
+By default the chatbot uses Ollama running on the same machine as the bot. No account or key is needed:
+
+1. Install Ollama from [ollama.com/download](https://ollama.com/download). On Windows it runs in the background
+   (tray icon) and starts with Windows.
+2. Download the model: `ollama pull llama3.2` (about 2 GB; a 3B model that runs fine on a CPU, faster with a GPU).
+   To use a different model, pull it and set `Chat:Model` in `appsettings.json` to its name (`ollama list` shows
+   what you have).
+
+If Ollama isn't running, the bot replies that it couldn't come up with an answer and logs why; everything else keeps
+working. The first question after Ollama has been idle for a while is slower, since it loads the model into memory
+first (`Chat:TimeoutSeconds`, default 120, allows for that).
+
+**Using Ollama's cloud instead:** set `Chat:OllamaUrl` to `https://ollama.com`, set `Chat:Model` to a name from
+[ollama.com/api/tags](https://ollama.com/api/tags), and create an API key at
+[ollama.com/settings/keys](https://ollama.com/settings/keys). Set the key the same way as the bot token, with
+`dotnet user-secrets set "Chat:ApiKey" "<api-key>"` or the `OLLAMA_API_KEY` environment variable. Without a key the
+bot logs a warning at startup.
+
+### 7. Run it
 
 ```bash
 dotnet run
@@ -223,7 +277,7 @@ dotnet run
 | `/timeout`, `/untimeout` | Moderate Members | Moderate Members |
 | `/warn`, `/warnings`, `/clearwarnings` | Moderate Members | — |
 | `/purge` | Manage Messages | Manage Messages |
-| `/modlog`, `/automod` | Manage Server | — |
+| `/modlog`, `/automod`, `/chat personality` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work without being in voice; all music commands must be used in `#music`) | — |
@@ -231,6 +285,7 @@ dotnet run
 | `/lfg-setup` | Manage Server, plus Send Messages and Pin Messages in that channel | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Pin Messages to pin the panel |
 | `/help` | — | — |
 | `/help-post` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the list |
+| AI chat (mention the bot) | — | Send Messages; Read Message History for context; Add Reactions for the ⏳ cooldown hint |
 
 `/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose
 highest role is below yours (the server owner can act on anyone), and the bot's own role has to be above theirs too.
