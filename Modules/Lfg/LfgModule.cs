@@ -72,10 +72,13 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         [Summary(description: "Who can join")] PlatformChoice platform = PlatformChoice.Crossplay,
         [Summary(description: "Anything else, e.g. \"chill games, no sweats\"")] [MaxLength(MaxNoteLength)] string? note = null)
     {
+        // Acknowledge first (privately): posting the card can take long enough to miss Discord's 3-second window.
+        await DeferAsync(ephemeral: true);
+
         // A rank only means something in Ranked Play: picking one implies it, but not alongside another playlist.
         if (rank is not null && playlist is not (PlaylistChoice.Any or PlaylistChoice.RankedPlay))
         {
-            await RespondAsync("A minimum rank only applies to **Ranked Play** - pick that playlist, or leave rank empty.",
+            await FollowupAsync("A minimum rank only applies to **Ranked Play** - pick that playlist, or leave rank empty.",
                 ephemeral: true);
             return;
         }
@@ -87,7 +90,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
         if (Context.Channel is not ITextChannel channel)
         {
-            await RespondAsync("LFG posts can only go in text channels.", ephemeral: true);
+            await FollowupAsync("LFG posts can only go in text channels.", ephemeral: true);
             return;
         }
 
@@ -96,7 +99,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         {
             var lfgChannel = Context.Guild.TextChannels.FirstOrDefault(c =>
                 c.Name.Equals(lfgChannelName, StringComparison.OrdinalIgnoreCase));
-            await RespondAsync(lfgChannel is null
+            await FollowupAsync(lfgChannel is null
                     ? $"LFG posts go in **#{lfgChannelName}**, but this server doesn't have that channel yet."
                     : $"LFG posts go in {lfgChannel.Mention} - run `/lfg` there.",
                 ephemeral: true);
@@ -106,7 +109,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         var botPermissions = Context.Guild.CurrentUser.GetPermissions(channel);
         if (!botPermissions.ViewChannel || !botPermissions.SendMessages || !botPermissions.EmbedLinks)
         {
-            await RespondAsync($"I need **View Channel**, **Send Messages**, and **Embed Links** in {channel.Mention} " +
+            await FollowupAsync($"I need **View Channel**, **Send Messages**, and **Embed Links** in {channel.Mention} " +
                                "to post LFGs here.", ephemeral: true);
             return;
         }
@@ -121,16 +124,41 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             var where = post.MessageId == 0
                 ? "already"
                 : $"already ([here](https://discord.com/channels/{post.GuildId}/{post.ChannelId}/{post.MessageId}))";
-            await RespondAsync($"You {where} have an open LFG post. Start or cancel that one first.", ephemeral: true);
+            await FollowupAsync($"You {where} have an open LFG post. Start or cancel that one first.", ephemeral: true);
             return;
         }
 
-        // Ping the opt-in LFG role, if the server has one - at most once per cooldown per host.
+        // Ping the opt-in LFG role, if the server has one - at most once per cooldown per host. When it doesn't ping,
+        // say why in the host's confirmation instead of skipping silently.
         var pingRole = FindPingRole();
-        var (pingText, pingMentions) = pingRole is not null &&
-                                       _lfg.TryClaimRolePing(Context.Guild.Id, Context.User.Id, PingCooldown)
-            ? LfgMessages.RolePing(post, pingRole.Id)
-            : (null, AllowedMentions.None);
+        string? pingText = null;
+        var pingMentions = AllowedMentions.None;
+        string? pingStatus = null;
+        if (pingRole is null)
+        {
+            pingStatus = PingRoleName.Length == 0
+                ? null
+                : "No @LFG ping: pings aren't set up yet - a server admin can run `/lfg-setup`.";
+        }
+        else if (!CanPing(pingRole))
+        {
+            _logger.LogWarning("Can't ping LFG role {RoleId} in guild {GuildId}: it isn't mentionable and the bot lacks " +
+                               "Mention All Roles. Running /lfg-setup again fixes it.", pingRole.Id, Context.Guild.Id);
+            pingStatus = $"No @{pingRole.Name} ping: that role isn't mentionable. A server admin can run `/lfg-setup` " +
+                         "again to fix it.";
+        }
+        else if (!_lfg.TryClaimRolePing(Context.Guild.Id, Context.User.Id, PingCooldown))
+        {
+            pingStatus = $"No @{pingRole.Name} ping this time: your last post pinged it less than " +
+                         $"{(int)PingCooldown.TotalMinutes} minutes ago.";
+        }
+        else
+        {
+            (pingText, pingMentions) = LfgMessages.RolePing(post, pingRole.Id);
+            pingStatus = (Context.User as IGuildUser)?.RoleIds.Contains(pingRole.Id) == true
+                ? $"Pinged @{pingRole.Name} (Discord doesn't notify you about your own post, but everyone else with the role is)."
+                : $"Pinged @{pingRole.Name}.";
+        }
 
         // Posted as a regular message rather than the command's reply: interaction replies can only be edited for 15
         // minutes, and the post needs updating until it expires an hour later.
@@ -144,30 +172,34 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         {
             _lfg.Discard(post.Id);
             _logger.LogWarning(ex, "Couldn't post an LFG in channel {ChannelId}.", channel.Id);
-            await RespondAsync("Couldn't post your LFG in this channel.", ephemeral: true);
+            await FollowupAsync("Couldn't post your LFG in this channel.", ephemeral: true);
             return;
         }
 
-        await RespondAsync($"Your LFG is up. It closes when the squad is full, or after " +
-                           $"{(int)lifetime.TotalMinutes} minutes. Use **Start now** to go early with whoever's joined.",
-            ephemeral: true);
+        await FollowupAsync($"Your LFG is up. It closes when the squad is full, or after " +
+                           $"{(int)lifetime.TotalMinutes} minutes. Use **Start now** to go early with whoever's joined." +
+                           (pingStatus is null ? "" : $"\n{pingStatus}"),
+            ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 
     [SlashCommand("lfg-setup", "Posts the button panel members use to opt in to LFG pings (creates the role if needed).")]
     [RequireUserPermission(GuildPermission.ManageGuild)]
     public async Task LfgSetupAsync()
     {
+        // Creating the role, posting and pinning the panel easily takes longer than Discord's 3-second window.
+        await DeferAsync(ephemeral: true);
+
         var roleName = PingRoleName;
         if (roleName.Length == 0)
         {
-            await RespondAsync("LFG pings are turned off (`Lfg:PingRoleName` is empty).", ephemeral: true);
+            await FollowupAsync("LFG pings are turned off (`Lfg:PingRoleName` is empty).", ephemeral: true);
             return;
         }
 
         var bot = Context.Guild.CurrentUser;
         if (!bot.GuildPermissions.ManageRoles)
         {
-            await RespondAsync("I need the **Manage Roles** permission to create and hand out the LFG ping role.",
+            await FollowupAsync("I need the **Manage Roles** permission to create and hand out the LFG ping role.",
                 ephemeral: true);
             return;
         }
@@ -175,7 +207,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         if (Context.Channel is not ITextChannel channel ||
             bot.GetPermissions(channel) is not { SendMessages: true, EmbedLinks: true })
         {
-            await RespondAsync("I need **Send Messages** and **Embed Links** here to post the panel.", ephemeral: true);
+            await FollowupAsync("I need **Send Messages** and **Embed Links** here to post the panel.", ephemeral: true);
             return;
         }
 
@@ -190,10 +222,19 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
         if (role!.Position >= bot.Hierarchy)
         {
-            await RespondAsync($"The **@{Format.Sanitize(role.Name)}** role is above my highest role, so I can't hand it " +
+            await FollowupAsync($"The **@{Format.Sanitize(role.Name)}** role is above my highest role, so I can't hand it " +
                                "out. Drag my role above it in Server Settings → Roles, then run this again.",
                 ephemeral: true);
             return;
+        }
+
+        // A role that existed before setup may not be mentionable, which makes the ping text show without notifying
+        // anyone (unless the bot has Mention All Roles).
+        var madeMentionable = false;
+        if (!role.IsMentionable)
+        {
+            await role.ModifyAsync(r => r.Mentionable = true);
+            madeMentionable = true;
         }
 
         var panel = await channel.SendMessageAsync(embed: LfgMessages.RolePanelEmbed(role.Name),
@@ -210,7 +251,8 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             _logger.LogInformation(ex, "Couldn't pin the LFG ping panel in channel {ChannelId}.", channel.Id);
         }
 
-        await RespondAsync((createdRole ? $"Created the **@{Format.Sanitize(role.Name)}** role. " : "") +
+        await FollowupAsync((createdRole ? $"Created the **@{Format.Sanitize(role.Name)}** role. " : "") +
+                           (madeMentionable ? $"Made **@{Format.Sanitize(role.Name)}** mentionable so pings notify people. " : "") +
                            $"Posted the opt-in panel{(pinned ? " and pinned it" : " (I couldn't pin it - pin it yourself if you like)")}. " +
                            $"New `/lfg` posts will ping the role, at most once every {(int)PingCooldown.TotalMinutes} " +
                            "minutes per person.",
@@ -225,9 +267,12 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
     private async Task SetPingRoleAsync(bool wanted)
     {
+        // Changing roles is an API call that can take a while; acknowledge (privately) before doing it.
+        await DeferAsync(ephemeral: true);
+
         if (FindPingRole() is not { } role || Context.User is not IGuildUser user)
         {
-            await RespondAsync("LFG pings aren't set up right now - ask a server admin to run `/lfg-setup`.",
+            await FollowupAsync("LFG pings aren't set up right now - ask a server admin to run `/lfg-setup`.",
                 ephemeral: true);
             return;
         }
@@ -235,7 +280,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         var has = user.RoleIds.Contains(role.Id);
         if (has == wanted)
         {
-            await RespondAsync(wanted ? "You already get LFG pings." : "You already don't get LFG pings.", ephemeral: true);
+            await FollowupAsync(wanted ? "You already get LFG pings." : "You already don't get LFG pings.", ephemeral: true);
             return;
         }
 
@@ -254,12 +299,12 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         {
             _logger.LogWarning(ex, "Couldn't {Action} the LFG ping role for user {UserId}.", wanted ? "add" : "remove",
                 user.Id);
-            await RespondAsync("I couldn't change your roles - ask a server admin to check my **Manage Roles** " +
+            await FollowupAsync("I couldn't change your roles - ask a server admin to check my **Manage Roles** " +
                                "permission and that my role is above the LFG role.", ephemeral: true);
             return;
         }
 
-        await RespondAsync(wanted
+        await FollowupAsync(wanted
             ? $"🔔 You'll be pinged for new LFG posts. Click **Stop LFG pings** to turn it off."
             : "🔕 You won't be pinged for LFG posts anymore.", ephemeral: true);
     }
@@ -348,6 +393,9 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
     private string PingRoleName => _options.PingRoleName.Trim().TrimStart('@');
 
     private TimeSpan PingCooldown => TimeSpan.FromMinutes(Math.Max(0, _options.PingCooldownMinutes));
+
+    /// <summary>Whether a mention of this role will actually notify its members.</summary>
+    private bool CanPing(IRole role) => role.IsMentionable || Context.Guild.CurrentUser.GuildPermissions.MentionEveryone;
 
     private IRole? FindPingRole()
     {
