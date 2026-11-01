@@ -119,6 +119,19 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
   - Server personalities are saved in `data/chat-settings.json`.
   - The bot's ground rules always apply on top of any personality: short replies, reply only as itself, no pings,
     point to `/help` for commands.
+- **Asking it to do things:** "@bot play never gonna give you up" or "@bot make an lfg for ranked, need 3 more, mic
+  required" plays the song or posts the LFG, as if the person had used `/play` or `/lfg` themselves:
+  - **Same rules as the commands:** they must be in a voice channel to play music, they get one open LFG at a time,
+    and the ping cooldown applies.
+  - **Right channels, wherever it's asked:** music announcements go to the music channel and LFG cards to the LFG
+    channel, and the bot replies with where to find them. Posting an LFG for someone also needs them to be able to
+    post in the LFG channel.
+  - **How it decides:** each mention first gets a quick, fixed-answer check by the model: play music, make an LFG, or
+    neither. That check only reads the asker's own message, so nothing else in the channel can trigger an action.
+  - **Details:** the model turns requests like "put on some lofi beats" into a search, and YouTube links are used as
+    written. LFG details (squad size, mode, rank, mic, PC/console only) are read with fixed keyword rules, because the
+    small model invented details. Notes aren't read from chat; use `/lfg` for those.
+  - **Turning it off:** `Chat:Actions: false`. Each mention then skips the extra check and just chats.
 - Turn the feature off with `Chat:Enabled: false`.
 
 ## Project layout

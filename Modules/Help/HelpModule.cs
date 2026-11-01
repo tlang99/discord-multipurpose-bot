@@ -102,7 +102,11 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
         {
             builder.AddField("💬 Chat with me",
                 $"Mention {Context.Guild.CurrentUser.Mention} in a message, or reply to one of mine, and I'll answer. " +
-                "I read the last few messages in the channel for context.");
+                "I read the last few messages in the channel for context." +
+                (_chat.Actions
+                    ? "\nYou can also just ask: \"play never gonna give you up\" or \"make an lfg for ranked, need 3 " +
+                      "more, mic required\"."
+                    : ""));
         }
 
         return builder.AddField("ℹ️ Help", "`/help` - show this list").Build();
