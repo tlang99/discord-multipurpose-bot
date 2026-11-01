@@ -19,4 +19,8 @@ public class MusicOptions
 
     /// <summary>Cap on the queue length per server, so one playlist can't queue thousands of songs.</summary>
     public int MaxQueueLength { get; set; } = 200;
+
+    /// <summary>The only text channel music commands work in, by name (case-insensitive). Song announcements go there
+    /// too, since they're posted where /play was used. Empty allows any channel.</summary>
+    public string ChannelName { get; set; } = "music";
 }
