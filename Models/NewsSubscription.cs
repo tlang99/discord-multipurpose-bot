@@ -14,7 +14,7 @@ public class NewsSubscription
 
     public ulong ChannelId { get; set; }
 
-    /// <summary>If non-empty, only articles whose headline or summary contains one of these get posted.</summary>
+    /// <summary>If non-empty, only articles whose headline contains one of these get posted.</summary>
     public List<string> IncludeKeywords { get; set; } = new();
 
     /// <summary>Articles whose headline contains any of these are skipped.</summary>

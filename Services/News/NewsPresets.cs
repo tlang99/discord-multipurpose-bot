@@ -53,6 +53,29 @@ public static class NewsPresets
 
     /// <summary>Bing News is used over Google News because its feed includes each article's summary snippet and a
     /// thumbnail, while Google's only has the headline.</summary>
-    private static string BingNewsSearch(string query)
+    /// <remarks>Sorted by date: Bing's default is relevance, which kept returning the same ~10 mostly old articles
+    /// for days, so new ones (e.g. a Season 1 announcement) never made it into the feed.</remarks>
+    private static string BingNewsSearch(string query) => LegacyBingNewsSearch(query) + SortByDate;
+
+    private const string SortByDate = "&qft=sortbydate%3d%221%22";
+
+    private static string LegacyBingNewsSearch(string query)
         => $"https://www.bing.com/news/search?q={Uri.EscapeDataString(query)}&format=rss&mkt=en-US";
+
+    /// <summary>If <paramref name="feedUrl"/> is a built-in preset's feed URL from an older version of the bot (before
+    /// the date sort was added), returns the preset's current URL; otherwise null. Subscriptions store their URL, so
+    /// without this, existing follows would keep using the old relevance-sorted feed.</summary>
+    public static string? UpgradeLegacyFeedUrl(string feedUrl)
+    {
+        foreach (var preset in All.Values)
+        {
+            if (preset.FeedUrl.EndsWith(SortByDate, StringComparison.Ordinal) &&
+                string.Equals(feedUrl, preset.FeedUrl[..^SortByDate.Length], StringComparison.Ordinal))
+            {
+                return preset.FeedUrl;
+            }
+        }
+
+        return null;
+    }
 }
