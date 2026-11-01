@@ -96,7 +96,10 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "`/pause` · `/resume` · `/skip` · `/stop`\n" +
                 "`/nowplaying` · `/queue` - see what's playing and what's next\n" +
                 "`/remove` · `/move` · `/shuffle` · `/loop` · `/clearqueue` - manage the queue\n" +
-                "Controls only work from the voice channel the bot is in.");
+                "Controls only work from the voice channel the bot is in.")
+            .AddField("⏰ Reminders",
+                "`/remind` - e.g. `when: in 2h` `what: start the raid`, and I'll ping you in that channel\n" +
+                "`/reminders list` · `/reminders cancel` - see or cancel yours");
 
         if (_chat.IsEnabled)
         {

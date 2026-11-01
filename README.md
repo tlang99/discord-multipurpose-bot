@@ -115,6 +115,20 @@ above `@LFG` in Server Settings → Roles. Because members give themselves `@LFG
 gains any permission beyond `@everyone`'s, or a channel override that grants something, the bot refuses to hand
 it out (in `/lfg-setup` and the panel) until that's fixed. Removing the role always works.
 
+**Reminders** — `/remind when:<time> what:<text>` pings you in that channel when it's due:
+- **Times:** `when` takes relative times (`10m`, `2h30m`, `in 3 days`, `half an hour`) or clock times (`at 5pm`,
+  `tomorrow 9am`, `tonight at 8`). A clock time already past today means tomorrow, and `at 5` with no am/pm means
+  whichever comes next.
+- **Time zone:** clock times are read in `Reminders:TimeZone` (an IANA or Windows name; empty uses the bot machine's
+  zone). Replies use Discord timestamps, so everyone sees the time in their own zone.
+- **Managing:** `/reminders list` shows yours with a short code each, and `/reminders cancel id:<code>` cancels one.
+- **Limits:** between a minute and `Reminders:MaxDays` (365) away, and up to `Reminders:MaxPerUser` (25) pending per
+  person per server.
+- **Safety:** the text goes through the word filter when set (auto-mod on, moderators exempt), and the reminder only
+  pings its owner.
+- **Persistence:** reminders are saved in `data/reminders.json`. Ones that came due while the bot was offline are
+  delivered when it's back, marked late. If the channel can't be used any more, the bot DMs the person instead.
+
 **Command list** — `/help` shows members the commands they can use (LFG and music, with links to the channels
 they work in), visible only to them. `/help-post` (Manage Server) posts the same list in the current channel and
 pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
@@ -164,6 +178,7 @@ Services/
   ContentModeration/ IImageModerationService - image/GIF classification, implemented against Sightengine
   News/            INewsFeedReader (RSS/Atom parsing), built-in game feed presets, news embed formatting
   Lfg/             ILfgService - LFG post rules (join/leave/start/cancel/expiry), in memory, no Discord types
+  Reminders/       ReminderService (set/list/cancel rules) and ReminderTimeParser ("in 2h", "tomorrow 9am")
   Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
 EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
@@ -318,6 +333,7 @@ dotnet run
 | `/help` | — | — |
 | `/help-post` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the list |
 | AI chat (mention the bot) | — | Send Messages; Read Message History for context; Add Reactions for the ⏳ cooldown hint |
+| `/remind`, `/reminders list`, `/reminders cancel` | — (you can only see and cancel your own) | Send Messages in the channel it's set in |
 
 `/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose
 highest role is below yours (the server owner can act on anyone), and the bot's own role has to be above theirs too.
