@@ -1,7 +1,7 @@
 # Lavalink (music server)
 
 The bot's music commands don't stream audio themselves. They control [Lavalink](https://github.com/lavalink-devs/Lavalink),
-a separate Java program that fetches songs from YouTube/SoundCloud and sends the audio to Discord. Lavalink needs to
+a separate Java program that fetches songs from YouTube and sends the audio to Discord. Lavalink needs to
 be running on the same machine as the bot for `/play` to work. Everything else in the bot works without it.
 
 ## One-time setup
@@ -55,8 +55,8 @@ $env:LAVALINK_PASSWORD = "<new password>"          # before dotnet run (or dotne
 
 ## When YouTube stops working
 
-YouTube regularly changes things in ways that break playback. When `/play` starts failing for YouTube songs (but
-SoundCloud still works):
+YouTube regularly changes things in ways that break playback. When `/play` finds songs but they won't play (the bot
+posts "YouTube wouldn't let me play ..."):
 
 1. Check `lavalink/logs/spring.log` for `All clients failed to load the item`: it lists why each YouTube client
    failed ("Sign in to confirm you're not a bot" means the sign-in above is missing or expired).
@@ -70,6 +70,8 @@ SoundCloud still works):
 4. If none of that works, the plugin's README has further workarounds (`clients`, `poToken`, and a remote cipher
    server, [yt-cipher](https://github.com/kikkia/yt-cipher)).
 
-SoundCloud is enabled but currently broken as well: SoundCloud only serves a format Lavalink's audio library can't
-play yet ([lavaplayer#202](https://github.com/lavalink-devs/lavaplayer/pull/202)). It should start working with
-the first Lavalink release that includes that fix.
+SoundCloud is turned off (`soundcloud: false` in `application.yml`) because it's broken: SoundCloud only serves a
+format Lavalink's audio library can't play yet ([lavaplayer#202](https://github.com/lavalink-devs/lavaplayer/pull/202)).
+To bring it back once a Lavalink release includes that fix: turn it on again in `application.yml`, then add
+`soundcloud.com` to the allowed link hosts in `Modules/Music/MusicModule.cs` and remove the SoundCloud message in
+`/play`.

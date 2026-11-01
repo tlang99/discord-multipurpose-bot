@@ -20,8 +20,9 @@ lavalink:
     password: "youshallnotpass"
     sources:
       youtube: false   # handled by the plugin above
-      soundcloud: true
-      # Everything else is off. "http" in particular would let /play stream any URL from this machine.
+      # Off: Lavalink can't play SoundCloud's current audio format yet (see lavalink/README.md).
+      soundcloud: false
+      # Everything else is off too. "http" in particular would let /play stream any URL from this machine.
       bandcamp: false
       twitch: false
       vimeo: false
@@ -29,7 +30,7 @@ lavalink:
       http: false
       local: false
     youtubeSearchEnabled: true
-    soundcloudSearchEnabled: true
+    soundcloudSearchEnabled: false
     youtubePlaylistLoadLimit: 4   # pages of 100 - the bot caps the queue anyway
     playerUpdateInterval: 5
     bufferDurationMs: 400

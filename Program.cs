@@ -6,6 +6,7 @@ using Lavalink4NET.InactivityTracking.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using ModBot.Configuration;
 using ModBot.EventHandlers;
 using ModBot.Hosting;
@@ -124,4 +125,16 @@ builder.Services.AddHostedService<DiscordBotService>();
 builder.Services.AddHostedService<NewsPollingService>();
 
 var host = builder.Build();
+
+// The default Lavalink password is only acceptable while Lavalink is reachable from this machine alone. Pointed at
+// another machine (or a Docker port), it would leave the music server's control channel open over plain HTTP.
+if (musicOptions.LavalinkPassword == new MusicOptions().LavalinkPassword &&
+    Uri.TryCreate(musicOptions.LavalinkUrl, UriKind.Absolute, out var lavalinkUri) && !lavalinkUri.IsLoopback)
+{
+    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Music").LogWarning(
+        "Lavalink at {Url} is not on this machine but still uses the default password. Set the same new password " +
+        "with LAVALINK_SERVER_PASSWORD for Lavalink and LAVALINK_PASSWORD for the bot (see lavalink/README.md).",
+        musicOptions.LavalinkUrl);
+}
+
 await host.RunAsync();

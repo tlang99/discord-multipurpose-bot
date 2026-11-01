@@ -34,6 +34,9 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
 
     public void SuppressNextAnnouncement(string trackIdentifier) => _skipAnnouncementFor = trackIdentifier;
 
+    /// <summary>Undoes <see cref="SuppressNextAnnouncement"/> when the song never started.</summary>
+    public void ClearSuppressedAnnouncement() => _skipAnnouncementFor = null;
+
     protected override async ValueTask NotifyTrackStartedAsync(ITrackQueueItem track, CancellationToken cancellationToken = default)
     {
         await base.NotifyTrackStartedAsync(track, cancellationToken);

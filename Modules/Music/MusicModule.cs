@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using Discord;
 using Discord.Interactions;
@@ -16,7 +17,8 @@ namespace ModBot.Modules.Music;
 
 /// <summary>
 /// Music playback through Lavalink. Anyone can use these, but only from the voice channel the bot is playing in, so
-/// people outside the channel can't control what everyone in it is hearing.
+/// people outside the channel can't control what everyone in it is hearing. Moderators (Move Members or Manage
+/// Messages) can control it from anywhere.
 /// </summary>
 [RequireContext(ContextType.Guild)]
 public class MusicModule : InteractionModuleBase<SocketInteractionContext>
@@ -26,6 +28,12 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 
     private static readonly PlayerFactory<MusicPlayer, MusicPlayerOptions> PlayerFactoryInstance =
         PlayerFactory.Create<MusicPlayer, MusicPlayerOptions>(properties => new MusicPlayer(properties));
+
+    /// <summary>Hosts /play accepts links from (plus their subdomains, e.g. www., m., music.youtube.com).</summary>
+    private static readonly string[] AllowedLinkHosts = ["youtube.com", "youtu.be"];
+
+    /// <summary>Per-server lock around adding to the queue. Static because a module instance is created per command.</summary>
+    private static readonly ConcurrentDictionary<ulong, SemaphoreSlim> EnqueueLocks = new();
 
     private readonly IAudioService _audioService;
     private readonly MusicOptions _options;
@@ -62,12 +70,15 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 
         var isLink = Uri.TryCreate(query, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 
-        // SoundCloud only serves audio in a format Lavalink can't play yet (lavalink/README.md), so say so up front
-        // instead of joining the voice channel and then failing.
-        if (isLink && uri!.Host.EndsWith("soundcloud.com", StringComparison.OrdinalIgnoreCase))
+        // Only hand Lavalink links to sites it's meant to play, rather than relying on its config alone to refuse
+        // the rest. Checked before joining the voice channel, so a bad link doesn't make the bot join and then fail.
+        if (isLink && !IsAllowedLinkHost(uri!.Host))
         {
-            await FollowupAsync("SoundCloud links don't work right now (the music server can't play SoundCloud's " +
-                                "audio format yet). Try searching for the song by name instead - that uses YouTube.");
+            // SoundCloud only serves audio in a format Lavalink can't play yet (lavalink/README.md).
+            await FollowupAsync(HostMatches(uri.Host, "soundcloud.com")
+                ? "SoundCloud links don't work right now (the music server can't play SoundCloud's audio format " +
+                  "yet). Try searching for the song by name instead - that uses YouTube."
+                : "I can only play YouTube links. To find a song from somewhere else, search for it by name instead.");
             return;
         }
 
@@ -106,28 +117,51 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        var room = _options.MaxQueueLength - player.Queue.Count;
-        if (room <= 0)
+        // One /play at a time per server from here: otherwise two at once could both see room in the queue and
+        // together go past the limit, or both think they're starting playback.
+        var enqueueLock = EnqueueLocks.GetOrAdd(Context.Guild.Id, _ => new SemaphoreSlim(1, 1));
+        await enqueueLock.WaitAsync();
+        List<LavalinkTrack> tracks;
+        int position;
+        try
         {
-            await FollowupAsync($"The queue is full ({_options.MaxQueueLength} songs). Skip or remove some first.");
-            return;
+            var room = _options.MaxQueueLength - player.Queue.Count;
+            if (room <= 0)
+            {
+                await FollowupAsync($"The queue is full ({_options.MaxQueueLength} songs). Skip or remove some first.");
+                return;
+            }
+
+            // A search returns several matches - only the top one is wanted. A playlist link means all of them.
+            tracks = result.IsPlaylist
+                ? result.Tracks.Take(room).ToList()
+                : [result.Track ?? result.Tracks[0]];
+
+            var startsNow = player.CurrentItem is null;
+            if (startsNow)
+            {
+                player.SuppressNextAnnouncement(tracks[0].Identifier);
+            }
+
+            try
+            {
+                position = await player.PlayAsync(tracks[0]);
+            }
+            catch
+            {
+                // Otherwise the stale flag would hide the announcement the next time this song is played.
+                player.ClearSuppressedAnnouncement();
+                throw;
+            }
+
+            if (tracks.Count > 1)
+            {
+                await player.Queue.AddRangeAsync(tracks.Skip(1).Select(t => (ITrackQueueItem)new TrackQueueItem(t)).ToList());
+            }
         }
-
-        // A search returns several matches - only the top one is wanted. A playlist link means all of them.
-        var tracks = result.IsPlaylist
-            ? result.Tracks.Take(room).ToList()
-            : [result.Track ?? result.Tracks[0]];
-
-        var startsNow = player.CurrentItem is null;
-        if (startsNow)
+        finally
         {
-            player.SuppressNextAnnouncement(tracks[0].Identifier);
-        }
-
-        var position = await player.PlayAsync(tracks[0]);
-        if (tracks.Count > 1)
-        {
-            await player.Queue.AddRangeAsync(tracks.Skip(1).Select(t => (ITrackQueueItem)new TrackQueueItem(t)).ToList());
+            enqueueLock.Release();
         }
 
         var playlistNote = result.IsPlaylist
@@ -472,7 +506,8 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return null;
         }
 
-        if (requireSameChannel && (Context.User as IGuildUser)?.VoiceChannel?.Id != player.VoiceChannelId)
+        var user = Context.User as IGuildUser;
+        if (requireSameChannel && user?.VoiceChannel?.Id != player.VoiceChannelId && !IsModerator(user))
         {
             await RespondAsync($"You need to be in <#{player.VoiceChannelId}> to control the music.", ephemeral: true);
             return null;
@@ -480,4 +515,16 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 
         return player;
     }
+
+    /// <summary>Moderators can control the player from anywhere, e.g. to stop an offensive song without joining the
+    /// voice channel. Move Members/Manage Messages match the permissions they already use for voice/text moderation.</summary>
+    private static bool IsModerator(IGuildUser? user)
+        => user is not null && (user.GuildPermissions.MoveMembers || user.GuildPermissions.ManageMessages);
+
+    private static bool IsAllowedLinkHost(string host) => AllowedLinkHosts.Any(allowed => HostMatches(host, allowed));
+
+    /// <summary>True for <paramref name="domain"/> itself or any subdomain of it - but not e.g. "notyoutube.com".</summary>
+    private static bool HostMatches(string host, string domain)
+        => host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+           host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
 }

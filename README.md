@@ -53,7 +53,8 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
 - `/pause`, `/resume`, `/skip [count]`, `/stop` (clears the queue and leaves), `/nowplaying`, `/queue [page]`.
 - `/remove position`, `/move from to`, `/shuffle`, `/loop off|song|queue`, `/clearqueue`.
 
-Anyone can use these, but commands that change playback only work from the bot's voice channel. Each new song is
+Anyone can use these, but commands that change playback only work from the bot's voice channel, except for
+moderators (Move Members or Manage Messages), who can control it from anywhere. `/play` only accepts YouTube links. Each new song is
 announced in the text channel where `/play` was first used. The bot leaves after `Music:IdleTimeoutSeconds`
 (default 2 minutes) with nobody listening or nothing playing, and the queue is capped at `Music:MaxQueueLength`
 (default 200). If Lavalink isn't running, the music commands say so and everything else keeps working.
@@ -185,4 +186,4 @@ dotnet run
 | `/modlog`, `/automod` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
-| Other music commands | — (must be in the bot's voice channel; `/queue` and `/nowplaying` work from anywhere) | — |
+| Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work from anywhere) | — |
