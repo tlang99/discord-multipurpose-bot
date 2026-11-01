@@ -1,5 +1,6 @@
 using Discord;
 using Discord.Interactions;
+using Discord.Net;
 using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -217,6 +218,16 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
+        // Manage Server alone shouldn't let someone use the bot to post and pin in a channel they couldn't post and
+        // pin in themselves. Checked before touching the role so a refused run changes nothing.
+        if (Context.User is not IGuildUser user ||
+            user.GetPermissions(channel) is not { SendMessages: true, PinMessages: true })
+        {
+            await FollowupAsync("You need **Send Messages** and **Pin Messages** in this channel to post the LFG ping " +
+                               "panel here.", ephemeral: true);
+            return;
+        }
+
         var role = FindPingRole();
         var createdRole = role is null;
         if (createdRole)
@@ -261,7 +272,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             await panel.PinAsync();
             pinned = true;
         }
-        catch (Exception ex)
+        catch (HttpException ex)
         {
             _logger.LogInformation(ex, "Couldn't pin the LFG ping panel in channel {ChannelId}.", channel.Id);
         }
