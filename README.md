@@ -111,8 +111,15 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
 - Replies never ping anyone but the person who asked, and are cut to Discord's 2000-character limit.
 - Each person can ask once every `Chat:CooldownSeconds` (default 10); too soon and the bot reacts with ⏳. At most
   `Chat:MaxConcurrentRequests` (default 1) questions go to Ollama at once; the rest wait their turn.
-- The instructions given to the model can be replaced with `Chat:SystemPrompt` (`{botName}` and `{serverName}` are
-  filled in). Turn the feature off with `Chat:Enabled: false`.
+- **Personality:** `Chat:Personality` in `appsettings.json` is the default (tone, character, interests). Each server
+  can replace it without a restart:
+  - `/chat personality set` (Manage Server) opens a pop-up filled in with the current personality to edit, up to
+    1000 characters. Leaving it empty goes back to the default.
+  - `/chat personality show` shows the current one, and `/chat personality reset` goes back to the default.
+  - Server personalities are saved in `data/chat-settings.json`.
+  - The bot's ground rules always apply on top of any personality: short replies, reply only as itself, no pings,
+    point to `/help` for commands.
+- Turn the feature off with `Chat:Enabled: false`.
 
 ## Project layout
 
@@ -257,7 +264,7 @@ dotnet run
 | `/timeout`, `/untimeout` | Moderate Members | Moderate Members |
 | `/warn`, `/warnings`, `/clearwarnings` | Moderate Members | — |
 | `/purge` | Manage Messages | Manage Messages |
-| `/modlog`, `/automod` | Manage Server | — |
+| `/modlog`, `/automod`, `/chat personality` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work without being in voice; all music commands must be used in `#music`) | — |

@@ -97,6 +97,7 @@ builder.Services.AddSingleton(provider => new InteractionService(
 builder.Services.AddSingleton<IGuildSettingsStore, JsonGuildSettingsStore>();
 builder.Services.AddSingleton<IWarningStore, JsonWarningStore>();
 builder.Services.AddSingleton<INewsSubscriptionStore, JsonNewsSubscriptionStore>();
+builder.Services.AddSingleton<IChatSettingsStore, JsonChatSettingsStore>();
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();
 

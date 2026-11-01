@@ -21,26 +21,29 @@ public partial class ChatHandler
     private const int DiscordMessageLimit = 2000;
     private const int MaxHistoryMessages = 50;
 
-    private const string DefaultSystemPrompt =
-        "You are {botName}, the bot in the Discord server \"{serverName}\". Chat in a friendly, casual way and keep " +
-        "answers short: usually a few sentences, and well under 1,500 characters unless someone asks for detail. " +
-        "Reply only as yourself, in your own words. Never start your reply with a name and a colon, and never write " +
-        "lines for anyone else. Use Discord markdown sparingly. Never write @everyone or @here, and don't try to " +
-        "ping people. You can't take actions in the server; for the bot's commands (LFG posts, music), point people " +
-        "to /help.";
+    /// <summary>Always part of the system prompt, after the personality, so no personality can switch them off.
+    /// "Reply only as yourself" in particular stops small models scripting a whole conversation.</summary>
+    private const string GroundRules =
+        "Whatever your personality, always follow these rules: Keep answers short: usually a few sentences, and well " +
+        "under 1,500 characters unless someone asks for detail. Reply only as yourself, in your own words. Never " +
+        "start your reply with a name and a colon, and never write lines for anyone else. Use Discord markdown " +
+        "sparingly. Never write @everyone or @here, and don't try to ping people. You can't take actions in the " +
+        "server; for the bot's commands (LFG posts, music), point people to /help.";
 
     private readonly IChatService _chat;
     private readonly IGuildSettingsStore _settingsStore;
+    private readonly IChatSettingsStore _chatSettings;
     private readonly ChatOptions _options;
     private readonly ILogger<ChatHandler> _logger;
     private readonly SemaphoreSlim _concurrency;
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
 
-    public ChatHandler(IChatService chat, IGuildSettingsStore settingsStore, IOptions<ChatOptions> options,
-        ILogger<ChatHandler> logger)
+    public ChatHandler(IChatService chat, IGuildSettingsStore settingsStore, IChatSettingsStore chatSettings,
+        IOptions<ChatOptions> options, ILogger<ChatHandler> logger)
     {
         _chat = chat;
         _settingsStore = settingsStore;
+        _chatSettings = chatSettings;
         _options = options.Value;
         _logger = logger;
         _concurrency = new SemaphoreSlim(Math.Max(1, _options.MaxConcurrentRequests));
@@ -101,7 +104,8 @@ public partial class ChatHandler
             try
             {
                 var (prompt, speakers) = await BuildPromptAsync(channel, message, guild, bot, question);
-                reply = await _chat.ReplyAsync(BuildSystemPrompt(guild, bot), [new ChatTurn(ChatRole.User, prompt)]);
+                reply = await _chat.ReplyAsync(await BuildSystemPromptAsync(guild, bot),
+                    [new ChatTurn(ChatRole.User, prompt)]);
                 reply = RemoveScriptedLines(reply, speakers);
             }
             catch (ChatServiceException ex)
@@ -156,10 +160,21 @@ public partial class ChatHandler
         return !allowed;
     }
 
-    private string BuildSystemPrompt(SocketGuild guild, SocketGuildUser bot)
-        => (string.IsNullOrWhiteSpace(_options.SystemPrompt) ? DefaultSystemPrompt : _options.SystemPrompt)
-            .Replace("{botName}", bot.DisplayName)
-            .Replace("{serverName}", guild.Name);
+    /// <summary>Who the bot is, then the server's personality (or the default), then the ground rules.</summary>
+    private async Task<string> BuildSystemPromptAsync(SocketGuild guild, SocketGuildUser bot)
+    {
+        var personality = await _chatSettings.GetPersonalityAsync(guild.Id);
+        if (string.IsNullOrWhiteSpace(personality))
+        {
+            personality = string.IsNullOrWhiteSpace(_options.Personality)
+                ? ChatOptions.DefaultPersonality
+                : _options.Personality;
+        }
+
+        return $"You are {bot.DisplayName}, the bot in the Discord server \"{guild.Name}\".\n\n" +
+               $"Your personality: {personality.Trim()}\n\n" +
+               GroundRules;
+    }
 
     /// <summary>
     /// The prompt: the recent messages as a transcript ("Name: text", oldest first), then the question, marked as the

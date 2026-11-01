@@ -34,9 +34,16 @@ public class ChatOptions
     /// memory on the first question after it's been idle.</summary>
     public int TimeoutSeconds { get; set; } = 120;
 
-    /// <summary>Instructions for the model. <c>{botName}</c> and <c>{serverName}</c> are filled in. Empty uses the
-    /// built-in default.</summary>
-    public string SystemPrompt { get; set; } = string.Empty;
+    /// <summary>The chatbot's default personality: tone, character, interests. Servers can replace it with
+    /// <c>/chat personality set</c>. The bot's ground rules (short replies, no pings, reply only as itself) always
+    /// apply on top, so this can't break them.</summary>
+    public string Personality { get; set; } = DefaultPersonality;
+
+    /// <summary>Longest personality text accepted from /chat personality.</summary>
+    public const int MaxPersonalityLength = 1000;
+
+    public const string DefaultPersonality =
+        "Friendly and casual, like a helpful friend in the server who knows their way around games.";
 
     /// <summary>Whether the chatbot should answer at all: turned on, with a model and an address set.</summary>
     public bool IsEnabled => Enabled && !string.IsNullOrWhiteSpace(Model) && !string.IsNullOrWhiteSpace(OllamaUrl);
