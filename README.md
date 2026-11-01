@@ -65,8 +65,10 @@ announced in the text channel where `/play` was first used. The bot leaves after
 > SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
 > SoundCloud links.
 
-**Looking for group** — `/lfg [players] [note]` posts a Multiplayer LFG card in the channel it's run in, e.g.
-`/lfg players:4 note:"ranked, mics on"` (squad size 2–6 including you, default 4). The card has buttons:
+**Looking for group** — `/lfg [players] [note]` posts a Multiplayer LFG card, e.g. `/lfg players:4 note:"ranked,
+mics on"` (squad size 2–6 including you, default 4). It only works in the channel named by `Lfg:ChannelName`
+(default `lfg-mw4`; empty allows any channel). Elsewhere it replies privately with a link to that channel. The
+card has buttons:
 - **Join** / **Leave** — anyone. The squad list on the card updates as people come and go.
 - **Start now** — host only: close early with whoever has joined (needs at least one other player).
 - **Cancel** — the host, or a moderator (Manage Messages or Move Members) to remove anyone's post.

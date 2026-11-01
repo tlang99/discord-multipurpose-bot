@@ -41,6 +41,18 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
+        var lfgChannelName = _options.ChannelName.Trim().TrimStart('#');
+        if (lfgChannelName.Length > 0 && !channel.Name.Equals(lfgChannelName, StringComparison.OrdinalIgnoreCase))
+        {
+            var lfgChannel = Context.Guild.TextChannels.FirstOrDefault(c =>
+                c.Name.Equals(lfgChannelName, StringComparison.OrdinalIgnoreCase));
+            await RespondAsync(lfgChannel is null
+                    ? $"LFG posts go in **#{lfgChannelName}**, but this server doesn't have that channel yet."
+                    : $"LFG posts go in {lfgChannel.Mention} - run `/lfg` there.",
+                ephemeral: true);
+            return;
+        }
+
         var botPermissions = Context.Guild.CurrentUser.GetPermissions(channel);
         if (!botPermissions.ViewChannel || !botPermissions.SendMessages || !botPermissions.EmbedLinks)
         {
