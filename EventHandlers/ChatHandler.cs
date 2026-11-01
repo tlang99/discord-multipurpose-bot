@@ -147,7 +147,29 @@ public partial class ChatHandler
 
             if (action is not null && reply is null)
             {
-                var (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)message.Author, channel);
+                string text;
+                var suppressEmbeds = false;
+                try
+                {
+                    (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)message.Author, channel);
+                }
+                catch (Exception ex)
+                {
+                    // Lavalink or Discord failing mid-action: say so instead of leaving the request unanswered.
+                    _logger.LogWarning(ex, "Chat action {Action} failed in guild {GuildId}.", action.GetType().Name, guild.Id);
+                    text = "Something went wrong doing that - try again in a bit, or use the slash command.";
+                }
+
+                // Song and playlist titles are third-party text, so action replies follow the word rules too.
+                if (settings.AutoModEnabled && TextFilter.FindViolation(text, settings) is not null)
+                {
+                    text = action is PlayMusicAction
+                        ? "My reply named a song whose title breaks this server's word filter, so I won't repeat it " +
+                          "here. Check `/queue` to see what happened."
+                        : "My reply broke this server's word filter, so I'm keeping the details to myself.";
+                    suppressEmbeds = false;
+                }
+
                 await ReplyAsync(message, text, suppressEmbeds);
                 return;
             }
@@ -205,7 +227,10 @@ public partial class ChatHandler
 
                 // Posting for someone is only allowed where they could post themselves.
                 var askerPermissions = asker.GetPermissions(lfgChannel);
-                if (!askerPermissions.ViewChannel || !askerPermissions.SendMessages)
+                var askerCanSend = lfgChannel is IThreadChannel
+                    ? askerPermissions.SendMessagesInThreads
+                    : askerPermissions.SendMessages;
+                if (!askerPermissions.ViewChannel || !askerCanSend)
                 {
                     return ($"You can't post in {lfgChannel.Mention}, so I can't post an LFG there for you.", false);
                 }

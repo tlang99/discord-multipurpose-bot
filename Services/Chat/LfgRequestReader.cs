@@ -13,7 +13,7 @@ public static partial class LfgRequestReader
 {
     private static readonly Dictionary<string, int> NumberWords = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["one"] = 1, ["two"] = 2, ["three"] = 3, ["four"] = 4, ["five"] = 5, ["a"] = 1, ["an"] = 1,
+        ["one"] = 1, ["two"] = 2, ["three"] = 3, ["four"] = 4, ["five"] = 5,
     };
 
     /// <summary>The squad size and details asked for. No note: free text is left to /lfg.</summary>
@@ -107,7 +107,8 @@ public static partial class LfgRequestReader
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
 
-    [GeneratedRegex(@"\b(\d|one|two|three|four|five|a|an)\s+more\b")]
+    // No "a"/"an": "need a more chill squad" isn't "one more".
+    [GeneratedRegex(@"\b(\d|one|two|three|four|five)\s+more\b")]
     private static partial Regex MoreRegex();
 
     [GeneratedRegex(@"\b(?<n>\d)[\s-]?(?:stack|man|players?|people|ppl)\b|\b(?:squad|group|team|party)\s+of\s+(?<n>\d|two|three|four|five)\b|\bfor\s+(?<n>\d|two|three|four|five)\b")]
