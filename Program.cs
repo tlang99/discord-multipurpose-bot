@@ -11,6 +11,7 @@ using ModBot.Configuration;
 using ModBot.EventHandlers;
 using ModBot.Hosting;
 using ModBot.Services.ContentModeration;
+using ModBot.Services.Lfg;
 using ModBot.Services.Moderation;
 using ModBot.Services.News;
 using ModBot.Services.Storage;
@@ -51,6 +52,7 @@ builder.Services.Configure<BotOptions>(builder.Configuration.GetSection(BotOptio
 builder.Services.Configure<SightengineOptions>(builder.Configuration.GetSection(SightengineOptions.SectionName));
 builder.Services.Configure<NewsOptions>(builder.Configuration.GetSection(NewsOptions.SectionName));
 builder.Services.Configure<MusicOptions>(builder.Configuration.GetSection(MusicOptions.SectionName));
+builder.Services.Configure<LfgOptions>(builder.Configuration.GetSection(LfgOptions.SectionName));
 var musicOptions = builder.Configuration.GetSection(MusicOptions.SectionName).Get<MusicOptions>() ?? new MusicOptions();
 
 builder.Services.AddSingleton(new DiscordSocketConfig
@@ -88,6 +90,9 @@ builder.Services.AddSingleton<INewsSubscriptionStore, JsonNewsSubscriptionStore>
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();
 
+// LFG posts are held in memory only (see ILfgService), so this is the single source of truth while the bot runs.
+builder.Services.AddSingleton<ILfgService, LfgService>();
+
 builder.Services.AddHttpClient<IImageModerationService, SightengineImageModerationService>(client =>
 {
     client.BaseAddress = new Uri("https://api.sightengine.com/1.0/");
@@ -123,6 +128,7 @@ builder.Services.AddSingleton<AutoModerationHandler>();
 
 builder.Services.AddHostedService<DiscordBotService>();
 builder.Services.AddHostedService<NewsPollingService>();
+builder.Services.AddHostedService<LfgExpiryService>();
 
 var host = builder.Build();
 

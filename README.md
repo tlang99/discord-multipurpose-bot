@@ -65,6 +65,16 @@ announced in the text channel where `/play` was first used. The bot leaves after
 > SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
 > SoundCloud links.
 
+**Looking for group** — `/lfg [players] [note]` posts a Multiplayer LFG card in the channel it's run in, e.g.
+`/lfg players:4 note:"ranked, mics on"` (squad size 2–6 including you, default 4). The card has buttons:
+- **Join** / **Leave** — anyone. The squad list on the card updates as people come and go.
+- **Start now** — host only: close early with whoever has joined (needs at least one other player).
+- **Cancel** — the host, or a moderator (Manage Messages or Move Members) to remove anyone's post.
+
+When the last spot fills, or the host starts early, the bot pings everyone in the squad. Posts that don't fill up
+expire after `Lfg:ExpiryMinutes` (default 60). Each person can have one open post per server. Posts are kept in
+memory only, so after the bot restarts, old posts' buttons just say the post is no longer active.
+
 ## Project layout
 
 ```
@@ -75,12 +85,15 @@ Services/
   Moderation/      IModerationService - moderation actions, independent of Discord.Net modules
   ContentModeration/ IImageModerationService - image/GIF classification, implemented against Sightengine
   News/            INewsFeedReader (RSS/Atom parsing), built-in game feed presets, news embed formatting
+  Lfg/             ILfgService - LFG post rules (join/leave/start/cancel/expiry), in memory, no Discord types
 EventHandlers/     Gateway event handlers (e.g. AutoModerationHandler for MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
   Music/           Music commands plus the Lavalink player that announces songs (Lavalink4NET does the rest)
+  Lfg/             /lfg command, its button handlers, and the LFG card's embed/buttons
 lavalink/          Config for the Lavalink music server (the server itself is downloaded, not committed)
 Hosting/           DiscordBotService - owns the client lifecycle and wires events to handlers
                    NewsPollingService - background timer that posts new articles for /news subscriptions
+                   LfgExpiryService - closes LFG posts that didn't fill up in time
 ```
 
 ### Adding a new feature later
@@ -188,3 +201,4 @@ dotnet run
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work from anywhere) | — |
+| `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
