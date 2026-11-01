@@ -24,9 +24,10 @@ public partial class ChatHandler
     private const string DefaultSystemPrompt =
         "You are {botName}, the bot in the Discord server \"{serverName}\". Chat in a friendly, casual way and keep " +
         "answers short: usually a few sentences, and well under 1,500 characters unless someone asks for detail. " +
-        "Messages from people start with their display name, like \"Sam: hey\". Use Discord markdown sparingly. " +
-        "Never write @everyone or @here, and don't try to ping people. You can't take actions in the server; for the " +
-        "bot's commands (LFG posts, music), point people to /help.";
+        "Reply only as yourself, in your own words. Never start your reply with a name and a colon, and never write " +
+        "lines for anyone else. Use Discord markdown sparingly. Never write @everyone or @here, and don't try to " +
+        "ping people. You can't take actions in the server; for the bot's commands (LFG posts, music), point people " +
+        "to /help.";
 
     private readonly IChatService _chat;
     private readonly IGuildSettingsStore _settingsStore;
@@ -99,8 +100,9 @@ public partial class ChatHandler
             await _concurrency.WaitAsync();
             try
             {
-                var conversation = await BuildConversationAsync(channel, message, guild, bot.Id, question);
-                reply = await _chat.ReplyAsync(BuildSystemPrompt(guild, bot), conversation);
+                var (prompt, speakers) = await BuildPromptAsync(channel, message, guild, bot, question);
+                reply = await _chat.ReplyAsync(BuildSystemPrompt(guild, bot), [new ChatTurn(ChatRole.User, prompt)]);
+                reply = RemoveScriptedLines(reply, speakers);
             }
             catch (ChatServiceException ex)
             {
@@ -159,25 +161,30 @@ public partial class ChatHandler
             .Replace("{botName}", bot.DisplayName)
             .Replace("{serverName}", guild.Name);
 
-    /// <summary>The recent messages before the question (oldest first), then the question itself. People's messages
-    /// are prefixed with their display name so the model can tell speakers apart.</summary>
-    private async Task<List<ChatTurn>> BuildConversationAsync(SocketTextChannel channel, SocketUserMessage message,
-        SocketGuild guild, ulong botId, string question)
+    /// <summary>
+    /// The prompt: the recent messages as a transcript ("Name: text", oldest first), then the question, marked as the
+    /// one to answer. Also returns every name in it, for <see cref="RemoveScriptedLines"/>.
+    /// </summary>
+    /// <remarks>One message rather than a turn per Discord message: given separate "Name: text" turns, small models
+    /// tend to continue the pattern and script a whole exchange between the people in the channel.</remarks>
+    private async Task<(string Prompt, HashSet<string> Speakers)> BuildPromptAsync(SocketTextChannel channel,
+        SocketUserMessage message, SocketGuild guild, SocketGuildUser bot, string question)
     {
-        var turns = new List<ChatTurn>();
+        var lines = new List<string>();
         var included = new HashSet<ulong>();
+        var speakers = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { bot.DisplayName };
 
         var historyCount = Math.Clamp(_options.HistoryMessages, 0, MaxHistoryMessages);
-        if (historyCount > 0 && guild.CurrentUser.GetPermissions(channel).ReadMessageHistory)
+        if (historyCount > 0 && bot.GetPermissions(channel).ReadMessageHistory)
         {
             try
             {
                 var earlier = await channel.GetMessagesAsync(message, Direction.Before, historyCount).FlattenAsync();
                 foreach (var m in earlier.OrderBy(m => m.Timestamp))
                 {
-                    if (ToTurn(m, guild, botId) is { } turn)
+                    if (ToLine(m, guild, bot, speakers) is { } line)
                     {
-                        turns.Add(turn);
+                        lines.Add(line);
                         included.Add(m.Id);
                     }
                 }
@@ -191,21 +198,28 @@ public partial class ChatHandler
 
         // Replying to an older bot message: make sure the model sees what it's being asked about.
         if (message.ReferencedMessage is { } referenced && !included.Contains(referenced.Id) &&
-            ToTurn(referenced, guild, botId) is { } referencedTurn)
+            ToLine(referenced, guild, bot, speakers) is { } referencedLine)
         {
-            turns.Add(referencedTurn);
+            lines.Add(referencedLine);
         }
 
-        turns.Add(new ChatTurn(ChatRole.User, $"{DisplayName(message.Author, guild)}: {question}"));
-        return turns;
+        var asker = DisplayName(message.Author, guild);
+        speakers.Add(asker);
+
+        var prompt = lines.Count == 0
+            ? $"{asker} is asking you:\n{question}"
+            : "Recent messages in the channel, oldest first, for context:\n" + string.Join("\n", lines) +
+              $"\n\n{asker} is asking you:\n{question}";
+        return (prompt, speakers);
     }
 
-    private static ChatTurn? ToTurn(IMessage message, SocketGuild guild, ulong botId)
+    /// <summary>A transcript line for one earlier message, or null for ones that aren't conversation.</summary>
+    private static string? ToLine(IMessage message, SocketGuild guild, SocketGuildUser bot, HashSet<string> speakers)
     {
-        if (message.Author.Id == botId)
+        if (message.Author.Id == bot.Id)
         {
             // The bot's embeds (LFG cards, music announcements) have no text and aren't conversation.
-            return message.Content.Length == 0 ? null : new ChatTurn(ChatRole.Assistant, message.Content);
+            return message.Content.Length == 0 ? null : $"{bot.DisplayName} (you): {message.Content}";
         }
 
         if (message.Author.IsBot || message.Author.IsWebhook)
@@ -213,8 +227,55 @@ public partial class ChatHandler
             return null;
         }
 
-        var text = Describe(message, guild, botId);
-        return text.Length == 0 ? null : new ChatTurn(ChatRole.User, $"{DisplayName(message.Author, guild)}: {text}");
+        var text = Describe(message, guild, bot.Id);
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
+        var name = DisplayName(message.Author, guild);
+        speakers.Add(name);
+        return $"{name}: {text}";
+    }
+
+    /// <summary>
+    /// Safety net for a model that still writes the conversation as a script: drops a leading "Name:" (its own or
+    /// someone's), and cuts the reply off where a line starts speaking as one of the people in the transcript.
+    /// </summary>
+    private static string RemoveScriptedLines(string reply, HashSet<string> speakers)
+    {
+        bool StartsAsSpeaker(string line, out int prefixLength)
+        {
+            foreach (var name in speakers)
+            {
+                foreach (var prefix in new[] { $"{name}:", $"{name} (you):" })
+                {
+                    if (line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        prefixLength = prefix.Length;
+                        return true;
+                    }
+                }
+            }
+
+            prefixLength = 0;
+            return false;
+        }
+
+        var lines = reply.Trim().Split('\n').ToList();
+        if (lines.Count > 0 && StartsAsSpeaker(lines[0].TrimStart(), out var length))
+        {
+            lines[0] = lines[0].TrimStart()[length..].TrimStart();
+        }
+
+        var cut = lines.FindIndex(1, line => StartsAsSpeaker(line.TrimStart(), out _));
+        if (cut > 0)
+        {
+            lines = lines.Take(cut).ToList();
+        }
+
+        var cleaned = string.Join("\n", lines).Trim();
+        return cleaned.Length > 0 ? cleaned : reply.Trim();
     }
 
     /// <summary>The message as readable text: mentions turned into names (the bot's own mention dropped), custom
