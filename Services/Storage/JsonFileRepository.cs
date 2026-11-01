@@ -7,6 +7,12 @@ namespace ModBot.Services.Storage;
 /// and warnings stores. Swap this out for a real database later by implementing
 /// the same read/mutate pattern against your DB of choice instead of a file.
 /// </summary>
+/// <remarks>
+/// Reads hand out copies, never the cached objects themselves: otherwise a caller enumerating a list on one (e.g.
+/// auto-mod reading the banned words) could be interrupted by a command changing that same list, which throws
+/// "Collection was modified". The flip side is that a read-modify-save of a whole object can overwrite a change made
+/// in between, so changes to part of an object go through <see cref="MutateAsync"/>, which runs under the lock.
+/// </remarks>
 public class JsonFileRepository<TValue>
 {
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
@@ -27,24 +33,11 @@ public class JsonFileRepository<TValue>
 
     public async Task<TValue?> GetAsync(string key)
     {
-        var data = await LoadAsync();
-        return data.TryGetValue(key, out var value) ? value : default;
-    }
-
-    public async Task<IReadOnlyCollection<TValue>> GetAllAsync()
-    {
-        var data = await LoadAsync();
-        return data.Values.ToList();
-    }
-
-    public async Task SetAsync(string key, TValue value)
-    {
         await _lock.WaitAsync();
         try
         {
             var data = await LoadInternalAsync();
-            data[key] = value;
-            await SaveInternalAsync(data);
+            return data.TryGetValue(key, out var value) ? Clone(value) : default;
         }
         finally
         {
@@ -52,6 +45,22 @@ public class JsonFileRepository<TValue>
         }
     }
 
+    public async Task<IReadOnlyCollection<TValue>> GetAllAsync()
+    {
+        await _lock.WaitAsync();
+        try
+        {
+            var data = await LoadInternalAsync();
+            return data.Values.Select(Clone).ToList();
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    /// <summary>Runs <paramref name="mutation"/> on the live data under the lock, then saves. Don't keep references
+    /// to the values it touches after it returns.</summary>
     public async Task MutateAsync(Action<Dictionary<string, TValue>> mutation)
     {
         await _lock.WaitAsync();
@@ -67,18 +76,9 @@ public class JsonFileRepository<TValue>
         }
     }
 
-    private async Task<Dictionary<string, TValue>> LoadAsync()
-    {
-        await _lock.WaitAsync();
-        try
-        {
-            return await LoadInternalAsync();
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
+    private static TValue Clone(TValue value)
+        => JsonSerializer.Deserialize<TValue>(JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions),
+            SerializerOptions)!;
 
     private async Task<Dictionary<string, TValue>> LoadInternalAsync()
     {
@@ -102,7 +102,15 @@ public class JsonFileRepository<TValue>
     private async Task SaveInternalAsync(Dictionary<string, TValue> data)
     {
         _cache = data;
-        using var stream = File.Create(_filePath);
-        await JsonSerializer.SerializeAsync(stream, data, SerializerOptions);
+
+        // Write a temp file and swap it in, so a crash or full disk mid-write can't leave a truncated file that
+        // fails to load on every later start.
+        var tempPath = _filePath + ".tmp";
+        await using (var stream = File.Create(tempPath))
+        {
+            await JsonSerializer.SerializeAsync(stream, data, SerializerOptions);
+        }
+
+        File.Move(tempPath, _filePath, overwrite: true);
     }
 }

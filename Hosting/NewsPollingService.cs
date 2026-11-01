@@ -77,8 +77,7 @@ public class NewsPollingService : BackgroundService
                     continue;
                 }
 
-                subscription.FeedUrl = newUrl;
-                await _store.SaveAsync(subscription);
+                await _store.UpdateAsync(subscription.GuildId, subscription.Name, s => s.FeedUrl = newUrl);
                 _logger.LogInformation("Updated the feed URL for '{Name}' in guild {GuildId} to the date-sorted version.",
                     subscription.Name, subscription.GuildId);
             }
@@ -129,7 +128,8 @@ public class NewsPollingService : BackgroundService
 
         var articles = await _feedReader.ReadAsync(subscription.FeedUrl, cancellationToken);
         var seen = subscription.SeenItemIds.ToHashSet();
-        var unseen = articles.Where(a => !seen.Contains(a.Id)).ToList();
+        // DistinctBy: a feed that lists the same article twice would otherwise get it posted twice in one check.
+        var unseen = articles.Where(a => !seen.Contains(a.Id)).DistinctBy(a => a.Id).ToList();
         if (unseen.Count == 0)
         {
             _logger.LogInformation("News check for '{Name}' in guild {GuildId}: nothing posted - no new articles ({Total} in feed, all already seen).",

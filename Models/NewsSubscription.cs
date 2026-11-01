@@ -27,5 +27,17 @@ public class NewsSubscription
     /// last. Trimmed to a bounded size so the store doesn't grow forever.</summary>
     public List<string> SeenItemIds { get; set; } = new();
 
+    /// <summary>Adds article IDs to <see cref="SeenItemIds"/>, skipping ones already there.</summary>
+    public void MarkSeen(IEnumerable<string> itemIds)
+    {
+        foreach (var id in itemIds)
+        {
+            if (!SeenItemIds.Contains(id))
+            {
+                SeenItemIds.Add(id);
+            }
+        }
+    }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
