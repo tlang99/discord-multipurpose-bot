@@ -33,6 +33,14 @@ public class LfgService : ILfgService
         }
     }
 
+    public void ReleaseRolePing(ulong guildId, ulong hostId)
+    {
+        lock (_lock)
+        {
+            _lastRolePing.Remove((guildId, hostId));
+        }
+    }
+
     public (LfgPost Post, bool Created) Create(ulong guildId, ulong channelId, ulong hostId, LfgMode mode, int size,
         LfgDetails details, string? note, TimeSpan lifetime)
     {

@@ -51,6 +51,10 @@ public interface ILfgService
     /// returns true.</summary>
     bool TryClaimRolePing(ulong guildId, ulong hostId, TimeSpan cooldown);
 
+    /// <summary>Gives back a ping claimed by <see cref="TryClaimRolePing"/> whose post was never sent, so a failed send
+    /// doesn't cost the host their ping for the whole cooldown.</summary>
+    void ReleaseRolePing(ulong guildId, ulong hostId);
+
     /// <summary>Records which message shows the post, once it's been sent.</summary>
     void AttachMessage(Guid postId, ulong messageId);
 

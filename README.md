@@ -88,7 +88,9 @@ memory only, so after the bot restarts, old posts' buttons just say the post is 
 (`Lfg:PingRoleName`) if needed, and posts and pins a panel with **Get LFG pings** / **Stop LFG pings** buttons.
 New `/lfg` posts then ping that role, at most once every `Lfg:PingCooldownMinutes` (default 10) per person, so
 posting and cancelling repeatedly can't spam everyone. The bot needs **Manage Roles**, and its own role must be
-above `@LFG` in Server Settings → Roles.
+above `@LFG` in Server Settings → Roles. Because members give themselves `@LFG`, it must stay a plain role. If it
+gains any permission beyond `@everyone`'s, or a channel override that grants something, the bot refuses to hand
+it out (in `/lfg-setup` and the panel) until that's fixed. Removing the role always works.
 
 ## Project layout
 

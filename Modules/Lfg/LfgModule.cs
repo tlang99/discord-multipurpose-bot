@@ -171,6 +171,12 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         catch (Exception ex)
         {
             _lfg.Discard(post.Id);
+            if (pingText is not null)
+            {
+                // Nobody was pinged, so don't make the host wait out the cooldown.
+                _lfg.ReleaseRolePing(Context.Guild.Id, Context.User.Id);
+            }
+
             _logger.LogWarning(ex, "Couldn't post an LFG in channel {ChannelId}.", channel.Id);
             await FollowupAsync("Couldn't post your LFG in this channel.", ephemeral: true);
             return;
@@ -215,9 +221,18 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         var createdRole = role is null;
         if (createdRole)
         {
-            // Mentionable, so the bot can ping it without needing the broader "Mention All Roles" permission.
+            // Mentionable, so the bot can ping it without needing the broader "Mention All Roles" permission. No
+            // permissions, since anyone can give it to themselves from the panel.
             role = await Context.Guild.CreateRoleAsync(roleName, GuildPermissions.None, color: null, isHoisted: false,
                 isMentionable: true);
+        }
+        else if (WhyUnsafeToSelfAssign(role!) is { } reason)
+        {
+            await FollowupAsync($"There's already a **@{Format.Sanitize(role!.Name)}** role, but it {reason}. Members " +
+                               "can give the ping role to themselves, so it must be a plain role with no permissions. " +
+                               "Remove those permissions, or rename that role and run this again to create a fresh one.",
+                ephemeral: true, allowedMentions: AllowedMentions.None);
+            return;
         }
 
         if (role!.Position >= bot.Hierarchy)
@@ -281,6 +296,17 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         if (has == wanted)
         {
             await FollowupAsync(wanted ? "You already get LFG pings." : "You already don't get LFG pings.", ephemeral: true);
+            return;
+        }
+
+        // Checked on every click, not just at setup: the role is found by name, and it could have gained permissions
+        // (or been swapped for a renamed role) since. Removing it is always allowed.
+        if (wanted && WhyUnsafeToSelfAssign(role) is { } reason)
+        {
+            _logger.LogWarning("Refused to self-assign LFG role {RoleId} in guild {GuildId}: it {Reason}.",
+                role.Id, Context.Guild.Id, reason);
+            await FollowupAsync("LFG pings are switched off right now because the ping role was given extra permissions. " +
+                               "A server admin needs to fix the role and run `/lfg-setup` again.", ephemeral: true);
             return;
         }
 
@@ -393,6 +419,33 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
     private string PingRoleName => _options.PingRoleName.Trim().TrimStart('@');
 
     private TimeSpan PingCooldown => TimeSpan.FromMinutes(Math.Max(0, _options.PingCooldownMinutes));
+
+    /// <summary>
+    /// Why members must not be able to give themselves this role, or null if it's safe. The panel lets anyone take the
+    /// ping role, so it must be harmless: any server permission, or a channel override that grants something (e.g.
+    /// access to a hidden channel), would let members escalate their own access just by clicking a button.
+    /// </summary>
+    private string? WhyUnsafeToSelfAssign(IRole role)
+    {
+        if (role.IsManaged)
+        {
+            return "belongs to an integration";
+        }
+
+        // Only permissions beyond what @everyone already has count: a manually created role comes with defaults like
+        // View Channels, which grant nothing new.
+        var extra = new GuildPermissions(role.Permissions.RawValue & ~Context.Guild.EveryoneRole.Permissions.RawValue);
+        if (extra.RawValue != 0)
+        {
+            var names = extra.ToList();
+            return $"has server permissions beyond @everyone's ({string.Join(", ", names.Take(3))}" +
+                   $"{(names.Count > 3 ? ", ..." : "")})";
+        }
+
+        var grantingChannel = Context.Guild.Channels.FirstOrDefault(c =>
+            c.GetPermissionOverwrite(role) is { AllowValue: not 0 });
+        return grantingChannel is null ? null : $"grants permissions in #{grantingChannel.Name}";
+    }
 
     /// <summary>Whether a mention of this role will actually notify its members.</summary>
     private bool CanPing(IRole role) => role.IsMentionable || Context.Guild.CurrentUser.GuildPermissions.MentionEveryone;
