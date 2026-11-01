@@ -1,5 +1,6 @@
 using Discord;
 using Discord.Interactions;
+using Discord.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModBot.Configuration;
@@ -42,6 +43,16 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
+        // Manage Server alone shouldn't let someone use the bot to post and pin in a channel they couldn't post and
+        // pin in themselves, like a read-only #announcements.
+        if (Context.User is not IGuildUser user ||
+            user.GetPermissions(channel) is not { SendMessages: true, PinMessages: true })
+        {
+            await FollowupAsync("You need **Send Messages** and **Pin Messages** in this channel to post the command " +
+                               "list here.", ephemeral: true);
+            return;
+        }
+
         var message = await channel.SendMessageAsync(embed: BuildEmbed(), allowedMentions: AllowedMentions.None);
 
         var pinned = false;
@@ -50,7 +61,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
             await message.PinAsync();
             pinned = true;
         }
-        catch (Exception ex)
+        catch (HttpException ex)
         {
             _logger.LogInformation(ex, "Couldn't pin the command list in channel {ChannelId}.", channel.Id);
         }
