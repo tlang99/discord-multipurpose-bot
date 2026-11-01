@@ -64,11 +64,18 @@ public class NewsPollingService : BackgroundService
     {
         if (_client.ConnectionState != ConnectionState.Connected)
         {
-            _logger.LogDebug("Skipping news check - not connected to Discord.");
+            _logger.LogInformation("Skipping news check - not connected to Discord.");
             return;
         }
 
-        foreach (var subscription in await _store.GetAllAsync())
+        var subscriptions = await _store.GetAllAsync();
+        if (subscriptions.Count == 0)
+        {
+            _logger.LogInformation("Skipping news check - no feeds are being followed.");
+            return;
+        }
+
+        foreach (var subscription in subscriptions)
         {
             try
             {
@@ -96,6 +103,8 @@ public class NewsPollingService : BackgroundService
         var unseen = articles.Where(a => !seen.Contains(a.Id)).ToList();
         if (unseen.Count == 0)
         {
+            _logger.LogInformation("News check for '{Name}' in guild {GuildId}: nothing posted - no new articles ({Total} in feed, all already seen).",
+                subscription.Name, subscription.GuildId, articles.Count);
             return;
         }
 
@@ -109,8 +118,13 @@ public class NewsPollingService : BackgroundService
             await _store.MarkSeenAsync(subscription.GuildId, subscription.Name, skipped);
         }
 
+        var filteredCount = unseen.Count - matching.Count;
+        var cappedCount = matching.Count - toPost.Count;
+
         if (toPost.Count == 0)
         {
+            _logger.LogInformation("News check for '{Name}' in guild {GuildId}: nothing posted - all {Count} new article(s) filtered out by keywords.",
+                subscription.Name, subscription.GuildId, unseen.Count);
             return;
         }
 
@@ -123,7 +137,9 @@ public class NewsPollingService : BackgroundService
             await _store.MarkSeenAsync(subscription.GuildId, subscription.Name, [article.Id]);
         }
 
-        _logger.LogInformation("Posted {Count} news article(s) for '{Name}' to #{Channel}.",
-            toPost.Count, subscription.Name, channel.Name);
+        _logger.LogInformation("News check for '{Name}' in guild {GuildId}: posted {Count} article(s) to #{Channel} " +
+            "({Filtered} filtered out, {Capped} skipped over the {Max}-per-check cap).",
+            subscription.Name, subscription.GuildId, toPost.Count, channel.Name,
+            filteredCount, cappedCount, Math.Max(1, _options.MaxPostsPerPoll));
     }
 }
