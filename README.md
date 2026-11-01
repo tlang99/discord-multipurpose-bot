@@ -16,8 +16,10 @@ controls every aspect of passive content filtering — see the table below.
 order:
 1. **Invite links** — optional, off by default (`/automod block-invites`).
 2. **Custom banned words** — your own list, managed with `/automod word-add|word-remove|word-list`.
-3. **Built-in profanity filter** — a curated list of common English profanity, on by default
-   (`/automod profanity-filter`).
+3. **Built-in profanity filter** — a curated list of common English profanity, off by default
+   (`/automod profanity-filter`). Text filters ignore case, spaces and punctuation so "f u c k" is caught, which
+   also means a filtered word can be found across or inside other words (e.g. "this hit"), so expect some false
+   positives.
 4. **Image/GIF content moderation** — directly-uploaded image and GIF attachments, plus raw image/GIF URLs pasted
    in a message, are sent to [Sightengine](https://sightengine.com) for classification. Independently togglable:
    explicit content, suggestive-but-not-explicit content, and offensive content (hate symbols, obscene gestures)
@@ -226,4 +228,9 @@ dotnet run
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work without being in voice; all music commands must be used in `#music`) | — |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
-| `/lfg-setup` | Manage Server | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Manage Messages to pin the panel |
+| `/lfg-setup` | Manage Server, plus Send Messages and Pin Messages in that channel | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Pin Messages to pin the panel |
+| `/help` | — | — |
+| `/help-post` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the list |
+
+`/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose
+highest role is below yours (the server owner can act on anyone), and the bot's own role has to be above theirs too.
