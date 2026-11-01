@@ -214,6 +214,17 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
     private async Task FollowAsync(string name, string feedUrl, ITextChannel channel, string displayName,
         NewsPresetInfo? preset)
     {
+        // Without this, Manage Server alone would let someone make the bot post into channels they can't see
+        // (e.g. staff-only ones). Only View Channel is required: news channels are usually read-only, so the person
+        // setting it up may not be able to send messages there themselves.
+        var userPermissions = (Context.User as IGuildUser)?.GetPermissions(channel) ?? default;
+        if (!userPermissions.ViewChannel)
+        {
+            await RespondAsync($"You need to be able to see {channel.Mention} to have news posted there.",
+                ephemeral: true);
+            return;
+        }
+
         var botPermissions = Context.Guild.CurrentUser.GetPermissions(channel);
         if (!botPermissions.ViewChannel || !botPermissions.SendMessages || !botPermissions.EmbedLinks)
         {
@@ -243,7 +254,10 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to read feed {Url} while subscribing.", feedUrl);
-            await FollowupAsync("Couldn't read that feed - make sure the URL points to an RSS or Atom feed.", ephemeral: true);
+            await FollowupAsync(IsBlockedAddress(ex)
+                    ? "That feed points to a private or internal network address, which isn't allowed."
+                    : "Couldn't read that feed - make sure the URL points to an RSS or Atom feed.",
+                ephemeral: true);
             return;
         }
 
@@ -268,6 +282,20 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
             $"Use `/news latest {name}` to see what's out right now" +
             (subscription.IncludeKeywords.Count > 0 ? $", and `/news filter-show {name}` to see what gets posted." : "."),
             ephemeral: true);
+    }
+
+    /// <summary>HttpClient wraps connect-time failures, so look through the inner exceptions.</summary>
+    private static bool IsBlockedAddress(Exception? ex)
+    {
+        for (; ex is not null; ex = ex.InnerException)
+        {
+            if (ex is BlockedAddressException)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     [GeneratedRegex("^[a-z0-9-]{1,32}$")]

@@ -83,7 +83,9 @@ builder.Services.AddHttpClient<INewsFeedReader, RssNewsFeedReader>(client =>
     client.Timeout = TimeSpan.FromSeconds(20);
     // Some feed hosts reject requests with no User-Agent.
     client.DefaultRequestHeaders.UserAgent.ParseAdd("ModBot/1.0 (Discord news bot)");
-});
+})
+// Feed URLs come from server admins, so only allow connections to the public internet.
+.ConfigurePrimaryHttpMessageHandler(PublicNetworkHttpHandler.Create);
 
 builder.Services.AddSingleton<AutoModerationHandler>();
 
