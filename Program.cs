@@ -107,6 +107,8 @@ builder.Services.AddSingleton<IModerationService, ModerationService>();
 
 // LFG posts are held in memory only (see ILfgService), so this is the single source of truth while the bot runs.
 builder.Services.AddSingleton<ILfgService, LfgService>();
+builder.Services.AddSingleton<ModBot.Modules.Lfg.LfgPoster>();
+builder.Services.AddSingleton<ModBot.Modules.Music.MusicService>();
 
 builder.Services.AddHttpClient<IImageModerationService, SightengineImageModerationService>(client =>
 {
@@ -156,6 +158,7 @@ builder.Services.AddHttpClient<IChatService, OllamaChatService>(client =>
 });
 
 builder.Services.AddSingleton<AutoModerationHandler>();
+builder.Services.AddSingleton<ChatActionParser>();
 builder.Services.AddSingleton<ChatHandler>();
 
 builder.Services.AddHostedService<DiscordBotService>();
