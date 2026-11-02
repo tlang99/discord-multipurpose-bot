@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using ModBot.Models;
 using ModBot.Services.Reminders;
+using ModBot.Services.Storage;
 
 namespace ModBot.Tests;
 
@@ -10,20 +11,22 @@ public sealed class ReminderDelivererTests : IDisposable
 
     private readonly TempReminderStore _temp = new();
     private readonly FakeSender _sender = new();
+    private readonly FlakyStore _store;
     private readonly ReminderDeliverer _deliverer;
 
     public ReminderDelivererTests()
     {
-        _deliverer = new ReminderDeliverer(_temp.Store, _sender, NullLogger<ReminderDeliverer>.Instance);
+        _store = new FlakyStore(_temp.Store);
+        _deliverer = new ReminderDeliverer(_store, _sender, NullLogger<ReminderDeliverer>.Instance);
     }
 
     public void Dispose() => _temp.Dispose();
 
-    private async Task<Reminder> AddAsync(DateTimeOffset dueAt, int attempts = 0)
+    private async Task<Reminder> AddAsync(DateTimeOffset dueAt, int attempts = 0, string id = "abcd")
     {
         var reminder = new Reminder
         {
-            Id = "abcd", GuildId = 1, ChannelId = 10, UserId = 100, Text = "get a beer", DueAt = dueAt,
+            Id = id, GuildId = 1, ChannelId = 10, UserId = 100, Text = "get a beer", DueAt = dueAt,
             Attempts = attempts,
         };
         await _temp.Store.TryAddAsync(reminder, maxPerUser: 25);
@@ -139,6 +142,73 @@ public sealed class ReminderDelivererTests : IDisposable
         Assert.DoesNotContain("offline", note);
     }
 
+    [Fact]
+    public async Task Someone_who_left_the_server_gets_nothing_and_it_is_dropped()
+    {
+        _sender.Recipient = ReminderRecipient.NotInServer;
+        await AddAsync(Now.AddSeconds(-10));
+
+        await _deliverer.DeliverDueAsync(Now);
+
+        Assert.Equal(0, _sender.ChannelSends);
+        Assert.Equal(0, _sender.DmSends);
+        Assert.Null(await StoredAsync());
+    }
+
+    [Fact]
+    public async Task Someone_who_cant_post_there_any_more_gets_a_dm_instead()
+    {
+        _sender.Recipient = ReminderRecipient.CantPostInChannel;
+        await AddAsync(Now.AddSeconds(-10));
+
+        await _deliverer.DeliverDueAsync(Now);
+
+        Assert.Equal(0, _sender.ChannelSends);
+        Assert.Equal(1, _sender.DmSends);
+        Assert.Null(await StoredAsync());
+    }
+
+    [Fact]
+    public async Task An_unanswered_member_check_counts_as_a_failed_attempt()
+    {
+        _sender.Recipient = ReminderRecipient.Unknown;
+        await AddAsync(Now.AddSeconds(-10));
+
+        await _deliverer.DeliverDueAsync(Now);
+
+        Assert.Equal(0, _sender.ChannelSends + _sender.DmSends);
+        Assert.Equal(1, (await StoredAsync())!.Attempts);
+    }
+
+    [Fact]
+    public async Task Sent_but_not_removed_is_not_sent_again()
+    {
+        await AddAsync(Now.AddSeconds(-10));
+        _store.FailRemoves = true;
+
+        await _deliverer.DeliverDueAsync(Now);
+        Assert.Equal(1, _sender.ChannelSends);
+
+        // The claim has expired and the disk works again: it's removed, not re-sent.
+        _store.FailRemoves = false;
+        await _deliverer.DeliverDueAsync(Now + ReminderDeliverer.ClaimFor + TimeSpan.FromSeconds(1));
+
+        Assert.Equal(1, _sender.ChannelSends);
+        Assert.Null(await StoredAsync());
+    }
+
+    [Fact]
+    public async Task One_failing_reminder_doesnt_hold_up_the_rest()
+    {
+        await AddAsync(Now.AddSeconds(-20), id: "aaaa");
+        await AddAsync(Now.AddSeconds(-10), id: "bbbb");
+        _store.FailRemoves = true;
+
+        await _deliverer.DeliverDueAsync(Now);
+
+        Assert.Equal(2, _sender.ChannelSends);
+    }
+
     [Theory]
     [InlineData(1, 2)]
     [InlineData(3, 8)]
@@ -146,8 +216,37 @@ public sealed class ReminderDelivererTests : IDisposable
     public void Retry_gaps_double_up_to_an_hour(int attempts, int minutes)
         => Assert.Equal(TimeSpan.FromMinutes(minutes), ReminderDeliverer.RetryGap(attempts));
 
+    /// <summary>The real JSON store, except removes can be made to fail like a disk error.</summary>
+    private sealed class FlakyStore(IReminderStore inner) : IReminderStore
+    {
+        public bool FailRemoves { get; set; }
+
+        public Task<bool> RemoveAsync(string id)
+            => FailRemoves ? throw new IOException("disk full") : inner.RemoveAsync(id);
+
+        public Task<ReminderAddResult> TryAddAsync(Reminder reminder, int maxPerUser)
+            => inner.TryAddAsync(reminder, maxPerUser);
+
+        public Task<IReadOnlyList<Reminder>> GetForUserAsync(ulong guildId, ulong userId)
+            => inner.GetForUserAsync(guildId, userId);
+
+        public Task<IReadOnlyList<Reminder>> GetDueAsync(DateTimeOffset now) => inner.GetDueAsync(now);
+
+        public Task<bool> TryClaimAsync(string id, DateTimeOffset now, DateTimeOffset claimUntil)
+            => inner.TryClaimAsync(id, now, claimUntil);
+
+        public Task<(ReminderCancelResult Result, Reminder? Reminder)> TryCancelAsync(string id, ulong guildId,
+            ulong userId, DateTimeOffset now) => inner.TryCancelAsync(id, guildId, userId, now);
+
+        public Task<bool> UpdateAsync(string id, Action<Reminder> update) => inner.UpdateAsync(id, update);
+    }
+
     private sealed class FakeSender : IReminderSender
     {
+        public ReminderRecipient Recipient { get; set; } = ReminderRecipient.CanPostInChannel;
+
+        public Task<ReminderRecipient> CheckRecipientAsync(Reminder reminder) => Task.FromResult(Recipient);
+
         public bool ChannelWorks { get; set; } = true;
         public bool DmWorks { get; set; } = true;
         public int ChannelSends { get; private set; }

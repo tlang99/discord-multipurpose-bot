@@ -18,6 +18,36 @@ public class DiscordReminderSender : IReminderSender
         _logger = logger;
     }
 
+    public async Task<ReminderRecipient> CheckRecipientAsync(Reminder reminder)
+    {
+        if (_client.GetGuild(reminder.GuildId) is not { } guild)
+        {
+            return ReminderRecipient.NotInServer;
+        }
+
+        IGuildUser? member;
+        try
+        {
+            // Falls back to asking Discord if the member isn't cached; null means they're not in the server.
+            member = await ((IGuild)guild).GetUserAsync(reminder.UserId, CacheMode.AllowDownload);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "Couldn't check user {UserId} for reminder {Id}.", reminder.UserId, reminder.Id);
+            return ReminderRecipient.Unknown;
+        }
+
+        if (member is null)
+        {
+            return ReminderRecipient.NotInServer;
+        }
+
+        return guild.GetChannel(reminder.ChannelId) is { } channel and IMessageChannel &&
+               ReminderPermissions.CanPost(member, channel) && ReminderPermissions.CanPost(guild.CurrentUser, channel)
+            ? ReminderRecipient.CanPostInChannel
+            : ReminderRecipient.CantPostInChannel;
+    }
+
     public async Task<bool> TrySendInChannelAsync(Reminder reminder, string lateNote)
     {
         if (_client.GetChannel(reminder.ChannelId) is not IMessageChannel channel)

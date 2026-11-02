@@ -29,10 +29,17 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
+        // Slash commands work even where the person can't type, so without this anyone could have the bot post their
+        // text in a read-only channel like #rules.
+        if (Context.User is not SocketGuildUser member || !ReminderPermissions.CanPost(member, channel))
+        {
+            await RespondAsync($"You can't post in {channel.Mention}, so I can't post a reminder there for you.",
+                ephemeral: true);
+            return;
+        }
+
         // It's delivered here later, so make sure that'll work now rather than failing silently then.
-        var permissions = Context.Guild.CurrentUser.GetPermissions(channel);
-        var canSend = channel is IThreadChannel ? permissions.SendMessagesInThreads : permissions.SendMessages;
-        if (!permissions.ViewChannel || !canSend)
+        if (!ReminderPermissions.CanPost(Context.Guild.CurrentUser, channel))
         {
             await RespondAsync($"I can't post in {channel.Mention}, so I couldn't deliver a reminder here. Try another " +
                                "channel.", ephemeral: true);
