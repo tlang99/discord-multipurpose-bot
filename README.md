@@ -82,6 +82,11 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
   **Add song** (a pop-up), **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and
   **Remove mine**. The buttons keep working across restarts. Running `/music-menu` again replaces it.
+- **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
+  (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
+  minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
+  notice. Servers with a menu don't get a "Now playing" post for each song either, since the menu shows it.
+  `Music:KeepMenuAtBottom: false` turns the reposting off.
 
 Commands:
 - `/add query` — a song name (searches YouTube), or a YouTube song or playlist link. Just queues it.
@@ -94,7 +99,7 @@ Commands:
 Adding works from anywhere. Controlling playback (pause, stop, loop, voting) only works from the bot's voice
 channel, except for moderators (Move Members or Manage Messages), who can control it from anywhere. Only YouTube
 links are accepted. All music commands only work in the text channel named by `Music:ChannelName` (default `music`;
-empty allows any channel), so replies and the "Now playing" announcement for each song stay out of the main chat.
+empty allows any channel), so replies (and "Now playing" posts, in servers without a menu) stay out of the main chat.
 Elsewhere the bot replies privately pointing to that channel. The bot leaves voice after `Music:IdleTimeoutSeconds`
 (default 2 minutes) with nobody listening or nothing playing; the queue stays. If Lavalink isn't running, the music
 commands say so and everything else keeps working. A saved song that YouTube won't play any more is skipped with a
@@ -378,7 +383,7 @@ somewhere else.
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/add`, `/play`, `/start` | — (`/play` starts the music, and `/start` plays the queue, in your voice channel; adding works from anywhere) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (controlling playback needs you in the bot's voice channel unless you have Move Members or Manage Messages; `/queue`, `/nowplaying`, `/remove` and `/remove-mine` work from anywhere; all music commands must be used in `#music`) | — |
-| `/music-menu` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the menu |
+| `/music-menu` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the menu; Manage Messages to delete the pin notices (optional) |
 | `/clearqueue`, removing others' songs | Move Members or Manage Messages | — |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
 | `/lfg-setup` | Manage Server, plus Send Messages and Pin Messages in that channel | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Pin Messages to pin the panel |

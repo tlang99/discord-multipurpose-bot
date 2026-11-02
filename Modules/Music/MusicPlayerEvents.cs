@@ -27,6 +27,12 @@ public sealed class MusicPlayerEvents
     /// <summary>The player is gone: /stop, the idle timeout, or the bot was disconnected. Gets the server ID.</summary>
     public Func<ulong, Task>? PlayerClosed { get; set; }
 
+    /// <summary>Whether to post "Now playing" for each song in a server. Not where the music menu already shows it:
+    /// the extra posts would just push the menu up.</summary>
+    public Func<ulong, bool>? AnnounceSongs { get; set; }
+
+    internal bool ShouldAnnounce(ulong guildId) => AnnounceSongs?.Invoke(guildId) ?? true;
+
     internal Task RaiseTrackStartedAsync(MusicPlayer player, ITrackQueueItem item)
         => RunAsync(TrackStarted is { } handler ? () => handler(player, item) : null, player.GuildId);
 

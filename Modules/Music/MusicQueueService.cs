@@ -41,7 +41,23 @@ public class MusicQueueService : IHostedService
     /// <summary>Skip votes for the song playing in each server. In memory: they only matter for that one song.</summary>
     private readonly ConcurrentDictionary<ulong, SkipVotes> _votes = new();
 
+    private const string MenuTitle = "🎶 Music queue";
+
+    /// <summary>Keeping the menu at the bottom: wait for this long a quiet spell before reposting it...</summary>
+    private static readonly TimeSpan RepostWhenQuietFor = TimeSpan.FromSeconds(8);
+
+    /// <summary>...but not longer than this in a chat that never goes quiet...</summary>
+    private static readonly TimeSpan RepostWithin = TimeSpan.FromMinutes(2);
+
+    /// <summary>...and never more often than this.</summary>
+    private static readonly TimeSpan RepostAtMostEvery = TimeSpan.FromMinutes(1);
+
     private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _menuLocks = new();
+
+    /// <summary>Where each server's menu is, so every message in the server needn't read the saved queue to check.</summary>
+    private readonly ConcurrentDictionary<ulong, (ulong ChannelId, ulong MessageId)> _menus = new();
+
+    private readonly ConcurrentDictionary<ulong, RepostTimer> _reposts = new();
     private int _menusRestored;
 
     public MusicQueueService(IMusicQueueStore store, MusicService music, MusicPlayerEvents events,
@@ -56,6 +72,9 @@ public class MusicQueueService : IHostedService
         events.TrackStarted = OnTrackStartedAsync;
         events.TrackEnded = OnTrackEndedAsync;
         events.PlayerClosed = OnPlayerClosedAsync;
+
+        // The menu shows what's playing; "Now playing" posts as well would only push it up the channel.
+        events.AnnounceSongs = guildId => !_menus.ContainsKey(guildId);
     }
 
     public int SongsPerPerson => Math.Max(1, _options.SongsPerPerson);
@@ -344,6 +363,7 @@ public class MusicQueueService : IHostedService
                                "links there.");
             }
 
+            _menus[guildId] = (channel.Id, menu.Id);
             var pinned = await TryPinAsync(menu);
             await _store.MutateAsync(guildId, s =>
             {
@@ -504,7 +524,9 @@ public class MusicQueueService : IHostedService
 
             if (await FetchMenuAsync(channelId, messageId) is not { } menu)
             {
-                // Deleted by someone: forget it, so this stops trying. /music-menu posts a new one.
+                // Deleted by someone: forget it, so this stops trying (and songs are announced again). /music-menu
+                // posts a new one.
+                _menus.TryRemove(new KeyValuePair<ulong, (ulong, ulong)>(guildId, (channelId, messageId)));
                 await _store.MutateAsync(guildId, s =>
                 {
                     if (s.MenuMessageId == messageId)
@@ -553,7 +575,7 @@ public class MusicQueueService : IHostedService
     {
         var embed = new EmbedBuilder()
             .WithColor(new Color(0x1DB954))
-            .WithTitle("🎶 Music queue")
+            .WithTitle(MenuTitle)
             .WithFooter($"Songs play in turns: one from each person, round and round. Up to {SongsPerPerson} waiting " +
                         "each. Skipping takes votes from more than half the listeners - or the person who picked it." +
                         (state.LoopQueue ? " Looping the queue: finished songs go back in." : ""));
@@ -672,28 +694,151 @@ public class MusicQueueService : IHostedService
         }
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // Known before the bot connects, so songs aren't announced in servers that have a menu.
+        foreach (var state in await _store.GetAllAsync())
+        {
+            if (state is { MenuChannelId: { } channelId, MenuMessageId: { } messageId })
+            {
+                _menus[state.GuildId] = (channelId, messageId);
+            }
+        }
+
+        _client.MessageReceived += OnMessageReceivedAsync;
+
         // After a restart the menus still say what was playing before; set them straight once the bot is back.
         _client.Ready += () =>
         {
             if (Interlocked.Exchange(ref _menusRestored, 1) == 0)
             {
+                foreach (var guildId in _menus.Keys)
+                {
+                    RefreshMenu(guildId);
+                }
+            }
+
+            return Task.CompletedTask;
+        };
+    }
+
+    /// <summary>Keeps the menu at the bottom of its channel: messages posted under it get it reposted below them,
+    /// once the channel's had a quiet moment (see <see cref="RepostWhenQuietFor"/>).</summary>
+    private Task OnMessageReceivedAsync(SocketMessage message)
+    {
+        if (message.Channel is not SocketTextChannel channel ||
+            !_menus.TryGetValue(channel.Guild.Id, out var menu) || menu.ChannelId != channel.Id ||
+            message.Id == menu.MessageId)
+        {
+            return Task.CompletedTask;
+        }
+
+        var fromBot = message.Author.Id == _client.CurrentUser.Id;
+
+        // Discord's "pinned a message" notice for the menu: tidy it away (needs Manage Messages), and either way it
+        // doesn't count as burying the menu, or every repost would set off another.
+        if (message.Type == MessageType.ChannelPinnedMessage)
+        {
+            if (fromBot && channel.Guild.CurrentUser.GetPermissions(channel).ManageMessages)
+            {
                 _ = Task.Run(async () =>
                 {
-                    foreach (var state in await _store.GetAllAsync())
+                    try
                     {
-                        if (state.MenuMessageId is not null)
-                        {
-                            RefreshMenu(state.GuildId);
-                        }
+                        await message.DeleteAsync();
+                    }
+                    catch (HttpException ex)
+                    {
+                        _logger.LogDebug(ex, "Couldn't delete the pin notice for the music menu.");
                     }
                 });
             }
 
             return Task.CompletedTask;
-        };
+        }
+
+        // A new copy of the menu itself (reposting) isn't something to repost over.
+        if (!_options.KeepMenuAtBottom || fromBot && message.Embeds.Any(e => e.Title == MenuTitle))
+        {
+            return Task.CompletedTask;
+        }
+
+        ScheduleRepost(channel);
         return Task.CompletedTask;
+    }
+
+    private void ScheduleRepost(ITextChannel channel)
+    {
+        var timer = _reposts.GetOrAdd(channel.GuildId, _ => new RepostTimer());
+        CancellationTokenSource pending;
+        TimeSpan delay;
+        lock (timer)
+        {
+            var now = DateTimeOffset.UtcNow;
+            timer.BuriedSince ??= now;
+
+            // After a quiet spell, but not later than RepostWithin of it first being buried, nor sooner than a
+            // minute after the last repost.
+            var when = Min(now + RepostWhenQuietFor, timer.BuriedSince.Value + RepostWithin);
+            when = Max(when, timer.LastRepost + RepostAtMostEvery);
+            delay = Max(when - now, TimeSpan.Zero);
+
+            timer.Pending?.Cancel();
+            timer.Pending?.Dispose();
+            timer.Pending = pending = new CancellationTokenSource();
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delay, pending.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // a newer message pushed it back
+            }
+
+            lock (timer)
+            {
+                if (timer.Pending != pending)
+                {
+                    return;
+                }
+
+                timer.Pending = null;
+                timer.BuriedSince = null;
+                timer.LastRepost = DateTimeOffset.UtcNow;
+            }
+
+            try
+            {
+                // Only if this is still where the menu lives (an admin may have moved it meanwhile).
+                if (_menus.TryGetValue(channel.GuildId, out var menu) && menu.ChannelId == channel.Id)
+                {
+                    await PostMenuAsync(channel);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Couldn't move the music menu to the bottom of channel {ChannelId}.", channel.Id);
+            }
+        });
+    }
+
+    private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
+
+    private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
+
+    private static TimeSpan Max(TimeSpan a, TimeSpan b) => a > b ? a : b;
+
+    private sealed class RepostTimer
+    {
+        public DateTimeOffset LastRepost { get; set; }
+
+        public DateTimeOffset? BuriedSince { get; set; }
+
+        public CancellationTokenSource? Pending { get; set; }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

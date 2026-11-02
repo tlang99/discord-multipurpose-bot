@@ -61,7 +61,7 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
         }
 
         var identifier = track.Track?.Identifier;
-        if (identifier is null || _textChannel is null)
+        if (identifier is null || _textChannel is null || _events?.ShouldAnnounce(GuildId) == false)
         {
             return;
         }

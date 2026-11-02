@@ -24,6 +24,10 @@ public class MusicOptions
     /// playlist filling the queue.</summary>
     public int SongsPerPerson { get; set; } = 10;
 
+    /// <summary>Repost the music menu at the bottom of its channel when messages build up under it, so it stays in
+    /// view. At most once a minute, and only after the channel's been quiet for a few seconds.</summary>
+    public bool KeepMenuAtBottom { get; set; } = true;
+
     /// <summary>The only text channel music commands work in, by name (case-insensitive). Song announcements and the
     /// music menu go there too. Empty allows any channel.</summary>
     public string ChannelName { get; set; } = "music";
