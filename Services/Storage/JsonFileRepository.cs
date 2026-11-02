@@ -151,6 +151,10 @@ public class JsonFileRepository<TValue>
         await using (var stream = File.Create(tempPath))
         {
             await JsonSerializer.SerializeAsync(stream, data, SerializerOptions);
+
+            // Onto the disk itself, not just the OS cache, before the swap: otherwise a power cut right after the
+            // move can still leave an empty file in place of the old one.
+            stream.Flush(flushToDisk: true);
         }
 
         File.Move(tempPath, _filePath, overwrite: true);
