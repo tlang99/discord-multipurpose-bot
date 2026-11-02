@@ -26,7 +26,7 @@ public static partial class PollRequestReader
     {
         message = StraightenApostrophes(message);
         var phrase = CreatePhraseRegex().Match(message);
-        if (!phrase.Success || IsQuestionAbout(message, phrase.Index))
+        if (!phrase.Success || !IsCommand(message, phrase.Index))
         {
             return null;
         }
@@ -38,16 +38,18 @@ public static partial class PollRequestReader
         // what came before is. The length and multiple-choice wording come off first, so they don't count as the poll.
         // The lead-in to the phrase isn't part of it either: "is game night friday? can you [make a poll]".
         var text = TakeSettings(message[(phrase.Index + phrase.Length)..], ref hours, ref allowMultiple);
-        if (TakeBackRegex().IsMatch(text))
+        if (TakeBackRegex().IsMatch(text) || LaterRegex().IsMatch(text))
         {
-            return null; // "make a poll? no wait, nvm"
+            return null; // "make a poll? no wait, nvm", "make a poll later"
         }
 
         var before = TrailingLeadInRegex().Replace(message[..phrase.Index], "");
         var readByRules = true;
         if (NothingLeftRegex().IsMatch(StripFiller(text)))
         {
-            text = TakeSettings(before, ref hours, ref allowMultiple);
+            // Only a question written before the phrase is the poll ("is game night friday? make a poll"). Anything
+            // else there ("lol ok. make a poll") isn't, so the person is asked what the poll should be.
+            text = LastQuestion(TakeSettings(before, ref hours, ref allowMultiple)) ?? "";
         }
         else if (!text.Contains('?') && !OptionsLabelRegex().IsMatch(text) && LastQuestion(before) is { } question)
         {
@@ -213,15 +215,17 @@ public static partial class PollRequestReader
     }
 
     /// <summary>
-    /// "how do I make a poll", "don't make a poll yet", "did you make a poll?", "we should do a vote": talking about
-    /// a poll, not asking for one. Only the part of the sentence right before the phrase counts (back to the last
-    /// comma or sentence end), so "what should we play tonight? make a poll" and "hey what's up, make a poll" are
-    /// still requests.
+    /// Whether the phrase is an instruction to the bot: it opens its sentence (back to the last comma or sentence
+    /// end), or follows only a polite lead-in ("hey", "can you", "pls just", "I want you to"). Everything else is
+    /// talking about polls, whatever the wording: "how do I make a poll", "don't make a poll yet", "you make a poll
+    /// every day", "that poll the squad did". Accepting only instructions, rather than listing what to refuse, is
+    /// what keeps new wordings from posting polls. "What should we play? make a poll" and "hey what's up, make a
+    /// poll" still count, since the phrase opens its own sentence or clause.
     /// </summary>
-    private static bool IsQuestionAbout(string message, int phraseIndex)
+    private static bool IsCommand(string message, int phraseIndex)
     {
         var before = message[..phraseIndex];
-        return QuestionLeadRegex().IsMatch(before[(before.LastIndexOfAny(['?', '.', '!', '\n', ',']) + 1)..]);
+        return LeadInOnlyRegex().IsMatch(before[(before.LastIndexOfAny(['?', '.', '!', '\n', ',']) + 1)..]);
     }
 
     /// <summary>The question that <paramref name="text"/> ends with ("lol ok. what should we play?" → "what should
@@ -250,15 +254,25 @@ public static partial class PollRequestReader
     [GeneratedRegex(@"^\W*(?:(?:hey|yo|ok|okay|please|pls|can\s+you|could\s+you|would\s+you|will\s+you|go\s+ahead\s+and)[\s,]+)*(?:end|close|stop|finish|lock)\s+(?:the\s+|my\s+|this\s+|that\s+|our\s+)?poll\b(?:[\s,]+(?:now|please|pls|early|for\s+me))*[\s.!?]*$", RegexOptions.IgnoreCase)]
     private static partial Regex EndRequestRegex();
 
-    [GeneratedRegex(@"\b(?:how|where|why|what)\b|\b(?:can|could|do|may|should)\s+i\b|\bis\s+there\b|\bare\s+you\s+able\b|\b(?:don'?t|do\s+not|didn'?t|did|never|won'?t|shouldn'?t|no\s+need\s+to|not\s+going\s+to)\b|\b(?:should|could|shall)\s+we\b|\bwe\s+(?:should|could|might|can)\b|\blet'?s\s+not\b|\bi(?:'ll|'m|\s+will|\s+am|\s+might|\s+was|\s+(?:want|wanna|need|have\s+to|gotta)(?!\s+(?:you|u)\b))\b|\blet\s+me\b|\b(?:gonna|going\s+to|about\s+to|trying\s+to|tried\s+to)\b|\b(?:can'?t|cannot|can\s+not|couldn'?t|doesn'?t|isn'?t|wasn'?t)\b|\bi\s+(?:can|could)\b|\bis\s+it\s+possible\b|\b(?:does|do)\s+(?:anyone|anybody|someone|somebody|everyone)\b|\b(?:anyone|anybody|someone|somebody|who)\s+(?:wants?|wanna)\b|\b(?:if|when|once|after|before|unless)\s+(?:you|u|someone|we)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex QuestionLeadRegex();
+    /// <summary>A polite lead-in to an instruction: "hey", "pls just", "can you", "could u please", "I want you to",
+    /// "go ahead and", or a name ("@Sam").</summary>
+    private const string LeadInPattern =
+        @"(?:hey|yo|ok|okay|so|please|pls|plz|bro|dude|bot|just|now|quickly|quick|real\s+quick|go\s+ahead\s+and|(?:can|could|would|will)\s+(?:you|u)(?:\s+(?:please|pls|just))*|i\s+(?:want|need|would\s+like)\s+(?:you|u)\s+to|i'?d\s+like\s+(?:you|u)\s+to|@\S+)";
+
+    /// <summary>Nothing but lead-ins (or nothing at all) before the phrase in its sentence.</summary>
+    [GeneratedRegex(@"^[\s,]*(?:" + LeadInPattern + @"(?=[\s,]|$)[\s,]*)*$", RegexOptions.IgnoreCase)]
+    private static partial Regex LeadInOnlyRegex();
 
     [GeneratedRegex(@"\bmy\s+poll\b", RegexOptions.IgnoreCase)]
     private static partial Regex MyPollRegex();
 
-    /// <summary>Taking the request back: "make a poll? no wait", "nvm", "jk", "scratch that".</summary>
-    [GeneratedRegex(@"\b(?:no\s+wait|wait\s+no|never\s*mind|nvm|jk|just\s+kidding|scratch\s+that|cancel\s+that|forget\s+it)\b", RegexOptions.IgnoreCase)]
+    /// <summary>Taking the request back: "make a poll? no wait", "nah", "nvm", "jk", "scratch that".</summary>
+    [GeneratedRegex(@"\b(?:no\s+wait|wait\s+no|nah|nope|actually\s+no|actually\s+don'?t|never\s*mind|nvm|jk|just\s+kidding|scratch\s+that|cancel\s+that|forget\s+it)\b", RegexOptions.IgnoreCase)]
     private static partial Regex TakeBackRegex();
+
+    /// <summary>Asking for it later, not now: "make a poll later", "tomorrow", "in a bit".</summary>
+    [GeneratedRegex(@"^\W*(?:later|tomorrow|tmrw|tmr|tonight|soon|in\s+a\s+(?:bit|few|minute|min|sec|second|while)|after\s+(?:this|the\s+game|the\s+match))\W*$", RegexOptions.IgnoreCase)]
+    private static partial Regex LaterRegex();
 
     /// <summary>"for 2 days", "for an hour", "for 3h", "for a week" (<c>length</c>), or "multiple choice", "allow
     /// multiple answers" (<c>multi</c>).</summary>
@@ -275,8 +289,8 @@ public static partial class PollRequestReader
     [GeneratedRegex(@"^\W*(?:what|which|who|whom|whose|where|when|how|why)\b", RegexOptions.IgnoreCase)]
     private static partial Regex OpenQuestionRegex();
 
-    /// <summary>"can you", "could you please", "hey", "ok so" right before the poll phrase.</summary>
-    [GeneratedRegex(@"(?:\b(?:hey|yo|ok|okay|so|please|pls|(?:can|could|would|will)\s+you(?:\s+please)?)[\s,]*)+$", RegexOptions.IgnoreCase)]
+    /// <summary>The lead-in right before the poll phrase ("is game night friday? can you [make a poll]").</summary>
+    [GeneratedRegex(@"(?:(?<![\w'@])" + LeadInPattern + @"[\s,]*)+$", RegexOptions.IgnoreCase)]
     private static partial Regex TrailingLeadInRegex();
 
     /// <summary>Nothing of the poll after the phrase: "?", "pls", "now please!" ("can you make a poll?").</summary>

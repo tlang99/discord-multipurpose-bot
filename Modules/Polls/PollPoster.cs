@@ -186,31 +186,47 @@ public partial class PollPoster
 
         if (repliedToId is { } id)
         {
-            return await channel.GetMessageAsync(id) is IUserMessage replied && replied.Author.Id == bot.Id
-                ? await EndAsync(asker, replied)
-                : "The message you replied to isn't one of my polls.";
+            if (await channel.GetMessageAsync(id) is not IUserMessage replied || replied.Author.Id != bot.Id)
+            {
+                return "The message you replied to isn't one of my polls.";
+            }
+
+            // "End my poll" on someone else's poll: a moderator could end it, but they said theirs, so don't guess.
+            return saidMine && OwnerOf(replied, bot.Id) is { } owner && owner != asker.Id
+                ? "That poll isn't yours. Say \"end the poll\" in your reply if you mean that one."
+                : await EndAsync(asker, replied);
         }
 
-        var poll = await FindOpenPollAsync(channel, saidMine ? asker.Id : null, bot.Id);
-        if (poll is null)
+        if (saidMine)
         {
-            return $"I can't find an open poll{(saidMine ? " of yours" : "")} in the last 50 messages here. Reply to " +
-                   "the poll with \"end the poll\", or right-click it → Apps → End poll.";
+            return await FindOpenPollAsync(channel, m => OwnerOf(m, bot.Id) == asker.Id) is { } mine
+                ? await EndAsync(asker, mine)
+                : "I can't find an open poll of yours in the last 50 messages here. Reply to the poll with \"end " +
+                  "the poll\", or right-click it → Apps → End poll.";
         }
 
-        return OwnerOf(poll, bot.Id) == asker.Id
-            ? await EndAsync(asker, poll)
-            : "The newest poll here isn't yours, so I'm not sure which one you mean. Reply to the poll with \"end the " +
-              "poll\", or say \"end my poll\" for your own.";
+        // "End that poll" means the newest open poll here, anyone's, including members' own Discord polls. It's only
+        // ended if it's one of the bot's polls that this person asked for.
+        var newest = await FindOpenPollAsync(channel, _ => true);
+        if (newest is null)
+        {
+            return "I can't find an open poll in the last 50 messages here. Reply to the poll with \"end the poll\", " +
+                   "or right-click it → Apps → End poll.";
+        }
+
+        return OwnerOf(newest, bot.Id) == asker.Id
+            ? await EndAsync(asker, newest)
+            : "The newest poll here isn't one of yours, so I'm not sure which one you mean. Reply to the poll with " +
+              "\"end the poll\", or say \"end my poll\" for your own.";
     }
 
-    /// <summary>The newest of the bot's polls that's still open among the last 50 messages in the channel: the
-    /// person's own, or anyone's when <paramref name="ownerId"/> is null.</summary>
-    public static async Task<IUserMessage?> FindOpenPollAsync(ITextChannel channel, ulong? ownerId, ulong botId)
+    /// <summary>The newest open poll among the last 50 messages in the channel that <paramref name="matches"/>, from
+    /// any author (members can post Discord polls too).</summary>
+    private static async Task<IUserMessage?> FindOpenPollAsync(ITextChannel channel, Func<IUserMessage, bool> matches)
     {
         var recent = await channel.GetMessagesAsync(50).FlattenAsync();
         return recent.OfType<IUserMessage>()
-            .Where(m => OwnerOf(m, botId) is { } owner && (ownerId is null || owner == ownerId) && IsOpen(m))
+            .Where(m => IsOpen(m) && matches(m))
             .OrderByDescending(m => m.Timestamp)
             .FirstOrDefault();
     }

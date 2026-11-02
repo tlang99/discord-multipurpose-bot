@@ -95,9 +95,19 @@ public class PollRequestReaderTests
         Assert.Equal("whether we should play ranked or casual tonight", request.Text);
     }
 
-    [Fact]
-    public void Asking_the_bot_to_make_one_is_still_a_request()
-        => Assert.NotNull(PollRequestReader.Read("i want you to make a poll: pizza or tacos?"));
+    [Theory]
+    [InlineData("i want you to make a poll: pizza or tacos?")]
+    [InlineData("pls just make a poll: pizza or tacos?")]
+    [InlineData("ok bot, make a poll: pizza or tacos?")]
+    [InlineData("could u please start a poll: pizza or tacos?")]
+    public void Asking_the_bot_to_make_one_is_still_a_request(string message)
+        => Assert.NotNull(PollRequestReader.Read(message));
+
+    [Theory]
+    [InlineData("can we make a poll?")]
+    [InlineData("lol ok. make a poll")]
+    public void Filler_before_the_phrase_isnt_the_poll(string message)
+        => Assert.Equal("", PollRequestReader.Read(message)?.Text ?? "");
 
     [Fact]
     public void Uses_what_came_before_the_phrase_when_nothing_follows()
@@ -219,6 +229,15 @@ public class PollRequestReaderTests
     [InlineData("is it possible to make a poll with images?")]
     [InlineData("does anyone want to make a poll?")]
     [InlineData("if you make a poll, I'll vote ranked")]
+    [InlineData("that poll the squad did was rigged")]
+    [InlineData("lol the poll everyone hated")]
+    [InlineData("you do a poll every day lol")]
+    [InlineData("every time you make a poll it breaks")]
+    [InlineData("u should not make a poll")]
+    [InlineData("nobody asked you to make a poll lol")]
+    [InlineData("make a poll? nah")]
+    [InlineData("make a poll later")]
+    [InlineData("make a poll tomorrow")]
     [InlineData("start a vote to skip this song")] // the music's vote skip
     [InlineData("make a vote skip happen")]
     public void Ignores_non_requests(string message) => Assert.Null(PollRequestReader.Read(message));
