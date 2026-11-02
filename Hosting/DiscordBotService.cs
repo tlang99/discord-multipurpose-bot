@@ -5,6 +5,7 @@ using Discord.WebSocket;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.EventHandlers;
 
@@ -168,30 +169,12 @@ public class DiscordBotService : BackgroundService
 
     private Task OnMessageReceivedAsync(SocketMessage message)
     {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _autoModerationHandler.HandleMessageAsync(message);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unhandled exception in auto-moderation handler.");
-            }
-        });
+        Background.Run(_logger, () => _autoModerationHandler.HandleMessageAsync(message), LogLevel.Error,
+            "Unhandled exception in auto-moderation handler.");
 
         // Separately, since waiting on the AI can take many seconds and mustn't hold up auto-mod.
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _chatHandler.HandleMessageAsync(message);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unhandled exception in chat handler.");
-            }
-        });
+        Background.Run(_logger, () => _chatHandler.HandleMessageAsync(message), LogLevel.Error,
+            "Unhandled exception in chat handler.");
 
         return Task.CompletedTask;
     }

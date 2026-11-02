@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Discord;
 using Discord.WebSocket;
 using Lavalink4NET;
@@ -8,6 +7,7 @@ using Lavalink4NET.Rest.Entities.Tracks;
 using Lavalink4NET.Tracks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 
 namespace ModBot.Modules.Music;
@@ -33,9 +33,8 @@ public class MusicService
     /// <summary>Hosts play requests accept links from (plus their subdomains, e.g. www., m., music.youtube.com).</summary>
     private static readonly string[] AllowedLinkHosts = ["youtube.com", "youtu.be"];
 
-    /// <summary>Per-server lock around changing what's playing (starting, skipping, the next turn). One small entry
-    /// per server that has used music; never removed.</summary>
-    private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _playbackLocks = new();
+    /// <summary>Per-server lock around changing what's playing (starting, skipping, the next turn).</summary>
+    private readonly KeyedLock<ulong> _playbackLocks = new();
 
     private readonly IAudioService _audioService;
     private readonly MusicPlayerEvents _events;
@@ -52,13 +51,10 @@ public class MusicService
     }
 
     /// <summary>The configured music channel's name, or empty when music commands work anywhere.</summary>
-    public string ChannelName => _options.ChannelName.Trim().TrimStart('#');
+    public string ChannelName => ConfiguredChannels.ChannelName(_options.ChannelName);
 
     /// <summary>The configured music channel, or null if the server doesn't have it.</summary>
-    public ITextChannel? FindChannel(SocketGuild guild)
-        => ChannelName.Length == 0
-            ? null
-            : guild.TextChannels.FirstOrDefault(c => c.Name.Equals(ChannelName, StringComparison.OrdinalIgnoreCase));
+    public ITextChannel? FindChannel(SocketGuild guild) => ConfiguredChannels.Find(guild, ChannelName);
 
     /// <summary>The server's live player, or null if the bot isn't in voice there.</summary>
     public MusicPlayer? GetPlayer(ulong guildId)
@@ -67,15 +63,10 @@ public class MusicService
             ? player
             : null;
 
-    /// <summary>Waits for this server's playback lock. Callers must <c>Release()</c> it in a <c>finally</c>, and keep
-    /// the locked section short: other music commands in the server wait on it, within Discord's 3-second reply
-    /// window.</summary>
-    public async Task<SemaphoreSlim> AcquirePlaybackLockAsync(ulong guildId)
-    {
-        var playbackLock = _playbackLocks.GetOrAdd(guildId, _ => new SemaphoreSlim(1, 1));
-        await playbackLock.WaitAsync();
-        return playbackLock;
-    }
+    /// <summary>Runs <paramref name="work"/> holding this server's playback lock. Keep it short: other music commands
+    /// in the server wait on it, within Discord's 3-second reply window.</summary>
+    public Task<T> WithPlaybackLockAsync<T>(ulong guildId, Func<Task<T>> work)
+        => _playbackLocks.RunAsync(guildId, work);
 
     /// <summary>Why <paramref name="query"/> can't be looked up at all (empty, or a link to a site the bot doesn't
     /// play), or null if it can. Cheap, so callers check it before anything slow.</summary>

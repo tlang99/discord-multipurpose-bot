@@ -2,6 +2,7 @@ using Discord;
 using Discord.Interactions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 
 namespace ModBot.Modules.Music;
@@ -17,9 +18,10 @@ public sealed class RequireMusicChannelAttribute : PreconditionAttribute
     public override Task<PreconditionResult> CheckRequirementsAsync(IInteractionContext context, ICommandInfo commandInfo,
         IServiceProvider services)
     {
-        var channelName = services.GetRequiredService<IOptions<MusicOptions>>().Value.ChannelName.Trim().TrimStart('#');
+        var options = services.GetRequiredService<IOptions<MusicOptions>>().Value;
+        var channelName = ConfiguredChannels.ChannelName(options.ChannelName);
         if (channelName.Length == 0 || context.Guild is null ||
-            context.Channel is ITextChannel channel && channel.Name.Equals(channelName, StringComparison.OrdinalIgnoreCase))
+            context.Channel is ITextChannel channel && ConfiguredChannels.IsNamed(channel, channelName))
         {
             return Task.FromResult(PreconditionResult.FromSuccess());
         }
@@ -30,10 +32,10 @@ public sealed class RequireMusicChannelAttribute : PreconditionAttribute
     private static async Task<PreconditionResult> CheckAsync(IGuild guild, string channelName)
     {
         var musicChannel = (await guild.GetTextChannelsAsync(CacheMode.CacheOnly))
-            .FirstOrDefault(c => c.Name.Equals(channelName, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(c => ConfiguredChannels.IsNamed(c, channelName));
 
         return PreconditionResult.FromError(musicChannel is null
-            ? $"Music commands go in **#{channelName}**, but this server doesn't have that channel yet."
+            ? ConfiguredChannels.Missing("Music commands go", channelName)
             : $"Music commands go in {musicChannel.Mention} - run them there.");
     }
 }

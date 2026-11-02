@@ -1,6 +1,7 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
+using ModBot.Common;
 
 namespace ModBot.Modules.Music;
 
@@ -90,23 +91,14 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     {
         await DeferAsync(ephemeral: true);
 
-        if (Context.Channel is not ITextChannel channel ||
-            Context.Guild.CurrentUser.GetPermissions(channel) is not { SendMessages: true, EmbedLinks: true })
+        if (ChannelAccess.WhyCantPostPanel(Context.Guild.CurrentUser, Context.User as IGuildUser, Context.Channel,
+                "the music menu") is { } problem)
         {
-            await FollowupAsync("I need **Send Messages** and **Embed Links** here to post the menu.", ephemeral: true);
+            await FollowupAsync(problem, ephemeral: true);
             return;
         }
 
-        // Manage Server alone shouldn't let someone use the bot to post and pin in a channel they couldn't themselves.
-        if (Context.User is not IGuildUser user ||
-            user.GetPermissions(channel) is not { SendMessages: true, PinMessages: true })
-        {
-            await FollowupAsync("You need **Send Messages** and **Pin Messages** in this channel to post the music " +
-                                "menu here.", ephemeral: true);
-            return;
-        }
-
-        var (pinned, error) = await _queue.PostMenuAsync(channel);
+        var (pinned, error) = await _queue.PostMenuAsync((ITextChannel)Context.Channel);
         await FollowupAsync(error ?? "Posted the music menu" + (pinned
             ? " and pinned it."
             : " (I couldn't pin it - give me **Pin Messages**, or pin it yourself)."), ephemeral: true);

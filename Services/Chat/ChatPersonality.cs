@@ -17,15 +17,19 @@ public class ChatPersonality
         _options = options.Value;
     }
 
-    public async Task<string> GetAsync(ulong guildId)
+    public async Task<string> GetAsync(ulong guildId) => (await GetWithSourceAsync(guildId)).Text;
+
+    /// <summary>The personality, and whether it's the server's own rather than a default.</summary>
+    public async Task<(string Text, bool IsCustom)> GetWithSourceAsync(ulong guildId)
     {
         var personality = await _store.GetPersonalityAsync(guildId);
         if (!string.IsNullOrWhiteSpace(personality))
         {
-            return personality.Trim();
+            return (personality.Trim(), true);
         }
 
-        return string.IsNullOrWhiteSpace(_options.Personality) ? ChatOptions.DefaultPersonality : _options.Personality.Trim();
+        return (string.IsNullOrWhiteSpace(_options.Personality) ? ChatOptions.DefaultPersonality : _options.Personality.Trim(),
+            false);
     }
 
     /// <summary>The start of every system prompt: who the bot is and its personality. Callers add their own task

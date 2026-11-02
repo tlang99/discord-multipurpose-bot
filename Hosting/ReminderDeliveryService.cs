@@ -2,6 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModBot.Common;
 using ModBot.Services.Reminders;
 
 namespace ModBot.Hosting;
@@ -42,32 +43,24 @@ public class ReminderDeliveryService : BackgroundService
         };
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+        => PeriodicLoop.RunAsync(CheckInterval, DeliverDueAsync, stoppingToken);
+
+    private async Task DeliverDueAsync()
     {
-        using var timer = new PeriodicTimer(CheckInterval);
+        if (!_ready || _client.ConnectionState != ConnectionState.Connected)
+        {
+            return;
+        }
+
         try
         {
-            while (await timer.WaitForNextTickAsync(stoppingToken))
-            {
-                if (!_ready || _client.ConnectionState != ConnectionState.Connected)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    await _deliverer.DeliverDueAsync(DateTimeOffset.UtcNow);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    // Never let one bad check stop reminders for good.
-                    _logger.LogError(ex, "Reminder check failed.");
-                }
-            }
+            await _deliverer.DeliverDueAsync(DateTimeOffset.UtcNow);
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Expected on shutdown.
+            // Never let one bad check stop reminders for good.
+            _logger.LogError(ex, "Reminder check failed.");
         }
     }
 }

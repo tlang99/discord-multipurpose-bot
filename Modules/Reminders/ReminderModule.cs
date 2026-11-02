@@ -2,6 +2,8 @@ using System.Text;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
+using ModBot.Common;
+using ModBot.Services.Moderation;
 using ModBot.Services.Reminders;
 
 namespace ModBot.Modules.Reminders;
@@ -31,7 +33,7 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
 
         // Slash commands work even where the person can't type, so without this anyone could have the bot post their
         // text in a read-only channel like #rules.
-        if (Context.User is not SocketGuildUser member || !ReminderPermissions.CanPost(member, channel))
+        if (Context.User is not SocketGuildUser member || !ChannelAccess.CanPost(member, channel))
         {
             await RespondAsync($"You can't post in {channel.Mention}, so I can't post a reminder there for you.",
                 ephemeral: true);
@@ -39,7 +41,7 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         // It's delivered here later, so make sure that'll work now rather than failing silently then.
-        if (!ReminderPermissions.CanPost(Context.Guild.CurrentUser, channel))
+        if (!ChannelAccess.CanPost(Context.Guild.CurrentUser, channel))
         {
             await RespondAsync($"I can't post in {channel.Mention}, so I couldn't deliver a reminder here. Try another " +
                                "channel.", ephemeral: true);
@@ -47,7 +49,7 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         // Auto-mod exempts members with Manage Messages from the word filter; same here.
-        var applyWordFilter = (Context.User as SocketGuildUser)?.GuildPermissions.ManageMessages != true;
+        var applyWordFilter = !TextFilter.IsExempt(member);
         var result = await _reminders.CreateAsync(Context.Guild.Id, channel.Id, Context.User.Id, when, what,
             applyWordFilter);
         await RespondAsync(result.Message, ephemeral: true, allowedMentions: AllowedMentions.None);
@@ -77,7 +79,7 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
             foreach (var reminder in reminders)
             {
                 var line = $"`{reminder.Id}` {ReminderService.Relative(reminder.DueAt)} in <#{reminder.ChannelId}>: " +
-                           $"{Truncate(reminder.Text, 120)}";
+                           $"{TextTools.Truncate(reminder.Text, 120)}";
                 if (text.Length + line.Length > EmbedBuilder.MaxDescriptionLength - 50)
                 {
                     text.AppendLine("…");
@@ -88,7 +90,7 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
             }
 
             var embed = new EmbedBuilder()
-                .WithColor(new Color(0x5865F2))
+                .WithColor(Colors.Bot)
                 .WithTitle($"Your reminders ({reminders.Count})")
                 .WithDescription(text.ToString())
                 .WithFooter("Cancel one with /reminders cancel and its code.")
@@ -102,7 +104,5 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
             var result = await _reminders.CancelAsync(Context.Guild.Id, Context.User.Id, id);
             await RespondAsync(result.Message, ephemeral: true, allowedMentions: AllowedMentions.None);
         }
-
-        private static string Truncate(string value, int max) => value.Length <= max ? value : value[..(max - 1)] + "…";
     }
 }

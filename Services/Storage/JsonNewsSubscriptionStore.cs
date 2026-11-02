@@ -8,12 +8,8 @@ public class JsonNewsSubscriptionStore : INewsSubscriptionStore
     /// reappear in a feed aren't re-posted.</summary>
     private const int MaxSeenItemsPerSubscription = 500;
 
-    private readonly JsonFileRepository<NewsSubscription> _repository;
-
-    public JsonNewsSubscriptionStore()
-    {
-        _repository = new JsonFileRepository<NewsSubscription>(Path.Combine("data", "news-subscriptions.json"));
-    }
+    private readonly JsonFileRepository<NewsSubscription> _repository =
+        JsonFileRepository<NewsSubscription>.InDataFolder("news-subscriptions.json");
 
     public async Task<IReadOnlyList<NewsSubscription>> GetAllAsync()
         => (await _repository.GetAllAsync()).ToList();
@@ -36,27 +32,14 @@ public class JsonNewsSubscriptionStore : INewsSubscriptionStore
             data[key] = subscription;
         });
 
-    public async Task<bool> UpdateAsync(ulong guildId, string name, Action<NewsSubscription> update)
-    {
-        var found = false;
-        await _repository.MutateAsync(data =>
+    public Task<bool> UpdateAsync(ulong guildId, string name, Action<NewsSubscription> update)
+        => _repository.UpdateAsync(Key(guildId, name), subscription =>
         {
-            if (data.TryGetValue(Key(guildId, name), out var subscription))
-            {
-                found = true;
-                update(subscription);
-                TrimSeen(subscription);
-            }
+            update(subscription);
+            TrimSeen(subscription);
         });
-        return found;
-    }
 
-    public async Task<bool> RemoveAsync(ulong guildId, string name)
-    {
-        var removed = false;
-        await _repository.MutateAsync(data => removed = data.Remove(Key(guildId, name)));
-        return removed;
-    }
+    public Task<bool> RemoveAsync(ulong guildId, string name) => _repository.RemoveAsync(Key(guildId, name));
 
     public Task MarkSeenAsync(ulong guildId, string name, IEnumerable<string> itemIds)
         => UpdateAsync(guildId, name, subscription => subscription.MarkSeen(itemIds));

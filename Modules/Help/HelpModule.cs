@@ -1,8 +1,8 @@
 using Discord;
 using Discord.Interactions;
-using Discord.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 
 namespace ModBot.Modules.Help;
@@ -38,36 +38,16 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
     {
         await DeferAsync(ephemeral: true);
 
-        if (Context.Channel is not ITextChannel channel ||
-            Context.Guild.CurrentUser.GetPermissions(channel) is not { SendMessages: true, EmbedLinks: true })
+        if (ChannelAccess.WhyCantPostPanel(Context.Guild.CurrentUser, Context.User as IGuildUser, Context.Channel,
+                "the command list") is { } problem)
         {
-            await FollowupAsync("I need **Send Messages** and **Embed Links** here to post the command list.",
-                ephemeral: true);
+            await FollowupAsync(problem, ephemeral: true);
             return;
         }
 
-        // Manage Server alone shouldn't let someone use the bot to post and pin in a channel they couldn't post and
-        // pin in themselves, like a read-only #announcements.
-        if (Context.User is not IGuildUser user ||
-            user.GetPermissions(channel) is not { SendMessages: true, PinMessages: true })
-        {
-            await FollowupAsync("You need **Send Messages** and **Pin Messages** in this channel to post the command " +
-                               "list here.", ephemeral: true);
-            return;
-        }
-
+        var channel = (ITextChannel)Context.Channel;
         var message = await channel.SendMessageAsync(embed: BuildEmbed(), allowedMentions: AllowedMentions.None);
-
-        var pinned = false;
-        try
-        {
-            await message.PinAsync();
-            pinned = true;
-        }
-        catch (HttpException ex)
-        {
-            _logger.LogInformation(ex, "Couldn't pin the command list in channel {ChannelId}.", channel.Id);
-        }
+        var pinned = await MessageTools.TryPinAsync(message, _logger, "the command list");
 
         await FollowupAsync(pinned
                 ? "Posted the command list and pinned it. If commands change, delete it and run this again."
@@ -84,7 +64,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
             .WithTitle("Bot commands")
             .WithDescription("Type `/` in the chat box to see these with their options. Use `/help` anytime to see " +
                              "this list (only you will see it).")
-            .WithColor(new Color(0x5865F2))
+            .WithColor(Colors.Bot)
             .AddField("🎮 Looking for group" + (lfgWhere is null ? "" : $" - in {lfgWhere}"),
                 "`/lfg` - post a squad card others can join. All options are optional: `players`, `playlist`, " +
                 "`rank`, `mic`, `platform`, `note`.\n" +
@@ -121,12 +101,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
     /// isn't limited to one channel.</summary>
     private string? ChannelText(string configuredName)
     {
-        var name = configuredName.Trim().TrimStart('#');
-        if (name.Length == 0)
-            return null;
-
-        var channel = Context.Guild.TextChannels.FirstOrDefault(c =>
-            c.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        return channel?.Mention ?? $"#{name}";
+        var name = ConfiguredChannels.ChannelName(configuredName);
+        return name.Length == 0 ? null : ConfiguredChannels.Find(Context.Guild, name)?.Mention ?? $"#{name}";
     }
 }

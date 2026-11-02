@@ -3,6 +3,7 @@ using Discord.WebSocket;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.News;
@@ -45,24 +46,19 @@ public class NewsPollingService : BackgroundService
     {
         var interval = TimeSpan.FromMinutes(Math.Max(1, _options.PollIntervalMinutes));
 
+        await UpgradeLegacyFeedUrlsAsync();
+
         try
         {
-            await UpgradeLegacyFeedUrlsAsync();
-
             // Give the gateway connection a head start so the first check isn't wasted.
             await Task.Delay(StartupDelay, stoppingToken);
-
-            using var timer = new PeriodicTimer(interval);
-            do
-            {
-                await PollAllAsync(stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            // Expected on shutdown.
+            return; // shut down before the first check
         }
+
+        await PeriodicLoop.RunAsync(interval, () => PollAllAsync(stoppingToken), stoppingToken, runFirstTickNow: true);
     }
 
     /// <summary>Points subscriptions made from a built-in preset at the preset's current feed URL. Seen-article history

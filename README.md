@@ -211,6 +211,8 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
 ## Project layout
 
 ```
+Common/            Small helpers every feature shares: finding a configured channel by name, permission checks
+                   before posting, pinning, per-server locks, background tasks and the timer loop
 Configuration/     Strongly-typed options bound from appsettings/env/secrets
 Models/            Plain data types (GuildSettings, Warning, ModerationResult)
 Services/
@@ -243,6 +245,8 @@ Hosting/           DiscordBotService - owns the client lifecycle and wires event
    rather than directly in the module, following the pattern `IModerationService` uses.
 4. If it needs a gateway event (message edits, reactions, member joins, etc.), add a handler class under
    `EventHandlers/` and wire the event in `DiscordBotService`.
+5. Check `Common/` before writing Discord plumbing: a feature tied to a channel name, a pinned panel, a permission
+   check before posting or a timed background job already has a helper there.
 
 Storage is JSON-file-based for simplicity (`data/guild-settings.json`, `data/warnings.json`). To move to a real
 database later, implement `IGuildSettingsStore`/`IWarningStore` against it and swap the registration in

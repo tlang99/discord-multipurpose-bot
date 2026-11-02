@@ -1,10 +1,8 @@
 using Discord;
 using Discord.Interactions;
-using Discord.Net;
 using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using ModBot.Configuration;
+using ModBot.Common;
 using ModBot.Models;
 using ModBot.Services.Lfg;
 using ModBot.Services.Moderation;
@@ -97,13 +95,11 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         var lfgChannelName = _poster.ChannelName;
-        if (lfgChannelName.Length > 0 && !channel.Name.Equals(lfgChannelName, StringComparison.OrdinalIgnoreCase))
+        if (lfgChannelName.Length > 0 && !ConfiguredChannels.IsNamed(channel, lfgChannelName))
         {
-            var lfgChannel = Context.Guild.TextChannels.FirstOrDefault(c =>
-                c.Name.Equals(lfgChannelName, StringComparison.OrdinalIgnoreCase));
-            await FollowupAsync(lfgChannel is null
-                    ? $"LFG posts go in **#{lfgChannelName}**, but this server doesn't have that channel yet."
-                    : $"LFG posts go in {lfgChannel.Mention} - run `/lfg` there.",
+            await FollowupAsync(_poster.FindChannel(Context.Guild) is { } lfgChannel
+                    ? $"LFG posts go in {lfgChannel.Mention} - run `/lfg` there."
+                    : ConfiguredChannels.Missing("LFG posts go", lfgChannelName),
                 ephemeral: true);
             return;
         }
@@ -125,7 +121,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         // Creating the role, posting and pinning the panel easily takes longer than Discord's 3-second window.
         await DeferAsync(ephemeral: true);
 
-        var roleName = PingRoleName;
+        var roleName = _poster.PingRoleName;
         if (roleName.Length == 0)
         {
             await FollowupAsync("LFG pings are turned off (`Lfg:PingRoleName` is empty).", ephemeral: true);
@@ -140,22 +136,15 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        if (Context.Channel is not ITextChannel channel ||
-            bot.GetPermissions(channel) is not { SendMessages: true, EmbedLinks: true })
+        // Checked before touching the role so a refused run changes nothing.
+        if (ChannelAccess.WhyCantPostPanel(bot, Context.User as IGuildUser, Context.Channel, "the LFG ping panel") is
+            { } problem)
         {
-            await FollowupAsync("I need **Send Messages** and **Embed Links** here to post the panel.", ephemeral: true);
+            await FollowupAsync(problem, ephemeral: true);
             return;
         }
 
-        // Manage Server alone shouldn't let someone use the bot to post and pin in a channel they couldn't post and
-        // pin in themselves. Checked before touching the role so a refused run changes nothing.
-        if (Context.User is not IGuildUser user ||
-            user.GetPermissions(channel) is not { SendMessages: true, PinMessages: true })
-        {
-            await FollowupAsync("You need **Send Messages** and **Pin Messages** in this channel to post the LFG ping " +
-                               "panel here.", ephemeral: true);
-            return;
-        }
+        var channel = (ITextChannel)Context.Channel;
 
         var role = FindPingRole();
         var createdRole = role is null;
@@ -195,22 +184,13 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         var panel = await channel.SendMessageAsync(embed: LfgMessages.RolePanelEmbed(role.Name),
             components: LfgMessages.RolePanelButtons(), allowedMentions: AllowedMentions.None);
 
-        var pinned = false;
-        try
-        {
-            await panel.PinAsync();
-            pinned = true;
-        }
-        catch (HttpException ex)
-        {
-            _logger.LogInformation(ex, "Couldn't pin the LFG ping panel in channel {ChannelId}.", channel.Id);
-        }
+        var pinned = await MessageTools.TryPinAsync(panel, _logger, "the LFG ping panel");
 
         await FollowupAsync((createdRole ? $"Created the **@{Format.Sanitize(role.Name)}** role. " : "") +
                            (madeMentionable ? $"Made **@{Format.Sanitize(role.Name)}** mentionable so pings notify people. " : "") +
                            $"Posted the opt-in panel{(pinned ? " and pinned it" : " (I couldn't pin it - pin it yourself if you like)")}. " +
-                           $"New `/lfg` posts will ping the role, at most once every {(int)PingCooldown.TotalMinutes} " +
-                           "minutes per person.",
+                           "New `/lfg` posts will ping the role, at most once every " +
+                           $"{(int)_poster.PingCooldown.TotalMinutes} minutes per person.",
             ephemeral: true);
     }
 
@@ -286,7 +266,8 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
     [ComponentInteraction(LfgMessages.CancelPrefix + ":*")]
     public Task CancelAsync(string postId)
-        => HandleButtonAsync(postId, id => _lfg.Cancel(id, Context.User.Id, IsModerator(Context.User as IGuildUser)));
+        => HandleButtonAsync(postId,
+            id => _lfg.Cancel(id, Context.User.Id, Moderators.IsModerator(Context.User as IGuildUser)));
 
     private async Task HandleButtonAsync(string rawPostId, Func<Guid, LfgResult> action)
     {
@@ -356,10 +337,6 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         }
     }
 
-    private string PingRoleName => _poster.PingRoleName;
-
-    private TimeSpan PingCooldown => _poster.PingCooldown;
-
     /// <summary>
     /// Why members must not be able to give themselves this role, or null if it's safe. The panel lets anyone take the
     /// ping role, so it must be harmless: any server permission, or a channel override that grants something (e.g.
@@ -421,8 +398,4 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
                 PlatformChoice.ConsoleOnly => LfgPlatform.ConsoleOnly,
                 _ => LfgPlatform.Crossplay,
             });
-
-    /// <summary>Same moderator bar as the music commands (<see cref="Moderators"/>): these members can remove anyone's
-    /// LFG post.</summary>
-    private static bool IsModerator(IGuildUser? user) => Moderators.IsModerator(user);
 }

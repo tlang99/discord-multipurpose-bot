@@ -18,45 +18,24 @@ public class ModerationService : IModerationService
         _logger = logger;
     }
 
-    public async Task<ModerationResult> KickAsync(IGuildUser target, IUser moderator, string reason)
-    {
-        if (await GetHierarchyProblemAsync(target.Guild, target.Id, moderator, "kick") is { } problem)
-        {
-            return ModerationResult.Fail(problem);
-        }
+    public Task<ModerationResult> KickAsync(IGuildUser target, IUser moderator, string reason)
+        => ActAsync(target.Guild, target, moderator, reason, "kick", () => target.KickAsync(reason),
+            "Kick", Color.Orange, $"**{target}** has been kicked.");
 
-        try
-        {
-            await target.KickAsync(reason);
-            await LogActionAsync(target.Guild, "Kick", Color.Orange, target, moderator, reason);
-            return ModerationResult.Ok($"**{target}** has been kicked.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to kick {UserId} from {GuildId}", target.Id, target.GuildId);
-            return ModerationResult.Fail($"Failed to kick {target}: {ex.Message}");
-        }
-    }
+    public Task<ModerationResult> BanAsync(IGuild guild, IUser target, IUser moderator, string reason, int pruneDays)
+        => ActAsync(guild, target, moderator, reason, "ban", () => guild.AddBanAsync(target, pruneDays, reason),
+            "Ban", Color.Red, $"**{target}** has been banned.");
 
-    public async Task<ModerationResult> BanAsync(IGuild guild, IUser target, IUser moderator, string reason, int pruneDays)
-    {
-        if (await GetHierarchyProblemAsync(guild, target.Id, moderator, "ban") is { } problem)
-        {
-            return ModerationResult.Fail(problem);
-        }
+    public Task<ModerationResult> TimeoutAsync(IGuildUser target, IUser moderator, TimeSpan duration, string reason)
+        => ActAsync(target.Guild, target, moderator, reason, "time out",
+            () => target.SetTimeOutAsync(duration, new RequestOptions { AuditLogReason = reason }),
+            $"Timeout ({FormatDuration(duration)})", Color.Gold,
+            $"**{target}** has been timed out for {FormatDuration(duration)}.");
 
-        try
-        {
-            await guild.AddBanAsync(target, pruneDays, reason);
-            await LogActionAsync(guild, "Ban", Color.Red, target, moderator, reason);
-            return ModerationResult.Ok($"**{target}** has been banned.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to ban {UserId} from {GuildId}", target.Id, guild.Id);
-            return ModerationResult.Fail($"Failed to ban {target}: {ex.Message}");
-        }
-    }
+    public Task<ModerationResult> RemoveTimeoutAsync(IGuildUser target, IUser moderator, string reason)
+        => ActAsync(target.Guild, target, moderator, reason, "remove the timeout for",
+            () => target.RemoveTimeOutAsync(new RequestOptions { AuditLogReason = reason }),
+            "Timeout Removed", Color.Green, $"Timeout removed for **{target}**.");
 
     public async Task<ModerationResult> UnbanAsync(IGuild guild, ulong targetUserId, IUser moderator, string reason)
     {
@@ -76,46 +55,6 @@ public class ModerationService : IModerationService
         {
             _logger.LogError(ex, "Failed to unban {UserId} from {GuildId}", targetUserId, guild.Id);
             return ModerationResult.Fail($"Failed to unban user: {ex.Message}");
-        }
-    }
-
-    public async Task<ModerationResult> TimeoutAsync(IGuildUser target, IUser moderator, TimeSpan duration, string reason)
-    {
-        if (await GetHierarchyProblemAsync(target.Guild, target.Id, moderator, "time out") is { } problem)
-        {
-            return ModerationResult.Fail(problem);
-        }
-
-        try
-        {
-            await target.SetTimeOutAsync(duration, new RequestOptions { AuditLogReason = reason });
-            await LogActionAsync(target.Guild, $"Timeout ({FormatDuration(duration)})", Color.Gold, target, moderator, reason);
-            return ModerationResult.Ok($"**{target}** has been timed out for {FormatDuration(duration)}.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to time out {UserId} in {GuildId}", target.Id, target.GuildId);
-            return ModerationResult.Fail($"Failed to time out {target}: {ex.Message}");
-        }
-    }
-
-    public async Task<ModerationResult> RemoveTimeoutAsync(IGuildUser target, IUser moderator, string reason)
-    {
-        if (await GetHierarchyProblemAsync(target.Guild, target.Id, moderator, "remove the timeout for") is { } problem)
-        {
-            return ModerationResult.Fail(problem);
-        }
-
-        try
-        {
-            await target.RemoveTimeOutAsync(new RequestOptions { AuditLogReason = reason });
-            await LogActionAsync(target.Guild, "Timeout Removed", Color.Green, target, moderator, reason);
-            return ModerationResult.Ok($"Timeout removed for **{target}**.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to remove timeout for {UserId} in {GuildId}", target.Id, target.GuildId);
-            return ModerationResult.Fail($"Failed to remove timeout for {target}: {ex.Message}");
         }
     }
 
@@ -164,6 +103,33 @@ public class ModerationService : IModerationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to write mod-log entry for guild {GuildId}", guild.Id);
+        }
+    }
+
+    /// <summary>
+    /// What kick, ban and the timeouts have in common: check the moderator may act on the target, do it, write the
+    /// mod-log entry, and turn a Discord error into a message for the moderator.
+    /// </summary>
+    /// <param name="verb">For the messages, e.g. "kick" or "time out".</param>
+    /// <param name="logTitle">The mod-log entry's title, e.g. "Kick".</param>
+    private async Task<ModerationResult> ActAsync(IGuild guild, IUser target, IUser moderator, string reason,
+        string verb, Func<Task> action, string logTitle, Color logColor, string success)
+    {
+        if (await GetHierarchyProblemAsync(guild, target.Id, moderator, verb) is { } problem)
+        {
+            return ModerationResult.Fail(problem);
+        }
+
+        try
+        {
+            await action();
+            await LogActionAsync(guild, logTitle, logColor, target, moderator, reason);
+            return ModerationResult.Ok(success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to {Verb} {UserId} in {GuildId}", verb, target.Id, guild.Id);
+            return ModerationResult.Fail($"Failed to {verb} {target}: {ex.Message}");
         }
     }
 
