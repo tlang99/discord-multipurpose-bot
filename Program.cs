@@ -140,8 +140,8 @@ builder.Services.ConfigureInactivityTracking(options =>
 {
     options.DefaultTimeout = TimeSpan.FromSeconds(Math.Max(10, musicOptions.IdleTimeoutSeconds));
 });
-// Chatbot: Ollama (ollama.com or self-hosted, see Chat:OllamaUrl) behind IChatService.
 
+// Chatbot: Ollama (ollama.com or self-hosted, see Chat:OllamaUrl) behind IChatService.
 builder.Services.AddHttpClient<IChatService, OllamaChatService>(client =>
 {
     if (Uri.TryCreate(chatOptions.OllamaUrl.TrimEnd('/') + "/", UriKind.Absolute, out var ollamaUri))
