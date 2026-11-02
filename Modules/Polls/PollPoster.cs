@@ -169,10 +169,13 @@ public partial class PollPoster
     /// <summary>
     /// "End my poll" from chat. Sent as a reply, it means the replied-to message and nothing else: it's fetched fresh
     /// (a reply's copy of it can lack the poll), and if it isn't an open poll they may end, they're told so rather
-    /// than having some other poll ended, since ending can't be undone. Without a reply, it's their newest open poll
-    /// in the channel.
+    /// than having some other poll ended, since ending can't be undone. Without a reply, "end my poll" is their newest
+    /// open poll in the channel. "End the poll" / "end that poll" means the newest open poll there, whoever's it is,
+    /// and it's only ended if that one is theirs: a moderator saying "end that poll" about a member's poll shouldn't
+    /// end the moderator's own instead. Anything else is asked to reply to the poll they mean.
     /// </summary>
-    public async Task<string> EndRequestedAsync(IGuildUser asker, ITextChannel channel, ulong? repliedToId)
+    public async Task<string> EndRequestedAsync(IGuildUser asker, ITextChannel channel, ulong? repliedToId,
+        bool saidMine)
     {
         var bot = await asker.Guild.GetCurrentUserAsync();
         var canReadHistory = bot.GetPermissions(channel).ReadMessageHistory;
@@ -188,18 +191,26 @@ public partial class PollPoster
                 : "The message you replied to isn't one of my polls.";
         }
 
-        return await FindOpenPollAsync(channel, asker.Id, bot.Id) is { } poll
+        var poll = await FindOpenPollAsync(channel, saidMine ? asker.Id : null, bot.Id);
+        if (poll is null)
+        {
+            return $"I can't find an open poll{(saidMine ? " of yours" : "")} in the last 50 messages here. Reply to " +
+                   "the poll with \"end the poll\", or right-click it → Apps → End poll.";
+        }
+
+        return OwnerOf(poll, bot.Id) == asker.Id
             ? await EndAsync(asker, poll)
-            : "I can't find an open poll of yours in the last 50 messages here. Reply to the poll with \"end the " +
-              "poll\", or right-click it → Apps → End poll.";
+            : "The newest poll here isn't yours, so I'm not sure which one you mean. Reply to the poll with \"end the " +
+              "poll\", or say \"end my poll\" for your own.";
     }
 
-    /// <summary>The person's newest poll that's still open, among the last 50 messages in the channel.</summary>
-    public static async Task<IUserMessage?> FindOpenPollAsync(ITextChannel channel, ulong ownerId, ulong botId)
+    /// <summary>The newest of the bot's polls that's still open among the last 50 messages in the channel: the
+    /// person's own, or anyone's when <paramref name="ownerId"/> is null.</summary>
+    public static async Task<IUserMessage?> FindOpenPollAsync(ITextChannel channel, ulong? ownerId, ulong botId)
     {
         var recent = await channel.GetMessagesAsync(50).FlattenAsync();
         return recent.OfType<IUserMessage>()
-            .Where(m => OwnerOf(m, botId) == ownerId && IsOpen(m))
+            .Where(m => OwnerOf(m, botId) is { } owner && (ownerId is null || owner == ownerId) && IsOpen(m))
             .OrderByDescending(m => m.Timestamp)
             .FirstOrDefault();
     }

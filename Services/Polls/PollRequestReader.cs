@@ -24,6 +24,7 @@ public static partial class PollRequestReader
     /// polls ("how do I make a poll?") aren't requests.</summary>
     public static PollRequest? Read(string message)
     {
+        message = StraightenApostrophes(message);
         var phrase = CreatePhraseRegex().Match(message);
         if (!phrase.Success || IsQuestionAbout(message, phrase.Index))
         {
@@ -68,7 +69,14 @@ public static partial class PollRequestReader
 
     /// <summary>True for "end my poll", "close the poll please", "can you stop this poll". Ending can't be undone, so
     /// the whole message has to be the request: "don't end my poll yet" or "who's going to close the poll?" aren't.</summary>
-    public static bool IsEndRequest(string message) => EndRequestRegex().IsMatch(message);
+    public static bool IsEndRequest(string message) => EndRequestRegex().IsMatch(StraightenApostrophes(message));
+
+    /// <summary>"end my poll": the person means their own. "end the poll" / "end that poll" might mean someone
+    /// else's.</summary>
+    public static bool SaysMine(string message) => MyPollRegex().IsMatch(message);
+
+    /// <summary>Phone keyboards type "don’t"; the rules are written with "don't".</summary>
+    private static string StraightenApostrophes(string message) => message.Replace('’', '\'').Replace('‘', '\'');
 
     /// <summary>
     /// Takes "for 2 days" and "multiple choice" off the start or end of <paramref name="text"/>, where people put
@@ -242,8 +250,11 @@ public static partial class PollRequestReader
     [GeneratedRegex(@"^\W*(?:(?:hey|yo|ok|okay|please|pls|can\s+you|could\s+you|would\s+you|will\s+you|go\s+ahead\s+and)[\s,]+)*(?:end|close|stop|finish|lock)\s+(?:the\s+|my\s+|this\s+|that\s+|our\s+)?poll\b(?:[\s,]+(?:now|please|pls|early|for\s+me))*[\s.!?]*$", RegexOptions.IgnoreCase)]
     private static partial Regex EndRequestRegex();
 
-    [GeneratedRegex(@"\b(?:how|where|why|what)\b|\b(?:can|could|do|may|should)\s+i\b|\bis\s+there\b|\bare\s+you\s+able\b|\b(?:don'?t|do\s+not|didn'?t|did|never|won'?t|shouldn'?t|no\s+need\s+to|not\s+going\s+to)\b|\b(?:should|could|shall)\s+we\b|\bwe\s+(?:should|could|might|can)\b|\blet'?s\s+not\b|\bi(?:'ll|'m|\s+will|\s+am|\s+might|\s+was|\s+(?:want|wanna|need|have\s+to|gotta)(?!\s+(?:you|u)\b))\b|\blet\s+me\b|\b(?:gonna|going\s+to|about\s+to|trying\s+to|tried\s+to)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:how|where|why|what)\b|\b(?:can|could|do|may|should)\s+i\b|\bis\s+there\b|\bare\s+you\s+able\b|\b(?:don'?t|do\s+not|didn'?t|did|never|won'?t|shouldn'?t|no\s+need\s+to|not\s+going\s+to)\b|\b(?:should|could|shall)\s+we\b|\bwe\s+(?:should|could|might|can)\b|\blet'?s\s+not\b|\bi(?:'ll|'m|\s+will|\s+am|\s+might|\s+was|\s+(?:want|wanna|need|have\s+to|gotta)(?!\s+(?:you|u)\b))\b|\blet\s+me\b|\b(?:gonna|going\s+to|about\s+to|trying\s+to|tried\s+to)\b|\b(?:can'?t|cannot|can\s+not|couldn'?t|doesn'?t|isn'?t|wasn'?t)\b|\bi\s+(?:can|could)\b|\bis\s+it\s+possible\b|\b(?:does|do)\s+(?:anyone|anybody|someone|somebody|everyone)\b|\b(?:anyone|anybody|someone|somebody|who)\s+(?:wants?|wanna)\b|\b(?:if|when|once|after|before|unless)\s+(?:you|u|someone|we)\b", RegexOptions.IgnoreCase)]
     private static partial Regex QuestionLeadRegex();
+
+    [GeneratedRegex(@"\bmy\s+poll\b", RegexOptions.IgnoreCase)]
+    private static partial Regex MyPollRegex();
 
     /// <summary>Taking the request back: "make a poll? no wait", "nvm", "jk", "scratch that".</summary>
     [GeneratedRegex(@"\b(?:no\s+wait|wait\s+no|never\s*mind|nvm|jk|just\s+kidding|scratch\s+that|cancel\s+that|forget\s+it)\b", RegexOptions.IgnoreCase)]

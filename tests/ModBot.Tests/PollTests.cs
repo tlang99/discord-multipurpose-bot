@@ -212,6 +212,13 @@ public class PollRequestReaderTests
     [InlineData("let me make a poll")]
     [InlineData("im gonna make a poll")]
     [InlineData("make a poll? no wait, nvm")]
+    [InlineData("don’t make a poll for pizza or tacos yet")] // a phone's curly apostrophe
+    [InlineData("I’ll make a poll later")]
+    [InlineData("I can't make a poll in #general, is something broken?")]
+    [InlineData("i cannot make a poll")]
+    [InlineData("is it possible to make a poll with images?")]
+    [InlineData("does anyone want to make a poll?")]
+    [InlineData("if you make a poll, I'll vote ranked")]
     [InlineData("start a vote to skip this song")] // the music's vote skip
     [InlineData("make a vote skip happen")]
     public void Ignores_non_requests(string message) => Assert.Null(PollRequestReader.Read(message));
@@ -229,6 +236,13 @@ public class PollRequestReaderTests
     [InlineData("i'll end the poll later", false)]
     public void Spots_end_requests(string message, bool expected)
         => Assert.Equal(expected, PollRequestReader.IsEndRequest(message));
+
+    [Theory]
+    [InlineData("end my poll", true)]
+    [InlineData("end the poll", false)]
+    [InlineData("close that poll", false)]
+    public void Tells_my_poll_from_the_poll(string message, bool mine)
+        => Assert.Equal(mine, PollRequestReader.SaysMine(message));
 
     [Fact]
     public void Keeps_only_answers_the_person_wrote()
@@ -331,5 +345,6 @@ public sealed class ChatPollParsingTests : IDisposable
 
     [Fact]
     public async Task End_requests_are_read_without_the_model()
-        => Assert.IsType<EndPollAction>(await Parser(new FakeChat("""{"action":"create_lfg"}""")).ParseAsync("end my poll"));
+        => Assert.Equal(new EndPollAction(SaidMine: true),
+            await Parser(new FakeChat("""{"action":"create_lfg"}""")).ParseAsync("end my poll"));
 }

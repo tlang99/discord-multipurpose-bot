@@ -38,7 +38,9 @@ public record CreatePollAction(string Question, IReadOnlyList<string> Answers, i
 public record UnclearPollAction : ChatAction;
 
 /// <summary>"End my poll": end the asker's open poll early (or the one they replied to).</summary>
-public record EndPollAction : ChatAction;
+/// <param name="SaidMine">"end my poll", rather than "end the poll" / "end that poll", which could mean someone
+/// else's.</param>
+public record EndPollAction(bool SaidMine = false) : ChatAction;
 
 /// <summary>
 /// Works out whether a chat message is asking the bot to play music, post an LFG, set a reminder or post a poll, and
@@ -138,7 +140,7 @@ public partial class ChatActionParser
 
         if (PollRequestReader.IsEndRequest(message))
         {
-            return new EndPollAction();
+            return new EndPollAction(PollRequestReader.SaysMine(message));
         }
 
         // So is a plainly worded music control ("skip this", "show the queue").

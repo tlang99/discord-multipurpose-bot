@@ -299,8 +299,10 @@ public partial class ChatHandler
                 return ("I couldn't tell what the poll should ask, or what the choices are. Try \"make a poll: what " +
                         "should we play? ranked, casual or zombies\", or use `/poll`.", false);
 
-            case EndPollAction:
-                return (await _polls.EndRequestedAsync(asker, channel, request.ReferencedMessage?.Id), true);
+            case EndPollAction end:
+                // The reply's own target, which is there even when Discord doesn't attach the message itself.
+                return (await _polls.EndRequestedAsync(asker, channel, request.Reference?.MessageId.ToNullable(),
+                    end.SaidMine), true);
 
             case UnclearSongAction:
                 return ("I couldn't tell which song you want - try \"play <song name>\", or use `/play`.", false);
