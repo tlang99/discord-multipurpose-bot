@@ -1,3 +1,5 @@
+using ModBot.Common;
+
 namespace ModBot.Services.Polls;
 
 /// <summary>A poll that's ready to post: a question, 2-10 distinct answers and how long it runs.</summary>
@@ -50,7 +52,8 @@ public static class PollRules
         {
             if (answer.Length > MaxAnswerLength)
             {
-                return new(null, $"Keep each answer to {MaxAnswerLength} characters (\"{answer[..20]}…\" is longer).");
+                return new(null, $"Keep each answer to {MaxAnswerLength} characters (\"{TextTools.Truncate(answer, 20)}\" " +
+                                 "is longer).");
             }
 
             if (!kept.Contains(answer, StringComparer.OrdinalIgnoreCase))

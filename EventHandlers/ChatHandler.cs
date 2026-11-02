@@ -180,8 +180,8 @@ public partial class ChatHandler
                     text = "Something went wrong doing that - try again in a bit, or use the slash command.";
                 }
 
-                // The action was its own answer (a poll posted as a reply to the request).
-                if (text.Length == 0 && embed is null)
+                // A posted poll is its own answer (it's a reply to the request); every other action replies.
+                if (action is CreatePollAction && text.Length == 0)
                 {
                     return;
                 }

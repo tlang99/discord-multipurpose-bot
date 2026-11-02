@@ -30,26 +30,15 @@ public static partial class PollRequestReader
             return null;
         }
 
-        // What comes after the phrase is the poll; if nothing does ("is game night friday? make a poll"), what came
-        // before is.
-        var text = message[(phrase.Index + phrase.Length)..];
-        if (string.IsNullOrWhiteSpace(StripFiller(text)))
-        {
-            text = message[..phrase.Index];
-        }
-
         int? hours = null;
-        if (LengthRegex().Match(text) is { Success: true } length)
-        {
-            hours = ReadHours(length);
-            text = text.Remove(length.Index, length.Length);
-        }
+        var allowMultiple = phrase.Groups["multi"].Success; // "make a multiple choice poll"
 
-        var allowMultiple = false;
-        if (MultipleRegex().Match(text) is { Success: true } multiple)
+        // What comes after the phrase is the poll; if nothing does ("is game night friday? make a poll for 2 days"),
+        // what came before is. The length and multiple-choice wording come off first, so they don't count as the poll.
+        var text = TakeSettings(message[(phrase.Index + phrase.Length)..], ref hours, ref allowMultiple);
+        if (StripFiller(text).Length == 0)
         {
-            allowMultiple = true;
-            text = text.Remove(multiple.Index, multiple.Length);
+            text = TakeSettings(message[..phrase.Index], ref hours, ref allowMultiple);
         }
 
         // Line breaks are kept: they can separate answers.
@@ -58,9 +47,43 @@ public static partial class PollRequestReader
         return new PollRequest(text, hours, allowMultiple, question, answers);
     }
 
-    /// <summary>True for "end my poll", "close the poll", "stop this vote".</summary>
-    public static bool IsEndRequest(string message)
-        => EndPhraseRegex().Match(message) is { Success: true } phrase && !IsQuestionAbout(message, phrase.Index);
+    /// <summary>True for "end my poll", "close the poll please", "can you stop this vote". Ending can't be undone, so
+    /// the whole message has to be the request: "don't end my poll yet" or "who's going to close the poll?" aren't.</summary>
+    public static bool IsEndRequest(string message) => EndRequestRegex().IsMatch(message);
+
+    /// <summary>
+    /// Takes "for 2 days" and "multiple choice" off the start or end of <paramref name="text"/>, where people put
+    /// them, and never out of the middle, so "who's up for 2 hours of raid tonight?" keeps its question. A question
+    /// mark after one means it's part of the question ("anyone free for 2 hours?"), so it stays.
+    /// </summary>
+    private static string TakeSettings(string text, ref int? hours, ref bool allowMultiple)
+    {
+        for (var found = true; found;)
+        {
+            found = false;
+            foreach (var regex in new[] { LeadingSettingRegex(), TrailingSettingRegex() })
+            {
+                if (regex.Match(text) is not { Success: true } setting)
+                {
+                    continue;
+                }
+
+                if (setting.Groups["length"].Success)
+                {
+                    hours ??= ReadHours(setting);
+                }
+                else
+                {
+                    allowMultiple = true;
+                }
+
+                text = text.Remove(setting.Index, setting.Length);
+                found = true;
+            }
+        }
+
+        return text;
+    }
 
     /// <summary>
     /// The model's answers that the person actually wrote, in its order. It's told to copy them, but small models
@@ -73,7 +96,11 @@ public static partial class PollRequestReader
         var written = $" {Normalize(message)} ";
         return answers
             .Select(a => a.Trim())
-            .Where(a => Normalize(a) is { Length: > 0 } normal && written.Contains($" {normal} "))
+            .Where(a => Normalize(a) is var normal &&
+                        // Emoji and symbols have no words to compare ("🍕 or 🌮"), so those are matched as written.
+                        (normal.Length > 0
+                            ? written.Contains($" {normal} ")
+                            : a.Length > 0 && message.Contains(a, StringComparison.Ordinal)))
             .ToList();
     }
 
@@ -134,29 +161,38 @@ public static partial class PollRequestReader
         return text;
     }
 
-    /// <summary>"how do I make a poll", "can I end my poll": asking about it, not asking for it.</summary>
+    /// <summary>"how do I make a poll": asking about it, not asking for it. Only the sentence the phrase is in counts,
+    /// so a poll question written first ("what should we play tonight? make a poll") is still a request.</summary>
     private static bool IsQuestionAbout(string message, int phraseIndex)
-        => QuestionLeadRegex().IsMatch(message[..phraseIndex]);
+    {
+        var before = message[..phraseIndex];
+        return QuestionLeadRegex().IsMatch(before[(before.LastIndexOfAny(['?', '.', '!', '\n']) + 1)..]);
+    }
 
     private static string Normalize(string text) => WhitespaceRegex().Replace(NonWordRegex().Replace(text.ToLowerInvariant(), " "), " ").Trim();
 
     /// <summary>"make a poll", "can you start a quick poll", "set up a vote", "poll everyone", or a message that starts
     /// with "poll:". Not "start a vote to skip", which is the music's vote skip.</summary>
-    [GeneratedRegex(@"\b(?:make|create|start|run|post|do|set\s+up|put\s+up|throw\s+up)\s+(?:me\s+|us\s+)?an?\s+(?:quick\s+|new\s+|little\s+)?(?:poll|vote(?!\s+(?:to\s+)?skip))\b|\bpoll\s+(?:everyone|everybody|the\s+(?:server|chat|channel|squad|group))\b|^\W*(?:quick\s+)?poll\b\s*[:\-–]", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:make|create|start|run|post|do|set\s+up|put\s+up|throw\s+up)\s+(?:me\s+|us\s+)?an?\s+(?:quick\s+|new\s+|little\s+)?(?<multi>(?:multiple[\s-]choice|multi[\s-]?select)\s+)?(?:poll|vote(?!\s+(?:to\s+)?skip))\b|\bpoll\s+(?:everyone|everybody|the\s+(?:server|chat|channel|squad|group))\b|^\W*(?:quick\s+)?poll\b\s*[:\-–]", RegexOptions.IgnoreCase)]
     private static partial Regex CreatePhraseRegex();
 
-    [GeneratedRegex(@"\b(?:end|close|stop|finish|lock)\s+(?:the\s+|my\s+|this\s+|that\s+|our\s+)?(?:poll|vote)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex EndPhraseRegex();
+    /// <summary>The whole message is the request, with only a polite lead-in or "now"/"please" after.</summary>
+    [GeneratedRegex(@"^\W*(?:(?:hey|yo|ok|okay|please|pls|can\s+you|could\s+you|would\s+you|will\s+you|go\s+ahead\s+and)[\s,]+)*(?:end|close|stop|finish|lock)\s+(?:the\s+|my\s+|this\s+|that\s+|our\s+)?(?:poll|vote)\b(?:[\s,]+(?:now|please|pls|early|for\s+me))*[\s.!?]*$", RegexOptions.IgnoreCase)]
+    private static partial Regex EndRequestRegex();
 
     [GeneratedRegex(@"\b(?:how|where|why|what)\b|\b(?:can|could|do|may|should)\s+i\b|\bis\s+there\b|\bare\s+you\s+able\b", RegexOptions.IgnoreCase)]
     private static partial Regex QuestionLeadRegex();
 
-    /// <summary>"for 2 days", "for an hour", "for 3h", "for a week".</summary>
-    [GeneratedRegex(@"\bfor\s+(?:(?<count>\d{1,4})|an?|one)\s*(?<unit>hours?|hrs?|h|days?|d|weeks?|wks?|w)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex LengthRegex();
+    /// <summary>"for 2 days", "for an hour", "for 3h", "for a week" (<c>length</c>), or "multiple choice", "allow
+    /// multiple answers" (<c>multi</c>).</summary>
+    private const string SettingPattern =
+        @"(?:(?<length>for\s+(?:(?<count>\d{1,4})|an?|one)\s*(?<unit>hours?|hrs?|h|days?|d|weeks?|wks?|w))|(?<multi>multiple[\s-]choice|multi[\s-]?select|pick\s+(?:more\s+than\s+one|multiple|several)|(?:allow(?:ing)?|with)\s+multiple(?:\s+(?:answers|choices|votes))?|multiple\s+(?:answers|votes|choices)(?:\s+allowed)?))\b";
 
-    [GeneratedRegex(@"\b(?:multiple[\s-]choice|multi[\s-]?select|pick\s+(?:more\s+than\s+one|multiple|several)|(?:allow(?:ing)?|with)\s+multiple(?:\s+(?:answers|choices|votes))?|multiple\s+(?:answers|votes|choices)(?:\s+allowed)?)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex MultipleRegex();
+    [GeneratedRegex(@"^\s*,?\s*(?:and\s+)?" + SettingPattern + @"[\s,]*", RegexOptions.IgnoreCase)]
+    private static partial Regex LeadingSettingRegex();
+
+    [GeneratedRegex(@"[\s,]*(?:\band\s+)?\b" + SettingPattern + @"[\s.!]*$", RegexOptions.IgnoreCase)]
+    private static partial Regex TrailingSettingRegex();
 
     /// <summary>Words that only join the phrase to the poll: ": what should we play?", "asking if", "about".</summary>
     [GeneratedRegex(@"^(?:[:\-–,.]|asking(?:\s+(?:if|whether))?|about|on|for|to\s+see|that\s+asks|with\s+the\s+question|please)(?:\s+|$)", RegexOptions.IgnoreCase)]

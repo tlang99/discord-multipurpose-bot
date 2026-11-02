@@ -38,6 +38,17 @@ public class PollRulesTests
     public void Rejects_long_answers_instead_of_cutting_them()
         => Assert.Null(PollRules.Check("Q?", ["a", new string('x', PollRules.MaxAnswerLength + 1)], 24, false).Draft);
 
+    [Fact]
+    public void The_long_answer_message_never_splits_an_emoji()
+    {
+        // The emoji's two halves are characters 20 and 21, right where the answer is cut.
+        var problem = PollRules.Check("Q?", ["a", new string('x', 19) + "🍕" + new string('x', 40)], 24, false).Problem;
+
+        Assert.NotNull(problem);
+        // A half emoji doesn't survive a round trip through UTF-8.
+        Assert.Equal(problem, System.Text.Encoding.UTF8.GetString(System.Text.Encoding.UTF8.GetBytes(problem)));
+    }
+
     [Theory]
     [InlineData("a, b, c", new[] { "a", "b", "c" })]
     [InlineData("Yes, tonight | No", new[] { "Yes, tonight", "No" })]
@@ -88,6 +99,50 @@ public class PollRequestReaderTests
     public void Uses_what_came_before_the_phrase_when_nothing_follows()
         => Assert.Equal("is game night friday?", PollRequestReader.Read("is game night friday? make a poll")?.Text);
 
+    [Fact]
+    public void Settings_after_the_phrase_dont_stop_it_using_what_came_before()
+    {
+        var request = PollRequestReader.Read("ranked or casual? make a poll for 2 days with multiple answers");
+
+        Assert.NotNull(request);
+        Assert.Equal("ranked or casual?", request.Text);
+        Assert.Equal(48, request.Hours);
+        Assert.True(request.AllowMultiple);
+    }
+
+    [Theory]
+    [InlineData("what should we play tonight? make a poll", "what should we play tonight?")]
+    [InlineData("where should we eat? start a poll", "where should we eat?")]
+    public void A_question_written_first_is_still_a_request(string message, string text)
+        => Assert.Equal(text, PollRequestReader.Read(message)?.Text);
+
+    [Fact]
+    public void Time_spans_inside_the_question_stay_in_it()
+    {
+        var request = PollRequestReader.Read("make a poll: who's up for 2 hours of raid tonight? yes, no");
+
+        Assert.NotNull(request);
+        Assert.Null(request.Hours);
+        Assert.Equal("who's up for 2 hours of raid tonight?", request.Question);
+    }
+
+    [Fact]
+    public void A_question_ending_in_a_time_span_keeps_it()
+        => Assert.Null(PollRequestReader.Read("make a poll: anyone free for 2 hours?")?.Hours);
+
+    [Theory]
+    [InlineData("make a multiple choice poll: which maps? rust, shipment or nuketown")]
+    [InlineData("create a multi-select poll: which maps? rust, shipment or nuketown")]
+    [InlineData("make a poll: which maps? rust, shipment or nuketown, multiple choice")]
+    public void Reads_multiple_choice(string message)
+    {
+        var request = PollRequestReader.Read(message);
+
+        Assert.NotNull(request);
+        Assert.True(request.AllowMultiple);
+        Assert.Equal(["rust", "shipment", "nuketown"], request.Answers);
+    }
+
     [Theory]
     [InlineData("how do i make a poll?")]
     [InlineData("can i make a poll in here")]
@@ -103,8 +158,12 @@ public class PollRequestReaderTests
     [InlineData("end my poll", true)]
     [InlineData("close the poll please", true)]
     [InlineData("can you stop this vote", true)]
+    [InlineData("hey, can you end the poll now please", true)]
     [InlineData("how do i end my poll?", false)]
     [InlineData("the poll ends tomorrow", false)]
+    [InlineData("don't end my poll yet", false)]
+    [InlineData("who's going to close the poll?", false)]
+    [InlineData("i'll end the poll later", false)]
     public void Spots_end_requests(string message, bool expected)
         => Assert.Equal(expected, PollRequestReader.IsEndRequest(message));
 
@@ -116,6 +175,10 @@ public class PollRequestReaderTests
 
         Assert.Equal(["Ranked!", "Casual"], kept);
     }
+
+    [Fact]
+    public void Keeps_emoji_answers_the_person_wrote()
+        => Assert.Equal(["🍕", "🌮"], PollRequestReader.KeepAnswersFrom("🍕 or 🌮", ["🍕", "🌮", "🍔"]));
 }
 
 public sealed class ChatPollParsingTests : IDisposable
