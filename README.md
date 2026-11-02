@@ -406,6 +406,26 @@ bot logs a warning at startup.
 dotnet run
 ```
 
+### 8. Servers' saved data
+
+Each server that adds the bot starts on the defaults: auto-mod **off** (`/automod enable` turns it on), every
+feature on, and music and LFG working in any channel until an admin picks one with `/settings channel`. What servers
+change is saved in `data/`, one file per kind of data with each server's entry under its server ID:
+`server-settings.json`, `guild-settings.json`, `chat-settings.json`, `warnings.json`, `reminders.json`,
+`news-subscriptions.json` and `music-queue.json`. `data/` is git-ignored. Back it up, since losing it resets every
+server.
+
+> **To do: removing a server's data when it leaves.** When a server removes the bot, its entries are kept (the log
+> says "Removed from server Name (ID)"), so its settings are still there if it adds the bot back. Nothing deletes them
+> yet. Until that's automated, clean up by hand: stop the bot, then remove that server's entries from each file in
+> `data/`. The entries are keyed by its server ID (from that log line). Reminders, warnings and news subscriptions
+> carry a `GuildId` field instead of being keyed by it. Then start the bot again. A later change should do this
+> automatically, for example a while after the server leaves, in case it was removed by mistake.
+
+**Upgrading from before per-server settings:** `Music:ChannelName` and `Lfg:ChannelName` are gone. If your own
+server relied on `#music` or `#lfg-mw4`, run `/settings channel` there once for each. The old keys in your
+`appsettings.json` are just ignored.
+
 ### Tests
 
 The tests in `tests/ModBot.Tests` cover the logic that's easy to get subtly wrong: reading times, reminder requests

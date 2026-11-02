@@ -37,7 +37,8 @@ public class ServerSettings
     /// <summary>This server turned LFG pings off.</summary>
     public bool LfgPingsOff { get; set; }
 
-    public bool IsEnabled(ServerFeature feature) => !DisabledFeatures.Contains(feature.ToString());
+    /// <remarks>Null-safe: a hand-edited file with <c>"DisabledFeatures": null</c> means nothing is off.</remarks>
+    public bool IsEnabled(ServerFeature feature) => DisabledFeatures?.Contains(feature.ToString()) != true;
 }
 
 /// <summary>Where a feature works in one server: the channel it picked, or any channel until it picks one.</summary>

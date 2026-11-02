@@ -116,11 +116,22 @@ public partial class ChatHandler
         // "@bot disable polls" from an admin. Read before the chatbot's own switch, so an admin can turn the chatbot
         // back on by asking it; nobody else gets an answer from a chatbot that's off.
         var words = Describe(message, guild, bot.Id, noteAttachments: false);
+        var server = await _serverSettings.GetAsync(guild.Id);
+        var isAdmin = message.Author is SocketGuildUser author && ServerFeatureSwitch.CanChange(author);
+        if (!server.IsEnabled(ServerFeature.Chat) && !isAdmin)
+        {
+            return;
+        }
+
         if (message.Author is SocketGuildUser member && SettingsRequestReader.Read(words) is { } change)
         {
-            if (!IsOnCooldown(guild.Id, member.Id))
+            if (IsOnCooldown(guild.Id, member.Id))
             {
-                await ReplyAsync(message, ServerFeatureSwitch.CanChange(member)
+                await ReactAsync(message, "⏳");
+            }
+            else
+            {
+                await ReplyAsync(message, isAdmin
                     ? await _featureSwitch.SetAsync(guild, change.Feature, change.On, member)
                     : "Only server admins (**Manage Server**) can turn features on or off. See `/settings`.");
             }
@@ -128,10 +139,9 @@ public partial class ChatHandler
             return;
         }
 
-        var server = await _serverSettings.GetAsync(guild.Id);
         if (!server.IsEnabled(ServerFeature.Chat))
         {
-            return;
+            return; // an admin, but not asking to switch something
         }
 
         var question = Describe(message, guild, bot.Id);

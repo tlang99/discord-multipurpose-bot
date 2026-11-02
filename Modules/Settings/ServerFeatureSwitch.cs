@@ -42,6 +42,7 @@ public class ServerFeatureSwitch
 
         await _settings.UpdateAsync(guild.Id, s =>
         {
+            s.DisabledFeatures ??= [];
             s.DisabledFeatures.Remove(feature.ToString());
             if (!on)
             {
