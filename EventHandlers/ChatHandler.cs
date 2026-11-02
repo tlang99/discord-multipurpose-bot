@@ -130,9 +130,10 @@ public partial class ChatHandler
             try
             {
                 // "Play X" / "make an LFG" are done, not chatted about. Only the asker's own message is looked at.
-                if (_options.Actions && message.Author is SocketGuildUser)
+                if (_options.Actions && message.Author is SocketGuildUser &&
+                    Describe(message, guild, bot.Id, noteAttachments: false) is { Length: > 0 } request)
                 {
-                    action = await _actionParser.ParseAsync(question);
+                    action = await _actionParser.ParseAsync(request);
                 }
 
                 if (action is null)
@@ -291,7 +292,7 @@ public partial class ChatHandler
                 }
 
                 // The poll is the answer; only a problem gets a reply of its own.
-                return (await _polls.PostReplyAsync(asker, channel, draft, request) ?? "", false);
+                return (await _polls.PostReplyAsync(asker, channel, draft, request, poll.FromModel) ?? "", false);
             }
 
             case UnclearPollAction:
@@ -301,10 +302,21 @@ public partial class ChatHandler
             case EndPollAction:
             {
                 // The poll they replied to, or else their newest open one here.
-                var target = request.ReferencedMessage is { } replied &&
-                             PollPoster.OwnerOf(replied, guild.CurrentUser.Id) is not null
+                IUserMessage? target = request.ReferencedMessage is { } replied &&
+                                       PollPoster.OwnerOf(replied, guild.CurrentUser.Id) is not null
                     ? replied
-                    : await PollPoster.FindOpenPollAsync(channel, asker.Id, guild.CurrentUser.Id);
+                    : null;
+                if (target is null)
+                {
+                    if (!guild.CurrentUser.GetPermissions(channel).ReadMessageHistory)
+                    {
+                        return ("I need **Read Message History** here to find your poll. Reply to the poll with " +
+                                "\"end the poll\" instead, or right-click it → Apps → End poll.", false);
+                    }
+
+                    target = await PollPoster.FindOpenPollAsync(channel, asker.Id, guild.CurrentUser.Id);
+                }
+
                 return target is null
                     ? ("I can't find an open poll of yours in the last 50 messages here. Reply to the poll with " +
                        "\"end the poll\", or right-click it → Apps → End poll.", false)
@@ -556,8 +568,9 @@ public partial class ChatHandler
     }
 
     /// <summary>The message as readable text: mentions turned into names (the bot's own mention dropped), custom
-    /// emoji into :name:, and a note for attachments.</summary>
-    private static string Describe(IMessage message, SocketGuild guild, ulong botId)
+    /// emoji into :name:, and a note for attachments (unless <paramref name="noteAttachments"/> is false: the action
+    /// parser gets the words alone, or the note would end up in a poll answer).</summary>
+    private static string Describe(IMessage message, SocketGuild guild, ulong botId, bool noteAttachments = true)
     {
         var text = UserMentionRegex().Replace(message.Content, m =>
         {
@@ -568,7 +581,7 @@ public partial class ChatHandler
         text = ChannelMentionRegex().Replace(text, m => "#" + (guild.GetChannel(ulong.Parse(m.Groups[1].Value))?.Name ?? "channel"));
         text = CustomEmojiRegex().Replace(text, m => $":{m.Groups[1].Value}:").Trim();
 
-        if (message.Attachments.Count > 0)
+        if (noteAttachments && message.Attachments.Count > 0)
         {
             text = $"{text} [{message.Attachments.Count} attachment(s)]".Trim();
         }

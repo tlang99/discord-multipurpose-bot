@@ -36,9 +36,11 @@ public static partial class PollRequestReader
         // What comes after the phrase is the poll; if nothing does ("is game night friday? make a poll for 2 days"),
         // what came before is. The length and multiple-choice wording come off first, so they don't count as the poll.
         var text = TakeSettings(message[(phrase.Index + phrase.Length)..], ref hours, ref allowMultiple);
-        if (StripFiller(text).Length == 0)
+        if (NothingLeftRegex().IsMatch(StripFiller(text)))
         {
-            text = TakeSettings(message[..phrase.Index], ref hours, ref allowMultiple);
+            // Without the lead-in to the phrase: "is game night friday? can you [make a poll]".
+            text = TakeSettings(TrailingLeadInRegex().Replace(message[..phrase.Index], ""), ref hours,
+                ref allowMultiple);
         }
 
         // Line breaks are kept: they can separate answers.
@@ -88,21 +90,38 @@ public static partial class PollRequestReader
     /// <summary>
     /// The model's answers that the person actually wrote, in its order. It's told to copy them, but small models
     /// fill in options of their own ("should we play tonight?" gets "Ranked, Casual, Zombies"), and the bot would be
-    /// putting words in their mouth. Case, spacing and punctuation don't count ("Ranked!" matches "ranked"), but the
-    /// words themselves do, whole: "Rank" doesn't match "ranked".
+    /// putting words in their mouth. So an answer has to be written as one of a list: next to an "or", a comma, a "|"
+    /// or a line break ("ranked or casual"), not just somewhere in the question ("should we play ranked tonight" lists
+    /// nothing, so "ranked" and "tonight" are both dropped and it becomes Yes/No). Case and punctuation don't count
+    /// ("Ranked!" matches "ranked"), but whole words do: "Rank" doesn't match "ranked". Repeats are dropped.
     /// </summary>
     public static IReadOnlyList<string> KeepAnswersFrom(string message, IEnumerable<string> answers)
     {
-        var written = $" {Normalize(message)} ";
-        return answers
-            .Select(a => a.Trim())
-            .Where(a => Normalize(a) is var normal &&
-                        // Emoji and symbols have no words to compare ("🍕 or 🌮"), so those are matched as written.
-                        (normal.Length > 0
-                            ? written.Contains($" {normal} ")
-                            : a.Length > 0 && message.Contains(a, StringComparison.Ordinal)))
-            .ToList();
+        var listed = ListMarked(message, Normalize);
+        var listedAsWritten = ListMarked(message, t => WhitespaceRegex().Replace(t, " ").Trim());
+        bool InList(string list, string answer) => list.Contains($" {answer} |") || list.Contains($"| {answer} ");
+
+        var kept = new List<string>();
+        foreach (var answer in answers.Select(a => a.Trim()).Where(a => a.Length > 0))
+        {
+            // Emoji and symbols have no words to compare ("🍕 or 🌮"), so those are matched as written.
+            var normal = Normalize(answer);
+            var written = normal.Length > 0
+                ? InList(listed, normal)
+                : InList(listedAsWritten, WhitespaceRegex().Replace(answer, " "));
+            if (written && !kept.Contains(answer, StringComparer.OrdinalIgnoreCase))
+            {
+                kept.Add(answer);
+            }
+        }
+
+        return kept;
     }
+
+    /// <summary>The message with each list separator ("or", ",", ";", "|", a line break) turned into " | ", then
+    /// <paramref name="tidy"/> applied to each piece.</summary>
+    private static string ListMarked(string message, Func<string, string> tidy)
+        => " " + string.Join(" | ", ListMarkRegex().Split(message).Select(tidy)) + " ";
 
     /// <summary>"question? a, b or c", "question options: a, b", or nothing to go on.</summary>
     private static (string? Question, IReadOnlyList<string>? Answers) ReadLaidOut(string text)
@@ -191,8 +210,17 @@ public static partial class PollRequestReader
     [GeneratedRegex(@"^\s*,?\s*(?:and\s+)?" + SettingPattern + @"[\s,]*", RegexOptions.IgnoreCase)]
     private static partial Regex LeadingSettingRegex();
 
-    [GeneratedRegex(@"[\s,]*(?:\band\s+)?\b" + SettingPattern + @"[\s.!]*$", RegexOptions.IgnoreCase)]
+    /// <summary>Not after "or": in "for 2 days or for a week" it's the last answer.</summary>
+    [GeneratedRegex(@"(?<!\bor[\s,]*)[\s,]*(?:\band\s+)?\b" + SettingPattern + @"[\s.!]*$", RegexOptions.IgnoreCase)]
     private static partial Regex TrailingSettingRegex();
+
+    /// <summary>"can you", "could you please", "hey", "ok so" right before the poll phrase.</summary>
+    [GeneratedRegex(@"(?:\b(?:hey|yo|ok|okay|so|please|pls|(?:can|could|would|will)\s+you(?:\s+please)?)[\s,]*)+$", RegexOptions.IgnoreCase)]
+    private static partial Regex TrailingLeadInRegex();
+
+    /// <summary>Nothing of the poll after the phrase: "?", "pls", "now please!" ("can you make a poll?").</summary>
+    [GeneratedRegex(@"^[\W_]*(?:(?:pls|plz|please|now|thanks|thx|ty|for\s+me|for\s+us)\b[\W_]*)*$", RegexOptions.IgnoreCase)]
+    private static partial Regex NothingLeftRegex();
 
     /// <summary>Words that only join the phrase to the poll: ": what should we play?", "asking if", "about".</summary>
     [GeneratedRegex(@"^(?:[:\-–,.]|asking(?:\s+(?:if|whether))?|about|on|for|to\s+see|that\s+asks|with\s+the\s+question|please)(?:\s+|$)", RegexOptions.IgnoreCase)]
@@ -203,6 +231,9 @@ public static partial class PollRequestReader
 
     [GeneratedRegex(@"\s*(?:,\s*or\s+|,|;|\n|\s+or\s+)\s*", RegexOptions.IgnoreCase)]
     private static partial Regex ListSeparatorRegex();
+
+    [GeneratedRegex(@"\bor\b|[,;|\n]", RegexOptions.IgnoreCase)]
+    private static partial Regex ListMarkRegex();
 
     [GeneratedRegex(@"^[\s:\-–]+")]
     private static partial Regex LeadingPunctuationRegex();

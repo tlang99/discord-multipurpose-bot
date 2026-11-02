@@ -111,6 +111,23 @@ public class PollRequestReaderTests
     }
 
     [Theory]
+    [InlineData("is game night friday? can you make a poll?", "is game night friday?")]
+    [InlineData("pizza or tacos? make a poll pls", "pizza or tacos?")]
+    [InlineData("pizza or tacos? make a poll now please!", "pizza or tacos?")]
+    public void Punctuation_or_please_after_the_phrase_isnt_the_poll(string message, string text)
+        => Assert.Equal(text, PollRequestReader.Read(message)?.Text);
+
+    [Fact]
+    public void A_length_shaped_last_answer_stays_an_answer()
+    {
+        var request = PollRequestReader.Read("make a poll: how long should the event run? for 2 days or for a week");
+
+        Assert.NotNull(request);
+        Assert.Null(request.Hours);
+        Assert.Equal(["for 2 days", "for a week"], request.Answers);
+    }
+
+    [Theory]
     [InlineData("what should we play tonight? make a poll", "what should we play tonight?")]
     [InlineData("where should we eat? start a poll", "where should we eat?")]
     public void A_question_written_first_is_still_a_request(string message, string text)
@@ -177,6 +194,14 @@ public class PollRequestReaderTests
     }
 
     [Fact]
+    public void Drops_answers_that_are_only_words_from_the_question()
+        => Assert.Empty(PollRequestReader.KeepAnswersFrom("should we play ranked tonight", ["ranked", "tonight", "play ranked"]));
+
+    [Fact]
+    public void Drops_repeated_answers()
+        => Assert.Equal(["pizza"], PollRequestReader.KeepAnswersFrom("pizza or pizza", ["pizza", "Pizza"]));
+
+    [Fact]
     public void Keeps_emoji_answers_the_person_wrote()
         => Assert.Equal(["🍕", "🌮"], PollRequestReader.KeepAnswersFrom("🍕 or 🌮", ["🍕", "🌮", "🍔"]));
 }
@@ -214,6 +239,17 @@ public sealed class ChatPollParsingTests : IDisposable
         var poll = Assert.IsType<CreatePollAction>(action);
         Assert.Equal("Ranked or casual tonight?", poll.Question);
         Assert.Equal(["Ranked", "Casual"], poll.Answers);
+        Assert.True(poll.FromModel); // so the word filter checks it even for moderators
+    }
+
+    [Fact]
+    public async Task Repeated_model_answers_fall_back_to_yes_or_no()
+    {
+        var chat = new FakeChat("""{"question":"Pizza tonight?","answers":["pizza","Pizza"]}""");
+
+        var action = await Parser(chat).ParseAsync("make a poll asking if we should get pizza");
+
+        Assert.Equal(PollRules.YesNo, Assert.IsType<CreatePollAction>(action).Answers);
     }
 
     [Fact]

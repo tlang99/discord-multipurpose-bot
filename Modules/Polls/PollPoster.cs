@@ -44,7 +44,10 @@ public partial class PollPoster
     /// Everything short of posting: permissions, the word filter and the cooldown, which it claims. Null means go
     /// ahead; call <see cref="Release"/> if posting then fails, so the person isn't held to a cooldown for nothing.
     /// </summary>
-    public async Task<string?> PrepareAsync(IGuildUser asker, ITextChannel channel, PollDraft draft)
+    /// <param name="writtenByModel">The chatbot's model wrote the question. Model text is always checked while
+    /// auto-mod is on, as with every other reply the bot writes, even when a moderator asked.</param>
+    public async Task<string?> PrepareAsync(IGuildUser asker, ITextChannel channel, PollDraft draft,
+        bool writtenByModel = false)
     {
         // Slash commands work even where the person can't type, so without this anyone could have the bot post a
         // poll in a read-only channel like #rules.
@@ -59,15 +62,12 @@ public partial class PollPoster
             return $"I need **Send Messages** and **Create Polls** in {channel.Mention} to post polls there.";
         }
 
-        // Same exemption as auto-mod: moderators aren't held to the word filter.
-        if (!TextFilter.IsExempt(asker))
+        // Same exemption as auto-mod: moderators aren't held to the word filter, for their own words.
+        var settings = await _settingsStore.GetAsync(asker.GuildId);
+        if (TextFilter.AppliesTo(settings, writtenByModel ? null : asker) &&
+            TextFilter.FindViolation(draft.Question + "\n" + string.Join("\n", draft.Answers), settings) is not null)
         {
-            var settings = await _settingsStore.GetAsync(asker.GuildId);
-            if (settings.AutoModEnabled &&
-                TextFilter.FindViolation(draft.Question + "\n" + string.Join("\n", draft.Answers), settings) is not null)
-            {
-                return "That poll breaks this server's word filter, so I can't post it.";
-            }
+            return "That poll breaks this server's word filter, so I can't post it.";
         }
 
         if (!TryClaimCooldown(asker.GuildId, asker.Id, out var wait))
@@ -83,9 +83,9 @@ public partial class PollPoster
     /// <summary>Posts the poll as a reply to <paramref name="request"/> (the chatbot's path; /poll responds to the
     /// interaction instead). Returns null on success, or what went wrong.</summary>
     public async Task<string?> PostReplyAsync(IGuildUser asker, ITextChannel channel, PollDraft draft,
-        IUserMessage request)
+        IUserMessage request, bool writtenByModel = false)
     {
-        if (await PrepareAsync(asker, channel, draft) is { } problem)
+        if (await PrepareAsync(asker, channel, draft, writtenByModel) is { } problem)
         {
             return problem;
         }

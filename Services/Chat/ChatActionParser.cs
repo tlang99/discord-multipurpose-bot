@@ -30,8 +30,9 @@ public record MusicControlAction(MusicCommandRequest Request, bool FromModel = f
 public record UnclearMusicAction : ChatAction;
 
 /// <param name="Hours">How long it runs, if the message said; null for the default.</param>
-public record CreatePollAction(string Question, IReadOnlyList<string> Answers, int? Hours, bool AllowMultiple)
-    : ChatAction;
+/// <param name="FromModel">The model wrote the question, so the word filter applies to it even for moderators.</param>
+public record CreatePollAction(string Question, IReadOnlyList<string> Answers, int? Hours, bool AllowMultiple,
+    bool FromModel = false) : ChatAction;
 
 /// <summary>The message asked for a poll, but what it should ask couldn't be worked out.</summary>
 public record UnclearPollAction : ChatAction;
@@ -239,7 +240,7 @@ public partial class ChatActionParser
                 .Select(a => a.GetString() ?? "");
             var answers = PollRequestReader.KeepAnswersFrom(request.Text, offered);
             return new CreatePollAction(question, answers.Count >= PollRules.MinAnswers ? answers : PollRules.YesNo,
-                request.Hours, request.AllowMultiple);
+                request.Hours, request.AllowMultiple, FromModel: true);
         }
         catch (Exception ex) when (ex is ChatServiceException or JsonException or KeyNotFoundException or InvalidOperationException)
         {
