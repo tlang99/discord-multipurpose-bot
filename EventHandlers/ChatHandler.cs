@@ -30,14 +30,20 @@ public partial class ChatHandler
         "Whatever your personality, always follow these rules: Keep answers short: usually a few sentences, and well " +
         "under 1,500 characters unless someone asks for detail. Reply only as yourself, in your own words. Never " +
         "start your reply with a name and a colon, and never write lines for anyone else. Use Discord markdown " +
-        "sparingly. Never write @everyone or @here, and don't try to ping people. Never claim you played a song, " +
-        "posted an LFG or set a reminder: those requests are handled separately, so if someone asks how, tell them " +
-        "to ask you directly (e.g. \"play <song>\", \"make an LFG for ranked\" or \"remind me in 20 minutes to check " +
-        "the oven\" - reminders need a time) or see /help.";
+        "sparingly. Never write @everyone or @here, and don't try to ping people. Never claim you played, skipped, " +
+        "paused or stopped a song, changed the queue, started the music, posted an LFG or set a reminder: those " +
+        "requests are handled separately, so if someone asks how, tell them to ask you directly (e.g. \"play <song>\", " +
+        "\"add <song> to the queue\", \"skip this\", \"show the queue\", \"start the music\", \"make an LFG for " +
+        "ranked\" or \"remind me in 20 minutes to check the oven\" - reminders need a time) or see /help. How the " +
+        "music works: there's one standing queue anyone can add to any time, even when nothing's playing; songs play " +
+        "in turns, one from each person; skipping a song takes votes from more than half the listeners, unless you " +
+        "picked it; and there's a pinned music menu with buttons in the music channel.";
 
     private readonly IChatService _chat;
     private readonly ChatActionParser _actionParser;
     private readonly MusicService _music;
+    private readonly MusicControls _musicControls;
+    private readonly MusicQueueService _musicQueue;
     private readonly LfgPoster _lfgPoster;
     private readonly ReminderService _reminders;
     private readonly IGuildSettingsStore _settingsStore;
@@ -46,7 +52,8 @@ public partial class ChatHandler
     private readonly ILogger<ChatHandler> _logger;
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
 
-    public ChatHandler(IChatService chat, ChatActionParser actionParser, MusicService music, LfgPoster lfgPoster,
+    public ChatHandler(IChatService chat, ChatActionParser actionParser, MusicService music,
+        MusicControls musicControls, MusicQueueService musicQueue, LfgPoster lfgPoster,
         ReminderService reminders,
         IGuildSettingsStore settingsStore, ChatPersonality personality, IOptions<ChatOptions> options,
         ILogger<ChatHandler> logger)
@@ -54,6 +61,8 @@ public partial class ChatHandler
         _chat = chat;
         _actionParser = actionParser;
         _music = music;
+        _musicControls = musicControls;
+        _musicQueue = musicQueue;
         _lfgPoster = lfgPoster;
         _reminders = reminders;
         _settingsStore = settingsStore;
@@ -147,10 +156,19 @@ public partial class ChatHandler
             {
                 string text;
                 var suppressEmbeds = false;
+                Embed? embed = null;
                 try
                 {
-                    (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)message.Author, channel,
-                        message.Id);
+                    if (action is MusicControlAction or UnclearMusicAction)
+                    {
+                        var music = await RunMusicControlAsync(action, (SocketGuildUser)message.Author, channel);
+                        (text, suppressEmbeds, embed) = (music.Text ?? "", music.SuppressEmbeds, music.Embed);
+                    }
+                    else
+                    {
+                        (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)message.Author, channel,
+                            message.Id);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -160,16 +178,18 @@ public partial class ChatHandler
                 }
 
                 // Song and playlist titles are third-party text, so action replies follow the word rules too.
-                if (settings.AutoModEnabled && TextFilter.FindViolation(text, settings) is not null)
+                if (settings.AutoModEnabled &&
+                    TextFilter.FindViolation(text + "\n" + EmbedText(embed), settings) is not null)
                 {
-                    text = action is PlayMusicAction
+                    text = action is PlayMusicAction or MusicControlAction
                         ? "My reply named a song whose title breaks this server's word filter, so I won't repeat it " +
                           "here. Check `/queue` to see what happened."
                         : "My reply broke this server's word filter, so I'm keeping the details to myself.";
                     suppressEmbeds = false;
+                    embed = null;
                 }
 
-                await ReplyAsync(message, text, suppressEmbeds);
+                await ReplyAsync(message, text, suppressEmbeds, embed);
                 return;
             }
         }
@@ -211,8 +231,11 @@ public partial class ChatHandler
                     return ($"Music goes in **#{_music.ChannelName}**, but this server doesn't have that channel yet.", false);
                 }
 
-                var result = await _music.PlayAsync(asker, musicChannel, play.Query, replyShowsNowPlaying: false);
-                var where = result.Success && musicChannel.Id != channel.Id ? $" (in {musicChannel.Mention})" : "";
+                // Into the standing queue, in the person's turns. "Play" also starts the music if it isn't playing.
+                var result = play.StartPlaying
+                    ? await _musicControls.PlayAsync(asker, musicChannel, play.Query)
+                    : await _musicControls.AddAsync(asker, musicChannel, play.Query);
+                var where = result.Success && musicChannel.Id != channel.Id ? $" (music's in {musicChannel.Mention})" : "";
                 return ((result.Text ?? "Done.") + where, result.SuppressEmbeds);
             }
 
@@ -264,6 +287,99 @@ public partial class ChatHandler
                 return ("I'm not sure how to do that yet.", false);
         }
     }
+
+    /// <summary>Controls the model can't trigger on its own: they can't be undone, and its guesses at which control
+    /// was meant are sometimes wrong. The person is asked to say it plainly instead.</summary>
+    private static readonly Dictionary<MusicCommand, string> PlainWordsNeeded = new()
+    {
+        [MusicCommand.Stop] = "stop the music",
+        [MusicCommand.ClearQueue] = "clear the queue",
+        [MusicCommand.RemoveMine] = "remove my songs",
+    };
+
+    /// <summary>
+    /// Runs a music control as the person who asked, through the same code as the slash commands and the music menu,
+    /// so the same rules apply (be in the bot's voice channel to control it, skips are votes, only your own songs are
+    /// yours to remove).
+    /// </summary>
+    private async Task<MusicReply> RunMusicControlAsync(ChatAction action, SocketGuildUser asker, SocketTextChannel channel)
+    {
+        if (action is not MusicControlAction { Request: var request } control)
+        {
+            return MusicReply.Fail("I couldn't tell what you want me to do with the music. Try \"skip\", \"pause\", " +
+                                   "\"show the queue\" or \"start the music\" - or see `/help`.");
+        }
+
+        // A skip from a member is just one vote, but a moderator's skips go through outright, so the model's guess
+        // shouldn't make one for them either.
+        var phrase = request.Command == MusicCommand.Skip && Moderators.IsModerator(asker)
+            ? "skip this song"
+            : PlainWordsNeeded.GetValueOrDefault(request.Command);
+        if (control.FromModel && phrase is not null)
+        {
+            return MusicReply.Fail($"Just to be sure - did you want me to **{phrase}**? Say \"@{channel.Guild.CurrentUser.DisplayName} " +
+                                   $"{phrase}\" and I'll do it.");
+        }
+
+        var guild = channel.Guild;
+        switch (request.Command)
+        {
+            case MusicCommand.Skip:
+                return await _musicControls.SkipAsync(asker);
+            case MusicCommand.Pause:
+                return await _musicControls.PauseAsync(asker);
+            case MusicCommand.Resume:
+                return await _musicControls.ResumeAsync(asker);
+            case MusicCommand.Stop:
+                return await _musicControls.StopAsync(asker);
+            case MusicCommand.NowPlaying:
+                return _musicControls.NowPlaying(asker);
+            case MusicCommand.ShowQueue:
+                return await _musicControls.QueueAsync(asker);
+            case MusicCommand.LoopSong:
+                return await _musicControls.LoopAsync(asker, LoopMode.Song);
+            case MusicCommand.LoopQueue:
+                return await _musicControls.LoopAsync(asker, LoopMode.Queue);
+            case MusicCommand.LoopOff:
+                return await _musicControls.LoopAsync(asker, LoopMode.Off);
+            case MusicCommand.Remove:
+                return await _musicControls.RemoveAsync(asker, request.Position ?? 0);
+            case MusicCommand.RemoveMine:
+                return await _musicControls.RemoveMineAsync(asker);
+            case MusicCommand.ClearQueue:
+                return await _musicControls.ClearQueueAsync(asker);
+
+            case MusicCommand.Start:
+            {
+                // "Now playing" goes where music does, wherever the request was made.
+                var musicChannel = _music.ChannelName.Length == 0 ? channel : _music.FindChannel(guild);
+                if (musicChannel is null)
+                {
+                    return MusicReply.Fail($"Music goes in **#{_music.ChannelName}**, but this server doesn't have " +
+                                           "that channel yet.");
+                }
+
+                return await _musicControls.StartAsync(asker, musicChannel);
+            }
+
+            case MusicCommand.ShowMenu:
+                return await _musicQueue.MenuLinkAsync(guild.Id) is { } link
+                    ? MusicReply.Ok($"🎶 The music menu's [here]({link}) - it's pinned in the music channel.")
+                    : MusicReply.Fail("There's no music menu yet - a server admin can post one with `/music-menu` " +
+                                      "in the music channel. Meanwhile, ask me to play or add songs, or use `/queue`.");
+
+            default:
+                return MusicReply.Fail("I'm not sure how to do that yet.");
+        }
+    }
+
+    /// <summary>All the text in an embed, for the word filter.</summary>
+    private static string EmbedText(Embed? embed)
+        => embed is null
+            ? ""
+            : string.Join("\n", new[] { embed.Title, embed.Description, embed.Footer?.Text }
+                .Concat(embed.Fields.SelectMany(f => new[] { f.Name, f.Value }))
+                .Where(s => !string.IsNullOrEmpty(s)));
 
     /// <summary>Records the question if the person is allowed to ask now; true if they have to wait.</summary>
     private bool IsOnCooldown(ulong guildId, ulong userId)
@@ -432,14 +548,16 @@ public partial class ChatHandler
     private static string DisplayName(IUser user, SocketGuild guild)
         => guild.GetUser(user.Id)?.DisplayName ?? user.GlobalName ?? user.Username;
 
-    private async Task ReplyAsync(SocketUserMessage message, string text, bool suppressEmbeds = false)
+    private async Task ReplyAsync(SocketUserMessage message, string text, bool suppressEmbeds = false,
+        Embed? embed = null)
     {
         try
         {
-            // Only the asker can be pinged, however the model's text is worded.
-            await message.ReplyAsync(text,
+            // Only the asker can be pinged, however the model's text is worded. (Suppressing embeds would hide the
+            // queue/now-playing card too, so it's only done on text-only replies.)
+            await message.ReplyAsync(text.Length == 0 ? null : text, embed: embed,
                 allowedMentions: new AllowedMentions(AllowedMentionTypes.None) { MentionRepliedUser = true },
-                flags: suppressEmbeds ? MessageFlags.SuppressEmbeds : MessageFlags.None);
+                flags: suppressEmbeds && embed is null ? MessageFlags.SuppressEmbeds : MessageFlags.None);
         }
         catch (Exception ex)
         {

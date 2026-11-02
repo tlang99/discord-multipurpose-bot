@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.Lfg;
+using ModBot.Services.Moderation;
 
 namespace ModBot.Modules.Lfg;
 
@@ -421,7 +422,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
                 _ => LfgPlatform.Crossplay,
             });
 
-    /// <summary>Same moderator bar as the music commands: these members can remove anyone's LFG post.</summary>
-    private static bool IsModerator(IGuildUser? user)
-        => user is not null && (user.GuildPermissions.ManageMessages || user.GuildPermissions.MoveMembers);
+    /// <summary>Same moderator bar as the music commands (<see cref="Moderators"/>): these members can remove anyone's
+    /// LFG post.</summary>
+    private static bool IsModerator(IGuildUser? user) => Moderators.IsModerator(user);
 }

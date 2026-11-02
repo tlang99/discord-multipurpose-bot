@@ -4,7 +4,6 @@ using Discord.WebSocket;
 using Lavalink4NET;
 using Lavalink4NET.Clients;
 using Lavalink4NET.Players;
-using Lavalink4NET.Players.Queued;
 using Lavalink4NET.Rest.Entities.Tracks;
 using Lavalink4NET.Tracks;
 using Microsoft.Extensions.Logging;
@@ -13,14 +12,16 @@ using ModBot.Configuration;
 
 namespace ModBot.Modules.Music;
 
-/// <summary>What happened on a play request: the reply to show (text and/or embed).</summary>
-/// <param name="SuppressEmbeds">Hide link previews, for replies that link a song.</param>
-public record MusicPlayResult(bool Success, string? Text, Embed? Embed = null, bool SuppressEmbeds = false);
+/// <summary>The songs a search or link found, or why there aren't any.</summary>
+/// <param name="PlaylistName">Set when the link was a playlist (then <paramref name="Tracks"/> is all of it).</param>
+public record TrackLookup(IReadOnlyList<LavalinkTrack> Tracks, string? PlaylistName, string? Error)
+{
+    public bool IsPlaylist => PlaylistName is not null;
+}
 
 /// <summary>
-/// Playing music: joining the requester's voice channel, finding the song and queueing it. Shared by /play and the
-/// chatbot ("play never gonna give you up") so both follow the same rules (YouTube links only, the queue limit, the
-/// requester must be in a voice channel). Also owns the per-server queue lock the other music commands take.
+/// The Lavalink side of music: finding songs (YouTube only), joining a voice channel, and the per-server lock that
+/// keeps changes to what's playing one at a time. What plays when is <see cref="MusicQueueService"/>'s job.
 /// </summary>
 public class MusicService
 {
@@ -32,17 +33,20 @@ public class MusicService
     /// <summary>Hosts play requests accept links from (plus their subdomains, e.g. www., m., music.youtube.com).</summary>
     private static readonly string[] AllowedLinkHosts = ["youtube.com", "youtu.be"];
 
-    /// <summary>Per-server lock around changing the queue (/play, /skip, /remove, /move, /shuffle, /clearqueue). One
-    /// small entry per server that has used music; never removed.</summary>
-    private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _queueLocks = new();
+    /// <summary>Per-server lock around changing what's playing (starting, skipping, the next turn). One small entry
+    /// per server that has used music; never removed.</summary>
+    private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _playbackLocks = new();
 
     private readonly IAudioService _audioService;
+    private readonly MusicPlayerEvents _events;
     private readonly MusicOptions _options;
     private readonly ILogger<MusicService> _logger;
 
-    public MusicService(IAudioService audioService, IOptions<MusicOptions> options, ILogger<MusicService> logger)
+    public MusicService(IAudioService audioService, MusicPlayerEvents events, IOptions<MusicOptions> options,
+        ILogger<MusicService> logger)
     {
         _audioService = audioService;
+        _events = events;
         _options = options.Value;
         _logger = logger;
     }
@@ -56,151 +60,95 @@ public class MusicService
             ? null
             : guild.TextChannels.FirstOrDefault(c => c.Name.Equals(ChannelName, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Waits for this server's queue lock. Callers must <c>Release()</c> it in a <c>finally</c>, and keep the
-    /// locked section short: other music commands in the server wait on it, within Discord's 3-second reply window.</summary>
-    public async Task<SemaphoreSlim> AcquireQueueLockAsync(ulong guildId)
+    /// <summary>The server's live player, or null if the bot isn't in voice there.</summary>
+    public MusicPlayer? GetPlayer(ulong guildId)
+        => _audioService.Players.TryGetPlayer<MusicPlayer>(guildId, out var player) &&
+           player is not null && player.State != PlayerState.Destroyed
+            ? player
+            : null;
+
+    /// <summary>Waits for this server's playback lock. Callers must <c>Release()</c> it in a <c>finally</c>, and keep
+    /// the locked section short: other music commands in the server wait on it, within Discord's 3-second reply
+    /// window.</summary>
+    public async Task<SemaphoreSlim> AcquirePlaybackLockAsync(ulong guildId)
     {
-        var queueLock = _queueLocks.GetOrAdd(guildId, _ => new SemaphoreSlim(1, 1));
-        await queueLock.WaitAsync();
-        return queueLock;
+        var playbackLock = _playbackLocks.GetOrAdd(guildId, _ => new SemaphoreSlim(1, 1));
+        await playbackLock.WaitAsync();
+        return playbackLock;
     }
 
-    /// <summary>Plays <paramref name="query"/> (a search or a YouTube link) for <paramref name="user"/>, or adds it to
-    /// the queue.</summary>
-    /// <param name="announcementChannel">Where "Now playing" announcements go if this starts a new player.</param>
-    /// <param name="replyShowsNowPlaying">True when the caller's reply is the announcement (the /play reply in the
-    /// music channel): the first song then comes back as an embed and isn't announced a second time.</param>
-    public async Task<MusicPlayResult> PlayAsync(SocketGuildUser user, ITextChannel announcementChannel, string query,
-        bool replyShowsNowPlaying)
+    /// <summary>Why <paramref name="query"/> can't be looked up at all (empty, or a link to a site the bot doesn't
+    /// play), or null if it can. Cheap, so callers check it before anything slow.</summary>
+    public static string? CheckQuery(string query)
     {
         query = query.Trim();
         if (query.Length == 0)
         {
-            return new(false, "Tell me what to play.");
+            return "Tell me what to play.";
+        }
+
+        // Only hand Lavalink links to sites it's meant to play, rather than relying on its config alone to refuse
+        // the rest.
+        if (Uri.TryCreate(query, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" &&
+            !IsAllowedLinkHost(uri.Host))
+        {
+            // SoundCloud only serves audio in a format Lavalink can't play yet (lavalink/README.md).
+            return HostMatches(uri.Host, "soundcloud.com")
+                ? "SoundCloud links don't work right now (the music server can't play SoundCloud's audio format " +
+                  "yet). Try searching for the song by name instead - that uses YouTube."
+                : "I can only play YouTube links. To find a song from somewhere else, search for it by name instead.";
+        }
+
+        return null;
+    }
+
+    /// <summary>Looks up a search (top YouTube result) or a YouTube song or playlist link (all of it).</summary>
+    public async Task<TrackLookup> FindTracksAsync(string query, ulong guildId)
+    {
+        query = query.Trim();
+        if (CheckQuery(query) is { } problem)
+        {
+            return new([], null, problem);
         }
 
         var isLink = Uri.TryCreate(query, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 
-        // Only hand Lavalink links to sites it's meant to play, rather than relying on its config alone to refuse
-        // the rest. Checked before joining the voice channel, so a bad link doesn't make the bot join and then fail.
-        if (isLink && !IsAllowedLinkHost(uri!.Host))
-        {
-            // SoundCloud only serves audio in a format Lavalink can't play yet (lavalink/README.md).
-            return new(false, HostMatches(uri.Host, "soundcloud.com")
-                ? "SoundCloud links don't work right now (the music server can't play SoundCloud's audio format " +
-                  "yet). Try searching for the song by name instead - that uses YouTube."
-                : "I can only play YouTube links. To find a song from somewhere else, search for it by name instead.");
-        }
-
-        if (GetJoinProblem(user) is { } problem)
-        {
-            return new(false, problem);
-        }
-
-        var (player, joinError) = await JoinPlayerAsync(user, announcementChannel);
-        if (player is null)
-        {
-            return new(false, joinError);
-        }
-
-        var searchMode = isLink ? TrackSearchMode.None : TrackSearchMode.YouTube;
-
         TrackLoadResult result;
         try
         {
-            result = await _audioService.Tracks.LoadTracksAsync(query, searchMode);
+            result = await _audioService.Tracks.LoadTracksAsync(query, isLink ? TrackSearchMode.None : TrackSearchMode.YouTube);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Track lookup failed for '{Query}' in guild {GuildId}.", query, user.Guild.Id);
-            return new(false, "Something went wrong looking that up - try again in a moment.");
+            _logger.LogWarning(ex, "Track lookup failed for '{Query}' in guild {GuildId}.", query, guildId);
+            return new([], null, "Something went wrong looking that up - try again in a moment. (If it keeps " +
+                                 "happening, the music server may be down - let a server admin know.)");
         }
 
         if (!result.HasMatches)
         {
-            return new(false, result.IsFailed
+            return new([], null, result.IsFailed
                 ? $"Couldn't load that{(result.Exception?.Message is { } reason ? $": {Format.Sanitize(reason)}" : ".")}"
                 : isLink ? "That link isn't a YouTube song or playlist I can play." : "No results found.");
         }
 
-        // One queue change at a time per server from here: otherwise two requests at once could both see room in the
-        // queue and together go past the limit, or both think they're starting playback.
-        var queueLock = await AcquireQueueLockAsync(user.Guild.Id);
-        List<LavalinkTrack> tracks;
-        int position;
-        try
-        {
-            // The limit is on upcoming songs (what /queue lists). When nothing is playing, the first song starts
-            // straight away rather than waiting in the queue, so there's room for one more.
-            var room = _options.MaxQueueLength - player.Queue.Count + (player.CurrentItem is null ? 1 : 0);
-            if (room <= 0)
-            {
-                return new(false, $"The queue is full ({_options.MaxQueueLength} songs). Skip or remove some first.");
-            }
-
-            // A search returns several matches - only the top one is wanted. A playlist link means all of them.
-            tracks = result.IsPlaylist
-                ? result.Tracks.Take(room).ToList()
-                : [result.Track ?? result.Tracks[0]];
-
-            var startsNow = player.CurrentItem is null;
-            if (startsNow && replyShowsNowPlaying)
-            {
-                player.SuppressNextAnnouncement(tracks[0].Identifier);
-            }
-
-            try
-            {
-                position = await player.PlayAsync(tracks[0]);
-            }
-            catch
-            {
-                // Otherwise the stale flag would hide the announcement the next time this song is played.
-                player.ClearSuppressedAnnouncement();
-                throw;
-            }
-
-            if (tracks.Count > 1)
-            {
-                await player.Queue.AddRangeAsync(tracks.Skip(1).Select(t => (ITrackQueueItem)new TrackQueueItem(t)).ToList());
-            }
-        }
-        finally
-        {
-            queueLock.Release();
-        }
-
-        var playlistNote = result.IsPlaylist
-            ? $"Added **{tracks.Count}** songs from **{Format.Sanitize(result.Playlist?.Name ?? "playlist")}**" +
-              (tracks.Count < result.Tracks.Length ? $" (the queue limit cut off {result.Tracks.Length - tracks.Count})." : ".")
-            : null;
-
-        if (position == 0)
-        {
-            return replyShowsNowPlaying
-                ? new(true, playlistNote, MusicFormatting.NowPlayingEmbed(tracks[0], player,
-                    $"Now playing - requested by {user.DisplayName}"))
-                : new(true, (playlistNote is null ? "" : playlistNote + " ") +
-                            $"▶️ Now playing {MusicFormatting.TrackLink(tracks[0])} ({MusicFormatting.Length(tracks[0])}).",
-                    SuppressEmbeds: true);
-        }
-
-        return new(true, playlistNote ??
-            $"Added {MusicFormatting.TrackLink(tracks[0])} ({MusicFormatting.Length(tracks[0])}) to the queue at position **{position}**.",
-            SuppressEmbeds: true);
+        // A search returns several matches - only the top one is wanted. A playlist link means all of them.
+        return result.IsPlaylist
+            ? new(result.Tracks.ToList(), result.Playlist?.Name ?? "playlist", null)
+            : new([result.Track ?? result.Tracks[0]], null, null);
     }
 
     /// <summary>Why the bot can't join the user's voice channel to play, or null if it can.</summary>
-    private string? GetJoinProblem(SocketGuildUser user)
+    public string? GetJoinProblem(SocketGuildUser user)
     {
         if (user.VoiceChannel is not { } voiceChannel)
         {
             return "Join a voice channel first.";
         }
 
-        if (_audioService.Players.TryGetPlayer(user.Guild.Id, out var existing) && existing.VoiceChannelId != voiceChannel.Id)
+        if (GetPlayer(user.Guild.Id) is { } existing && existing.VoiceChannelId != voiceChannel.Id)
         {
-            return $"I'm already playing in <#{existing.VoiceChannelId}> - join that channel to add songs.";
+            return $"I'm already playing in <#{existing.VoiceChannelId}> - join that channel instead.";
         }
 
         var permissions = user.Guild.CurrentUser.GetPermissions(voiceChannel);
@@ -219,13 +167,16 @@ public class MusicService
         return null;
     }
 
-    /// <summary>Gets (or creates and connects) the player for the user's voice channel.</summary>
-    private async Task<(MusicPlayer? Player, string Error)> JoinPlayerAsync(SocketGuildUser user,
+    /// <summary>Gets (or creates and connects) the player for the user's voice channel. Check
+    /// <see cref="GetJoinProblem"/> first for a friendlier reason when it can't.</summary>
+    /// <param name="announcementChannel">Where "Now playing" goes if this creates the player.</param>
+    public async Task<(MusicPlayer? Player, string Error)> JoinPlayerAsync(SocketGuildUser user,
         ITextChannel announcementChannel)
     {
         var playerOptions = new MusicPlayerOptions
         {
             TextChannel = announcementChannel,
+            Events = _events,
             SelfDeaf = true,
             ClearQueueOnStop = true,
         };
@@ -246,7 +197,7 @@ public class MusicService
             return (null, result.Status switch
             {
                 PlayerRetrieveStatus.UserNotInVoiceChannel => "Join a voice channel first.",
-                PlayerRetrieveStatus.VoiceChannelMismatch => "I'm playing in a different voice channel - join that one to add songs.",
+                PlayerRetrieveStatus.VoiceChannelMismatch => "I'm playing in a different voice channel - join that one.",
                 _ => "Couldn't join your voice channel.",
             });
         }

@@ -69,19 +69,41 @@ facts, but small models still embellish now and then, which is why the site's su
 - **Turning it off:** `News:AiWriteUps: false`.
 
 **Music** — plays YouTube audio in a voice channel, through a [Lavalink](lavalink/README.md) server that runs
-alongside the bot (and needs a one-time sign-in with a throwaway Google account, see its README):
-- `/play query` — a song name (searches YouTube), or a YouTube song or playlist link. Joins your voice channel, or
-  adds to the end of the queue if something's already playing.
-- `/pause`, `/resume`, `/skip [count]`, `/stop` (clears the queue and leaves), `/nowplaying`, `/queue [page]`.
-- `/remove position`, `/move from to`, `/shuffle`, `/loop off|song|queue`, `/clearqueue`.
+alongside the bot (and needs a one-time sign-in with a throwaway Google account, see its README). Each server has
+**one standing queue** that anyone can add to at any time, even when nothing's playing:
+- **It's kept:** the queue is saved in `data/music-queue.json`, so songs wait through the bot leaving voice, `/stop`
+  and restarts. Songs come off it as they play.
+- **Turns:** songs play one from each person, in the order they first added one, round and round, so someone who
+  adds ten songs doesn't hold everyone else up. Someone who adds later gets the next free turn. Each person can have
+  `Music:SongsPerPerson` songs waiting (default 10), and the queue holds `Music:MaxQueueLength` (default 200).
+- **Vote skip:** a song is skipped once more than half the people in the voice channel vote. Whoever picked it, and
+  moderators, skip it outright.
+- **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
+  pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
+  **Add song** (a pop-up), **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and
+  **Remove mine**. The buttons keep working across restarts. Running `/music-menu` again replaces it.
+- **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
+  (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
+  minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
+  notice. Servers with a menu don't get a "Now playing" post for each song either, since the menu shows it.
+  `Music:KeepMenuAtBottom: false` turns the reposting off.
 
-Anyone can use these, but commands that change playback only work from the bot's voice channel, except for
-moderators (Move Members or Manage Messages), who can control it from anywhere. `/play` only accepts YouTube links. All music commands
-only work in the text channel named by `Music:ChannelName` (default `music`; empty allows any channel), so replies
-and the "Now playing" announcement for each new song stay out of the main chat. Elsewhere the bot replies privately
-pointing to that channel. The bot leaves after `Music:IdleTimeoutSeconds`
-(default 2 minutes) with nobody listening or nothing playing, and the queue is capped at `Music:MaxQueueLength`
-(default 200). If Lavalink isn't running, the music commands say so and everything else keeps working.
+Commands:
+- `/add query` — a song name (searches YouTube), or a YouTube song or playlist link. Just queues it.
+- `/play query` — the same, and if nothing's playing and you're in a voice channel, starts the music there.
+- `/start` — plays the queue in your voice channel.
+- `/skip` (a vote), `/pause`, `/resume`, `/stop` (leaves voice; the queue's kept), `/nowplaying`, `/queue [page]`.
+- `/remove position` (your own songs; moderators: anyone's), `/remove-mine`, `/clearqueue` (moderators),
+  `/loop off|song|queue` (looping the queue puts finished songs back in for their picker; a skip still moves on).
+
+Adding works from anywhere. Controlling playback (pause, stop, loop, voting) only works from the bot's voice
+channel, except for moderators (Move Members or Manage Messages), who can control it from anywhere. Only YouTube
+links are accepted. All music commands only work in the text channel named by `Music:ChannelName` (default `music`;
+empty allows any channel), so replies (and "Now playing" posts, in servers without a menu) stay out of the main chat.
+Elsewhere the bot replies privately pointing to that channel. The bot leaves voice after `Music:IdleTimeoutSeconds`
+(default 2 minutes) with nobody listening or nothing playing; the queue stays. If Lavalink isn't running, the music
+commands say so and everything else keeps working. A saved song that YouTube won't play any more is skipped with a
+note.
 
 > YouTube's terms of service don't allow streaming its audio outside YouTube, and YouTube changes often enough that
 > playback breaks from time to time — see [lavalink/README.md](lavalink/README.md#when-youtube-stops-working).
@@ -173,6 +195,16 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
     limits, delivered as a reply to that message. It's recognised without the model: a reminder phrase ("remind me",
     "set a reminder", "ping me") plus a time the reminder parser understands. Without a time ("remind me to eat") it's
     just chat, and the bot explains how to ask. Adding reminders to the model's check made it worse at the others.
+  - **Music:** "@bot add mr brightside" (or "queue up…", "put … in the queue") just queues a song, like `/add`;
+    "play …" also starts the music, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
+    this song", "remove song 3", "remove my songs", "start the music", "where's the music menu?" and the rest of
+    the music commands work by asking too, through the same code as the slash commands (so a skip is a vote).
+    "Music session" wording works as well: starting one starts the music, leaving one takes out your songs.
+    Plainly worded controls are read with fixed rules, without the model: a clause of the message has to be the
+    command itself, so "this song sucks, skip it" skips but "I hate it when people skip songs" doesn't. Looser
+    wording goes to the model's check (as a fourth answer, "music control"), then a second call picks which control.
+    That pick was sometimes wrong in testing, so controls that can't be undone (stop, clearing the queue, removing
+    your songs) are never done on the model's say-so: the bot asks the person to say it plainly instead.
   - **Turning it off:** `Chat:Actions: false`. Each mention then skips the extra check and just chats.
 - Turn the feature off with `Chat:Enabled: false`.
 
@@ -191,7 +223,8 @@ Services/
   Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
 EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
-  Music/           Music commands plus the Lavalink player that announces songs (Lavalink4NET does the rest)
+  Music/           Music commands, the standing queue (turns, vote skip, the pinned menu) and the Lavalink player that
+                   announces songs (Lavalink4NET does the rest)
   Lfg/             /lfg command, its button handlers, and the LFG card's embed/buttons
 lavalink/          Config for the Lavalink music server (the server itself is downloaded, not committed)
 tests/            ModBot.Tests (xUnit): text readers, reminder rules, news write-up checks
@@ -348,8 +381,10 @@ somewhere else.
 | `/purge` | Manage Messages | Manage Messages |
 | `/modlog`, `/automod`, `/chat personality` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
-| `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
-| Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work without being in voice; all music commands must be used in `#music`) | — |
+| `/add`, `/play`, `/start` | — (`/play` starts the music, and `/start` plays the queue, in your voice channel; adding works from anywhere) | View Channel, Connect, Speak (in the voice channel) |
+| Other music commands | — (controlling playback needs you in the bot's voice channel unless you have Move Members or Manage Messages; `/queue`, `/nowplaying`, `/remove` and `/remove-mine` work from anywhere; all music commands must be used in `#music`) | — |
+| `/music-menu` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the menu; Manage Messages to delete the pin notices (optional) |
+| `/clearqueue`, removing others' songs | Move Members or Manage Messages | — |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
 | `/lfg-setup` | Manage Server, plus Send Messages and Pin Messages in that channel | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Pin Messages to pin the panel |
 | `/help` | — | — |
