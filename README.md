@@ -176,7 +176,27 @@ they work in), visible only to them. `/help-post` (Manage Server) posts the same
 pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
 change, delete the old post and run `/help-post` again.
 
-**Per-server settings** — every server that adds the bot can set things up for itself with `/settings` (Manage Server).appsettings.json only holds the defaults for servers that haven't changed anything, saved per server in`data/server-settings.json`:- `/settings show` — everything at a glance: which features are on, the music and LFG channels, the LFG ping role and  whether auto-mod is on.- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls or reminders on or off. Turning music off  stops what's playing. Things already underway still finish: LFG posts can be cancelled, polls ended, and reminders  are delivered.- `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.  Channels are saved by ID, so renaming one doesn't break it.- `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn  pings off, or leave both out for the default.- Moderation is per server too: `/automod` (auto-mod is **on** by default in a new server) and `/modlog`. So is the  chatbot's personality (`/chat personality`).- Admins can also switch features from chat: "@bot disable polls", "@bot turn music off for this server". Plain "turn  off the music" still just stops the song.**Logs** — when a server adds or removes the bot, it's logged with the server's name and ID. Startup logs every serverthe bot is in. Every line logged while handling something from a server ends with `=> Server name (ID)`, and settingschanges log who made them.
+**Per-server settings** — every server that adds the bot can set things up for itself with `/settings` (Manage
+Server). appsettings.json only holds the defaults for servers that haven't changed anything. Each server's choices are
+saved in `data/server-settings.json`:
+- `/settings show` — everything at a glance: which features are on, the music and LFG channels, the LFG ping role and
+  whether auto-mod is on.
+- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls or reminders on or off. Turning music off
+  stops what's playing. Things already underway still finish: LFG posts can be cancelled, polls ended, and reminders
+  are delivered.
+- `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.
+  Channels are saved by ID, so renaming one doesn't break it.
+- `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
+  pings off, or leave both out for the default.
+- Moderation is per server too: `/automod` (auto-mod is **on** by default in a new server) and `/modlog`. So is the
+  chatbot's personality (`/chat personality`).
+- Admins can also switch features from chat: "@bot disable polls", "@bot turn music off for this server". Plain "turn
+  off the music" still just stops the song.
+
+**Logs** — when a server adds or removes the bot, it's logged with the server's name and ID. Startup logs every server
+the bot is in. Every line logged while handling something from a server ends with `=> Server name (ID)`, and settings
+changes log who made them.
+
 **AI chat** — mention the bot in a message (or reply to one of its messages) and it answers, using a model served
 by [Ollama](https://ollama.com): on the same machine by default, or Ollama's cloud (see Setup step 6).
 - It sends the last `Chat:HistoryMessages` (default 10) messages in the channel along for context, so it can follow
