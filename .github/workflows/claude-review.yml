@@ -33,11 +33,34 @@ jobs:
             - Whether it fits the existing architecture described in README.md (slash
               commands auto-discovered under Modules/, business logic kept in Services/
               behind interfaces, gateway event handlers under EventHandlers/)
+            - DRY (don't repeat yourself): check whether new code duplicates logic that
+              already exists in the repo, not just within the diff. Search the codebase
+              (especially Common/, which holds the shared helpers, and the Services/ of
+              similar features) for existing helpers the change should reuse, and point
+              out logic written twice in the PR that should be one shared method. Name
+              the existing helper or the places that repeat, so the fix is clear. Don't
+              suggest an abstraction for code that only looks alike but would change for
+              different reasons.
+
+            Sort every finding by importance into exactly one of these sections, most
+            important first within each section:
+            1. **Blocking** - must be fixed before merging: bugs that do the wrong thing for
+               users (wrong output, an action nobody asked for, data loss), crashes,
+               security or permission holes, and word-filter or safety bypasses.
+            2. **Non-blocking but important** - should be fixed soon but can merge: likely
+               edge-case bugs, missing error handling, real duplication (DRY), and
+               architecture drift.
+            3. **Minor** - nice to have: naming, small simplifications, small performance
+               wins, comments and docs.
+            Write a heading for every section, with "None" under any that's empty. For each
+            finding, give the file and line, what goes wrong, and a concrete example
+            (the input or situation and the result).
 
             The PR branch is already checked out in the current working directory.
-            Use `gh pr comment` for overall feedback.
+            Post the sorted list as one overall comment with `gh pr comment`.
             Use `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`)
-            for comments on specific lines.
+            for comments on specific lines, and start each inline comment with its section
+            in brackets: [Blocking], [Important] or [Minor].
             Only post GitHub comments - don't just print review text as a message.
           claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
