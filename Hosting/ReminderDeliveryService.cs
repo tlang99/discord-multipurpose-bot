@@ -44,23 +44,10 @@ public class ReminderDeliveryService : BackgroundService
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
-        => PeriodicLoop.RunAsync(CheckInterval, DeliverDueAsync, stoppingToken);
+        => PeriodicLoop.RunAsync(CheckInterval, DeliverDueAsync, _logger, "Reminder check", stoppingToken);
 
-    private async Task DeliverDueAsync()
-    {
-        if (!_ready || _client.ConnectionState != ConnectionState.Connected)
-        {
-            return;
-        }
-
-        try
-        {
-            await _deliverer.DeliverDueAsync(DateTimeOffset.UtcNow);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // Never let one bad check stop reminders for good.
-            _logger.LogError(ex, "Reminder check failed.");
-        }
-    }
+    private Task DeliverDueAsync()
+        => _ready && _client.ConnectionState == ConnectionState.Connected
+            ? _deliverer.DeliverDueAsync(DateTimeOffset.UtcNow)
+            : Task.CompletedTask;
 }

@@ -7,7 +7,22 @@ public static class TextTools
     /// <summary><paramref name="value"/> cut to at most <paramref name="max"/> characters, ending in "…" when
     /// cut.</summary>
     public static string Truncate(string value, int max)
-        => value.Length <= max ? value : value[..(max - 1)].TrimEnd() + "…";
+    {
+        if (value.Length <= max)
+        {
+            return value;
+        }
+
+        // Never cut between the two halves of an emoji (or any character outside the basic range), which would
+        // leave half a character that shows up as garbage.
+        var keep = max - 1;
+        if (keep > 0 && char.IsHighSurrogate(value[keep - 1]))
+        {
+            keep--;
+        }
+
+        return value[..keep].TrimEnd() + "…";
+    }
 
     /// <summary>"1 song", "3 songs".</summary>
     public static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";

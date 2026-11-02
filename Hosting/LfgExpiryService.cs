@@ -25,7 +25,7 @@ public class LfgExpiryService : BackgroundService
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
-        => PeriodicLoop.RunAsync(CheckInterval, CloseExpiredAsync, stoppingToken);
+        => PeriodicLoop.RunAsync(CheckInterval, CloseExpiredAsync, _logger, "LFG expiry check", stoppingToken);
 
     private async Task CloseExpiredAsync()
     {

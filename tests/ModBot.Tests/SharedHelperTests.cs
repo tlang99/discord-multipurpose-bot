@@ -107,6 +107,48 @@ public sealed class SharedHelperTests : IDisposable
         Assert.True(cut.Length <= max);
     }
 
+    [Fact]
+    public void Truncate_never_splits_an_emoji()
+    {
+        // "abcd" + 😀 (two UTF-16 units) + "efgh": a cut to 6 would otherwise keep only the emoji's first half.
+        var cut = TextTools.Truncate("abcd😀efgh", 6);
+
+        Assert.Equal("abcd…", cut);
+        Assert.DoesNotContain(cut, char.IsSurrogate);
+    }
+
+    [Fact]
+    public async Task Repository_writes_nothing_when_updating_or_removing_a_missing_key()
+    {
+        var repository = new JsonFileRepository<string>(FilePath);
+        await repository.MutateAsync(data => data["a"] = "x");
+        var writtenAt = File.GetLastWriteTimeUtc(FilePath);
+        File.SetLastWriteTimeUtc(FilePath, writtenAt.AddMinutes(-5));
+
+        Assert.False(await repository.UpdateAsync("missing", _ => { }));
+        Assert.False(await repository.RemoveAsync("missing"));
+        Assert.Equal(writtenAt.AddMinutes(-5), File.GetLastWriteTimeUtc(FilePath));
+    }
+
+    [Fact]
+    public async Task Periodic_loop_keeps_going_after_a_tick_throws()
+    {
+        using var stop = new CancellationTokenSource();
+        var ticks = 0;
+
+        await PeriodicLoop.RunAsync(TimeSpan.FromMilliseconds(10), () =>
+        {
+            if (++ticks == 3)
+            {
+                stop.Cancel();
+            }
+
+            throw new InvalidOperationException("boom");
+        }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, "Test job", stop.Token, runFirstTickNow: true);
+
+        Assert.Equal(3, ticks);
+    }
+
     [Theory]
     [InlineData(" #music ", "music")]
     [InlineData("music", "music")]

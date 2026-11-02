@@ -44,21 +44,8 @@ public class JsonFileRepository<TValue>
     /// copy that only replaces the cached data once the file is written, so if the mutation throws partway or the save
     /// fails (e.g. disk full), nothing changes - memory never holds data the file doesn't. Don't keep references to the
     /// values it touches after it returns.</summary>
-    public async Task<T> MutateAsync<T>(Func<Dictionary<string, TValue>, T> mutation)
-    {
-        await _lock.WaitAsync();
-        try
-        {
-            var working = Clone(await LoadInternalAsync());
-            var result = mutation(working);
-            await SaveInternalAsync(working);
-            return result;
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
+    public Task<T> MutateAsync<T>(Func<Dictionary<string, TValue>, T> mutation)
+        => ChangeAsync(_ => true, data => mutation(data), default!);
 
     public Task MutateAsync(Action<Dictionary<string, TValue>> mutation)
         => MutateAsync(data =>
@@ -80,22 +67,45 @@ public class JsonFileRepository<TValue>
             return change(value);
         });
 
-    /// <summary>Changes the value at <paramref name="key"/> if there is one; false (and nothing saved changes) if
-    /// there isn't.</summary>
+    /// <summary>Changes the value at <paramref name="key"/> if there is one; false (and nothing is written) if there
+    /// isn't.</summary>
     public Task<bool> UpdateAsync(string key, Action<TValue> change)
-        => MutateAsync(data =>
+        => ChangeAsync(data => data.ContainsKey(key), data =>
         {
-            if (!data.TryGetValue(key, out var value))
+            change(data[key]);
+            return true;
+        }, ifSkipped: false);
+
+    /// <summary>Removes the value at <paramref name="key"/>; false (and nothing is written) if it was already
+    /// gone.</summary>
+    public Task<bool> RemoveAsync(string key)
+        => ChangeAsync(data => data.ContainsKey(key), data => data.Remove(key), ifSkipped: false);
+
+    /// <summary>The one place data changes, under the lock. When <paramref name="worthDoing"/> says no (checked on
+    /// the saved data), nothing is copied or written and <paramref name="ifSkipped"/> is returned. Otherwise
+    /// <paramref name="change"/> runs on a copy that only replaces the cached data once the file is written.</summary>
+    private async Task<T> ChangeAsync<T>(Func<Dictionary<string, TValue>, bool> worthDoing,
+        Func<Dictionary<string, TValue>, T> change, T ifSkipped)
+    {
+        await _lock.WaitAsync();
+        try
+        {
+            var current = await LoadInternalAsync();
+            if (!worthDoing(current))
             {
-                return false;
+                return ifSkipped;
             }
 
-            change(value);
-            return true;
-        });
-
-    /// <summary>Removes the value at <paramref name="key"/>; false if it was already gone.</summary>
-    public Task<bool> RemoveAsync(string key) => MutateAsync(data => data.Remove(key));
+            var working = Clone(current);
+            var result = change(working);
+            await SaveInternalAsync(working);
+            return result;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
 
     private async Task<T> ReadAsync<T>(Func<Dictionary<string, TValue>, T> read)
     {

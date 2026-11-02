@@ -58,7 +58,8 @@ public class NewsPollingService : BackgroundService
             return; // shut down before the first check
         }
 
-        await PeriodicLoop.RunAsync(interval, () => PollAllAsync(stoppingToken), stoppingToken, runFirstTickNow: true);
+        await PeriodicLoop.RunAsync(interval, () => PollAllAsync(stoppingToken), _logger, "News check", stoppingToken,
+            runFirstTickNow: true);
     }
 
     /// <summary>Points subscriptions made from a built-in preset at the preset's current feed URL. Seen-article history
