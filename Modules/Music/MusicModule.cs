@@ -5,21 +5,25 @@ using Discord.WebSocket;
 namespace ModBot.Modules.Music;
 
 /// <summary>
-/// Music playback through Lavalink. Anyone can use these, but only from the voice channel the bot is playing in, so
-/// people outside the channel can't control what everyone in it is hearing. Moderators (Move Members or Manage
-/// Messages) can control it from anywhere. All of them only work in the music channel (see
-/// <see cref="RequireMusicChannelAttribute"/>), so they don't flood the main chat. The rules live in
-/// <see cref="MusicControls"/>, shared with the chatbot.
+/// Music: a standing queue per server that anyone can add to at any time, played in turns (one song from each
+/// person) once someone starts it, with votes to skip. Controlling what's playing works from the bot's voice channel
+/// (moderators: anywhere). Everything here only works in the music channel (see
+/// <see cref="RequireMusicChannelAttribute"/>), so it doesn't flood the main chat, and the rules live in
+/// <see cref="MusicControls"/>, shared with the chatbot. The pinned menu's buttons are handled here too.
 /// </summary>
 [RequireContext(ContextType.Guild)]
 [RequireMusicChannel]
 public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly MusicControls _controls;
+    private const string AddModalId = "mq-add";
 
-    public MusicModule(MusicControls controls)
+    private readonly MusicControls _controls;
+    private readonly MusicQueueService _queue;
+
+    public MusicModule(MusicControls controls, MusicQueueService queue)
     {
         _controls = controls;
+        _queue = queue;
     }
 
     public enum LoopChoice
@@ -29,91 +33,163 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("Whole queue")] Queue,
     }
 
-    [SlashCommand("play", "Plays a song or playlist, or adds it to the queue (or your turns, in a music session).")]
-    public async Task PlayAsync(
-        [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] string query)
-    {
-        if (query.Trim().Length == 0)
-        {
-            await RespondAsync("Tell me what to play.", ephemeral: true);
-            return;
-        }
+    [SlashCommand("play", "Adds a song or playlist to the queue, and starts the music if it isn't playing.")]
+    public Task PlayAsync(
+        [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] [MaxLength(200)] string query)
+        => RunAsync((user, channel) => _controls.PlayAsync(user, channel, query), slow: true);
 
-        // Acknowledge first: Discord only allows 3 seconds, and joining voice + searching takes longer than that. (It
-        // means problems are shown publicly rather than only to the caller.)
-        await DeferAsync();
+    [SlashCommand("add", "Adds a song or playlist to the queue without starting the music.")]
+    public Task AddAsync(
+        [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] [MaxLength(200)] string query)
+        => RunAsync((user, channel) => _controls.AddAsync(user, channel, query), slow: true);
 
-        if (Context.User is not SocketGuildUser user || Context.Channel is not ITextChannel channel)
-        {
-            await FollowupAsync("Music only works in a server text channel.");
-            return;
-        }
-
-        // This reply is the "Now playing" message, so the player doesn't announce the first song again.
-        var result = await _controls.PlayAsync(user, channel, query, replyShowsNowPlaying: true);
-        await FollowupAsync(text: result.Text, embed: result.Embed, allowedMentions: AllowedMentions.None,
-            flags: result.SuppressEmbeds ? MessageFlags.SuppressEmbeds : MessageFlags.None);
-    }
+    [SlashCommand("start", "Starts playing the queue in your voice channel.")]
+    public Task StartAsync() => RunAsync((user, channel) => _controls.StartAsync(user, channel), slow: true);
 
     [SlashCommand("pause", "Pauses the current song.")]
-    public Task PauseAsync() => RunAsync(user => _controls.PauseAsync(user));
+    public Task PauseAsync() => RunAsync((user, _) => _controls.PauseAsync(user));
 
     [SlashCommand("resume", "Resumes a paused song.")]
-    public Task ResumeAsync() => RunAsync(user => _controls.ResumeAsync(user));
+    public Task ResumeAsync() => RunAsync((user, _) => _controls.ResumeAsync(user));
 
-    [SlashCommand("skip", "Skips the current song (or several). In a music session, votes to skip it.")]
-    public Task SkipAsync(
-        [Summary(description: "How many songs to skip, including the current one")] [MinValue(1)] int count = 1)
-        => RunAsync(user => _controls.SkipAsync(user, count));
+    [SlashCommand("skip", "Votes to skip the current song (skips it outright if you picked it).")]
+    public Task SkipAsync() => RunAsync((user, _) => _controls.SkipAsync(user));
 
-    [SlashCommand("stop", "Stops the music, clears the queue, and leaves the voice channel.")]
-    public Task StopAsync() => RunAsync(user => _controls.StopAsync(user));
+    [SlashCommand("stop", "Stops the music and leaves voice. The queue is kept for next time.")]
+    public Task StopAsync() => RunAsync((user, _) => _controls.StopAsync(user));
 
     [SlashCommand("nowplaying", "Shows the song that's playing.")]
-    public Task NowPlayingAsync() => RunAsync(user => Task.FromResult(_controls.NowPlaying(user)));
+    public Task NowPlayingAsync() => RunAsync((user, _) => Task.FromResult(_controls.NowPlaying(user)));
 
-    [SlashCommand("queue", "Shows the upcoming songs.")]
+    [SlashCommand("queue", "Shows the waiting songs, in turn order.")]
     public Task QueueAsync([Summary(description: "Page number")] [MinValue(1)] int page = 1)
-        => RunAsync(user => Task.FromResult(_controls.Queue(user, page)));
+        => RunAsync((user, _) => _controls.QueueAsync(user, page));
 
-    [SlashCommand("remove", "Removes a song from the queue.")]
+    [SlashCommand("remove", "Removes one of your songs from the queue (moderators: anyone's).")]
     public Task RemoveAsync([Summary(description: "Its position, as shown by /queue")] [MinValue(1)] int position)
-        => RunAsync(user => _controls.RemoveAsync(user, position));
+        => RunAsync((user, _) => _controls.RemoveAsync(user, position));
 
-    [SlashCommand("move", "Moves a song to a different spot in the queue.")]
-    public Task MoveAsync(
-        [Summary(description: "The song's current position, as shown by /queue")] [MinValue(1)] int from,
-        [Summary(description: "Where to move it (1 = play next)")] [MinValue(1)] int to)
-        => RunAsync(user => _controls.MoveAsync(user, from, to));
+    [SlashCommand("remove-mine", "Takes all your waiting songs out of the queue.")]
+    public Task RemoveMineAsync() => RunAsync((user, _) => _controls.RemoveMineAsync(user));
 
-    [SlashCommand("shuffle", "Shuffles the songs in the queue.")]
-    public Task ShuffleAsync() => RunAsync(user => _controls.ShuffleAsync(user));
+    [SlashCommand("clearqueue", "Empties the whole queue (moderators).")]
+    public Task ClearQueueAsync() => RunAsync((user, _) => _controls.ClearQueueAsync(user));
 
-    [SlashCommand("loop", "Repeats the current song or the whole queue.")]
+    [SlashCommand("loop", "Repeats the current song, or puts finished songs back in the queue.")]
     public Task LoopAsync([Summary(description: "What to repeat")] LoopChoice mode)
-        => RunAsync(user => Task.FromResult(_controls.Loop(user, mode switch
+        => RunAsync((user, _) => _controls.LoopAsync(user, mode switch
         {
             LoopChoice.Song => LoopMode.Song,
             LoopChoice.Queue => LoopMode.Queue,
             _ => LoopMode.Off,
-        })));
+        }));
 
-    [SlashCommand("clearqueue", "Removes every upcoming song (the current one keeps playing).")]
-    public Task ClearQueueAsync() => RunAsync(user => _controls.ClearQueueAsync(user));
-
-    /// <summary>Runs a control and replies: publicly when it worked (everyone listening should know), privately when
-    /// it didn't.</summary>
-    private async Task RunAsync(Func<SocketGuildUser, Task<MusicReply>> control)
+    [SlashCommand("music-menu", "Posts the music menu here and pins it (replacing any older one).")]
+    [RequireUserPermission(GuildPermission.ManageGuild)]
+    public async Task MusicMenuAsync()
     {
-        if (Context.User is not SocketGuildUser user)
+        await DeferAsync(ephemeral: true);
+
+        if (Context.Channel is not ITextChannel channel ||
+            Context.Guild.CurrentUser.GetPermissions(channel) is not { SendMessages: true, EmbedLinks: true })
         {
-            await RespondAsync("Music only works in a server.", ephemeral: true);
+            await FollowupAsync("I need **Send Messages** and **Embed Links** here to post the menu.", ephemeral: true);
             return;
         }
 
-        var reply = await control(user);
-        await RespondAsync(text: reply.Text, embed: reply.Embed, ephemeral: !reply.Success,
-            allowedMentions: AllowedMentions.None,
+        // Manage Server alone shouldn't let someone use the bot to post and pin in a channel they couldn't themselves.
+        if (Context.User is not IGuildUser user ||
+            user.GetPermissions(channel) is not { SendMessages: true, PinMessages: true })
+        {
+            await FollowupAsync("You need **Send Messages** and **Pin Messages** in this channel to post the music " +
+                                "menu here.", ephemeral: true);
+            return;
+        }
+
+        var (pinned, error) = await _queue.PostMenuAsync(channel);
+        await FollowupAsync(error ?? "Posted the music menu" + (pinned
+            ? " and pinned it."
+            : " (I couldn't pin it - give me **Pin Messages**, or pin it yourself)."), ephemeral: true);
+    }
+
+    // The pinned menu's buttons. Their IDs are fixed, so a menu keeps working across restarts.
+
+    [ComponentInteraction(MusicQueueService.AddButton)]
+    public Task AddButtonAsync() => RespondWithModalAsync<AddSongModal>(AddModalId);
+
+    [ModalInteraction(AddModalId)]
+    public Task AddSubmittedAsync(AddSongModal modal)
+        => ButtonAsync((user, channel) => _controls.AddAsync(user, channel, modal.Query ?? ""), alwaysPrivate: true);
+
+    [ComponentInteraction(MusicQueueService.PlayButton)]
+    public Task PlayButtonAsync() => ButtonAsync((user, channel) => _controls.StartAsync(user, channel));
+
+    [ComponentInteraction(MusicQueueService.SkipButton)]
+    public Task SkipButtonAsync() => ButtonAsync((user, _) => _controls.SkipAsync(user));
+
+    [ComponentInteraction(MusicQueueService.PauseButton)]
+    public Task PauseButtonAsync() => ButtonAsync((user, _) => _controls.PauseAsync(user));
+
+    [ComponentInteraction(MusicQueueService.ResumeButton)]
+    public Task ResumeButtonAsync() => ButtonAsync((user, _) => _controls.ResumeAsync(user));
+
+    [ComponentInteraction(MusicQueueService.StopButton)]
+    public Task StopButtonAsync() => ButtonAsync((user, _) => _controls.StopAsync(user));
+
+    [ComponentInteraction(MusicQueueService.MineButton)]
+    public Task MineButtonAsync() => ButtonAsync((user, _) => _controls.RemoveMineAsync(user), alwaysPrivate: true);
+
+    /// <summary>Runs a command and replies: publicly when it worked (everyone listening should know), privately when
+    /// it didn't.</summary>
+    /// <param name="slow">Looking up songs or joining voice can take longer than Discord's 3 seconds, so those
+    /// acknowledge first.</param>
+    private async Task RunAsync(Func<SocketGuildUser, ITextChannel, Task<MusicReply>> control, bool slow = false)
+    {
+        if (Context.User is not SocketGuildUser user || Context.Channel is not ITextChannel channel)
+        {
+            await RespondAsync("Music only works in a server text channel.", ephemeral: true);
+            return;
+        }
+
+        if (!slow)
+        {
+            var quick = await control(user, channel);
+            await RespondAsync(text: quick.Text, embed: quick.Embed, ephemeral: !quick.Success,
+                allowedMentions: AllowedMentions.None,
+                flags: quick.SuppressEmbeds ? MessageFlags.SuppressEmbeds : MessageFlags.None);
+            return;
+        }
+
+        // Shown to everyone, since most of these work; problems are then public too, which is fine.
+        await DeferAsync();
+        var reply = await control(user, channel);
+        await FollowupAsync(text: reply.Text, embed: reply.Embed, allowedMentions: AllowedMentions.None,
             flags: reply.SuppressEmbeds ? MessageFlags.SuppressEmbeds : MessageFlags.None);
+    }
+
+    /// <summary>Runs a menu button. The menu shows the result, so replies are private unless everyone listening
+    /// should hear about it (the music started or stopped, a song was skipped or paused).</summary>
+    private async Task ButtonAsync(Func<SocketGuildUser, ITextChannel, Task<MusicReply>> action, bool alwaysPrivate = false)
+    {
+        if (Context.User is not SocketGuildUser user || Context.Channel is not ITextChannel channel)
+        {
+            return;
+        }
+
+        // Acknowledged without a message of its own, so the follow-up can be private or public.
+        await DeferAsync();
+        var reply = await action(user, channel);
+        await FollowupAsync(text: reply.Text, embed: reply.Embed,
+            ephemeral: alwaysPrivate || !reply.Success || !reply.Announce,
+            allowedMentions: AllowedMentions.None, flags: MessageFlags.SuppressEmbeds);
+    }
+
+    public class AddSongModal : IModal
+    {
+        public string Title => "Add a song to the queue";
+
+        [InputLabel("Song name or YouTube link")]
+        [ModalTextInput("query", TextInputStyle.Short, placeholder: "e.g. mr brightside the killers", maxLength: 200)]
+        public string? Query { get; set; }
     }
 }

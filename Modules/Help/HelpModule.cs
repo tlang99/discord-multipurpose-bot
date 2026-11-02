@@ -91,14 +91,13 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "Use the **Join** / **Leave** buttons on someone's card, or **Start now** / **Cancel** on yours.\n" +
                 "Want a ping when someone posts? Click **Get LFG pings** on the pinned panel.")
             .AddField("🎵 Music" + (musicWhere is null ? "" : $" - in {musicWhere}"),
-                "Join a voice channel first.\n" +
-                "`/play` - play a song name or YouTube link (or add it to the queue)\n" +
-                "`/pause` · `/resume` · `/skip` · `/stop`\n" +
-                "`/nowplaying` · `/queue` - see what's playing and what's next\n" +
-                "`/remove` · `/move` · `/shuffle` · `/loop` · `/clearqueue` - manage the queue\n" +
-                "Controls only work from the voice channel the bot is in.\n" +
-                "`/session open` - a music session: everyone adds songs, then they play in turns, with vote skip. " +
-                "Use the buttons on its menu, or `/session start` · `/session end` · `/session leave` · `/session menu`.")
+                "One queue for everyone, kept between listening sessions. Songs play in turns: one from each person.\n" +
+                "`/add` - add a song name or YouTube link (any time, from anywhere)\n" +
+                "`/play` - add it and start the music in your voice channel · `/start` - play the queue\n" +
+                "`/skip` - vote to skip (more than half the listeners; instant if it's your pick)\n" +
+                "`/pause` · `/resume` · `/stop` (the queue's kept) · `/loop`\n" +
+                "`/nowplaying` · `/queue` · `/remove` · `/remove-mine`\n" +
+                "Or use the buttons on the pinned music menu. Controlling playback works from the bot's voice channel.")
             .AddField("⏰ Reminders",
                 "`/remind` - e.g. `when: in 2h` `what: start the raid`, and I'll ping you in that channel\n" +
                 "`/reminders list` · `/reminders cancel` - see or cancel yours");
@@ -110,7 +109,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "I read the last few messages in the channel for context." +
                 (_chat.Actions
                     ? "\nYou can also just ask: \"play never gonna give you up\", \"skip this\", \"show the queue\", " +
-                      "\"start a music session\", \"make an lfg for ranked, need 3 more, mic required\" or \"remind me " +
+                      "\"start the music\", \"make an lfg for ranked, need 3 more, mic required\" or \"remind me " +
                       "in 20 minutes to check the oven\"."
                     : ""));
         }

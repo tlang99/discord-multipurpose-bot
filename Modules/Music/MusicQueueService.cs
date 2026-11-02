@@ -1,0 +1,707 @@
+using System.Collections.Concurrent;
+using System.Text;
+using Discord;
+using Discord.Net;
+using Discord.WebSocket;
+using Lavalink4NET.Players;
+using Lavalink4NET.Protocol.Payloads.Events;
+using Lavalink4NET.Tracks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ModBot.Configuration;
+using ModBot.Models;
+using ModBot.Services.Storage;
+
+namespace ModBot.Modules.Music;
+
+/// <summary>
+/// Each server's standing music queue: anyone adds songs at any time (they're saved, so they wait through the bot
+/// leaving voice and restarts), and once someone starts the music they play in turns, one from each person, with
+/// votes to skip. Runs the pinned menu too. The slash commands, the menu's buttons and the chatbot all come through
+/// here (via <see cref="MusicControls"/>), so they follow the same rules.
+/// </summary>
+public class MusicQueueService : IHostedService
+{
+    public const string ButtonPrefix = "mq";
+    public const string AddButton = ButtonPrefix + ":add";
+    public const string PlayButton = ButtonPrefix + ":play";
+    public const string SkipButton = ButtonPrefix + ":skip";
+    public const string PauseButton = ButtonPrefix + ":pause";
+    public const string ResumeButton = ButtonPrefix + ":resume";
+    public const string StopButton = ButtonPrefix + ":stop";
+    public const string MineButton = ButtonPrefix + ":mine";
+
+    private readonly IMusicQueueStore _store;
+    private readonly MusicService _music;
+    private readonly DiscordSocketClient _client;
+    private readonly MusicOptions _options;
+    private readonly ILogger<MusicQueueService> _logger;
+
+    /// <summary>Skip votes for the song playing in each server. In memory: they only matter for that one song.</summary>
+    private readonly ConcurrentDictionary<ulong, SkipVotes> _votes = new();
+
+    private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _menuLocks = new();
+    private int _menusRestored;
+
+    public MusicQueueService(IMusicQueueStore store, MusicService music, MusicPlayerEvents events,
+        DiscordSocketClient client, IOptions<MusicOptions> options, ILogger<MusicQueueService> logger)
+    {
+        _store = store;
+        _music = music;
+        _client = client;
+        _options = options.Value;
+        _logger = logger;
+
+        events.TrackStarted = OnTrackStartedAsync;
+        events.TrackEnded = OnTrackEndedAsync;
+        events.PlayerClosed = OnPlayerClosedAsync;
+    }
+
+    public int SongsPerPerson => Math.Max(1, _options.SongsPerPerson);
+
+    private int MaxQueueLength => Math.Max(1, _options.MaxQueueLength);
+
+    /// <summary>More than half the people listening.</summary>
+    public static int VotesNeeded(int listeners) => Math.Max(1, listeners) / 2 + 1;
+
+    public Task<MusicQueueState> GetAsync(ulong guildId) => _store.GetAsync(guildId);
+
+    /// <summary>Adds songs for <paramref name="user"/>. With <paramref name="startIfIdle"/> (/play, "play X"), the
+    /// music also starts if nothing's playing and they're in a voice channel; otherwise the songs just wait.</summary>
+    public async Task<MusicReply> AddAsync(SocketGuildUser user, string query, ITextChannel fallbackChannel,
+        bool startIfIdle)
+    {
+        if (MusicService.CheckQuery(query) is { } badQuery)
+        {
+            return MusicReply.Fail(badQuery);
+        }
+
+        var lookup = await _music.FindTracksAsync(query, user.Guild.Id);
+        if (lookup.Error is not null)
+        {
+            return MusicReply.Fail(lookup.Error);
+        }
+
+        var songs = lookup.Tracks.Select(t => new QueuedSong
+        {
+            Track = t.ToString(),
+            Title = t.Title,
+            Uri = t.Uri?.ToString(),
+            Duration = t.Duration,
+            IsLiveStream = t.IsLiveStream,
+            PickerId = user.Id,
+            PickerName = user.DisplayName,
+        }).ToList();
+
+        var (result, added, position) = await _store.MutateAsync(user.Guild.Id, state =>
+        {
+            var outcome = MusicQueueRules.Add(state, songs, user.Id, SongsPerPerson, MaxQueueLength, out var taken);
+            return (outcome, taken, taken.Count > 0 ? MusicQueueRules.PositionOf(state, taken[0].Id) : -1);
+        });
+
+        switch (result)
+        {
+            case QueueAddResult.PersonFull:
+                return MusicReply.Fail($"You've got {SongsPerPerson} songs waiting, the most each person can have. " +
+                                       "Add more once some have played.");
+            case QueueAddResult.QueueFull:
+                return MusicReply.Fail($"The queue is full ({MaxQueueLength} songs).");
+        }
+
+        var what = lookup.IsPlaylist
+            ? $"**{added.Count}** songs from **{Format.Sanitize(lookup.PlaylistName!)}**" +
+              (added.Count < songs.Count ? $" (the most you can have waiting is {SongsPerPerson})" : "")
+            : $"{SongLink(added[0])} ({SongLength(added[0])})";
+        var text = new StringBuilder($"➕ {user.Mention} added {what}");
+
+        var player = _music.GetPlayer(user.Guild.Id);
+        var idle = player?.CurrentItem is null;
+        if (startIfIdle && idle && user.VoiceChannel is not null)
+        {
+            var start = await StartAsync(user, fallbackChannel);
+            text.Append(start.Success ? $". {start.Text}" : $". (Couldn't start the music: {start.Text})");
+        }
+        else
+        {
+            text.Append(position > 0 ? $" - #{position} in the turns." : ".");
+            if (idle)
+            {
+                text.Append(" Nothing's playing yet: join a voice channel and press **Play** on the music menu " +
+                            "(or say \"start the music\") when you're ready.");
+            }
+        }
+
+        RefreshMenu(user.Guild.Id);
+        return MusicReply.Ok(text.ToString());
+    }
+
+    /// <summary>Starts the music: the bot joins <paramref name="user"/>'s voice channel and plays the next turn.</summary>
+    public async Task<MusicReply> StartAsync(SocketGuildUser user, ITextChannel fallbackChannel)
+    {
+        if (_music.GetPlayer(user.Guild.Id) is { CurrentItem: not null } playing)
+        {
+            return MusicReply.Fail(user.VoiceChannel?.Id == playing.VoiceChannelId
+                ? "The music's already playing."
+                : $"I'm already playing in <#{playing.VoiceChannelId}> - join that channel.");
+        }
+
+        if ((await _store.GetAsync(user.Guild.Id)).Songs.Count == 0)
+        {
+            return MusicReply.Fail("There's nothing in the queue yet - add some songs first.");
+        }
+
+        if (_music.GetJoinProblem(user) is { } problem)
+        {
+            return MusicReply.Fail(problem);
+        }
+
+        var (player, joinError) = await _music.JoinPlayerAsync(user, await AnnouncementChannelAsync(user.Guild, fallbackChannel));
+        if (player is null)
+        {
+            return MusicReply.Fail(joinError);
+        }
+
+        var playbackLock = await _music.AcquirePlaybackLockAsync(user.Guild.Id);
+        try
+        {
+            // Someone else may have started it while the bot was joining.
+            if (player.CurrentItem is null && !await PlayNextLockedAsync(player))
+            {
+                return MusicReply.Fail("There's nothing in the queue yet - add some songs first.");
+            }
+        }
+        finally
+        {
+            playbackLock.Release();
+        }
+
+        return MusicReply.Ok($"▶️ {user.Mention} started the music in <#{player.VoiceChannelId}>.");
+    }
+
+    /// <summary>A vote to skip the song that's playing. Whoever picked it, and moderators, skip it outright.</summary>
+    public async Task<MusicReply> VoteSkipAsync(SocketGuildUser user)
+    {
+        var player = _music.GetPlayer(user.Guild.Id);
+        if (player?.CurrentItem is not { } current)
+        {
+            return MusicReply.Fail("Nothing's playing to skip.");
+        }
+
+        var moderator = MusicPermissions.IsModerator(user);
+        if (user.VoiceChannel?.Id != player.VoiceChannelId && !moderator)
+        {
+            return MusicReply.Fail($"Join <#{player.VoiceChannelId}> to vote - only people listening get a say.");
+        }
+
+        var song = (current as QueueTrackItem)?.Song;
+        var listeners = user.Guild.GetVoiceChannel(player.VoiceChannelId)?.ConnectedUsers.Count(u => !u.IsBot) ?? 1;
+        var needed = VotesNeeded(listeners);
+        var votes = _votes.GetOrAdd(user.Guild.Id, _ => new SkipVotes());
+        int count;
+        string reason;
+        lock (votes)
+        {
+            if (votes.SongId != song?.Id)
+            {
+                votes.SongId = song?.Id;
+                votes.Voters.Clear();
+            }
+
+            if (song?.PickerId == user.Id)
+            {
+                (count, reason) = (needed, $"{user.Mention} skipped their own pick");
+            }
+            else if (moderator)
+            {
+                (count, reason) = (needed, $"{user.Mention} (a moderator) skipped it");
+            }
+            else if (!votes.Voters.Add(user.Id))
+            {
+                return MusicReply.Fail($"You've already voted to skip this one ({votes.Voters.Count}/{needed}).");
+            }
+            else
+            {
+                count = votes.Voters.Count;
+                reason = $"{count}/{needed} votes";
+            }
+        }
+
+        if (count < needed)
+        {
+            RefreshMenu(user.Guild.Id);
+            return MusicReply.Ok($"🗳️ {user.Mention} voted to skip {MusicFormatting.TrackLink(current.Track)} " +
+                                 $"(**{count}/{needed}** - more than half the listeners skips it).") with { Announce = false };
+        }
+
+        bool next;
+        var playbackLock = await _music.AcquirePlaybackLockAsync(user.Guild.Id);
+        try
+        {
+            // Only skip the song that was voted on: if it ended while the votes came in, the next one is innocent.
+            if (player.CurrentItem is null || (player.CurrentItem as QueueTrackItem)?.Song.Id != song?.Id)
+            {
+                return MusicReply.Fail("That song already finished.");
+            }
+
+            // A looped song is skipped for good, rather than the loop carrying on to the next person's song.
+            player.RepeatMode = Lavalink4NET.Players.Queued.TrackRepeatMode.None;
+            next = await PlayNextLockedAsync(player);
+            if (!next)
+            {
+                await player.StopAsync();
+            }
+        }
+        finally
+        {
+            playbackLock.Release();
+        }
+
+        return MusicReply.Ok($"⏭️ Skipped {MusicFormatting.TrackLink(current.Track)} ({reason})." +
+                             (next ? "" : " That was the last song in the queue."));
+    }
+
+    /// <summary>Removes the song at <paramref name="position"/> in play order: your own, or anyone's for moderators.</summary>
+    public async Task<MusicReply> RemoveAsync(SocketGuildUser user, int position)
+    {
+        var moderator = MusicPermissions.IsModerator(user);
+        var (result, removed, total) = await _store.MutateAsync(user.Guild.Id, state =>
+        {
+            var count = state.Songs.Count;
+            var outcome = MusicQueueRules.RemoveAt(state, position, user.Id, moderator, out var song);
+            return (outcome, song, count);
+        });
+
+        switch (result)
+        {
+            case QueueRemoveResult.NotFound:
+                return MusicReply.Fail($"There's no song at position {position} - the queue has {total}.");
+            case QueueRemoveResult.NotYours:
+                return MusicReply.Fail("That's someone else's song - you can only remove your own. (Vote to skip it " +
+                                       "when it comes on.)");
+        }
+
+        RefreshMenu(user.Guild.Id);
+        return MusicReply.Ok($"🗑️ Removed {SongLink(removed!)} from the queue.");
+    }
+
+    public async Task<MusicReply> RemoveMineAsync(SocketGuildUser user)
+    {
+        var removed = await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.RemoveAllFor(state, user.Id));
+        if (removed == 0)
+        {
+            return MusicReply.Fail("You don't have any songs waiting.");
+        }
+
+        RefreshMenu(user.Guild.Id);
+        return MusicReply.Ok($"🗑️ {user.Mention} took their {removed} song{(removed == 1 ? "" : "s")} out of the queue.");
+    }
+
+    /// <summary>Empties the whole queue: moderators only, since it's everyone's songs.</summary>
+    public async Task<MusicReply> ClearAsync(SocketGuildUser user)
+    {
+        if (!MusicPermissions.IsModerator(user))
+        {
+            return MusicReply.Fail("Only moderators can clear everyone's songs. To take out yours, use " +
+                                   "`/remove-mine` (or say \"remove my songs\").");
+        }
+
+        var removed = await _store.MutateAsync(user.Guild.Id, MusicQueueRules.Clear);
+        if (removed == 0)
+        {
+            return MusicReply.Fail("The queue was already empty.");
+        }
+
+        RefreshMenu(user.Guild.Id);
+        return MusicReply.Ok($"🧹 {user.Mention} cleared {removed} song(s) from the queue.");
+    }
+
+    public async Task SetLoopQueueAsync(ulong guildId, bool on)
+    {
+        await _store.MutateAsync(guildId, state => state.LoopQueue = on);
+        RefreshMenu(guildId);
+    }
+
+    /// <summary>Posts the menu in <paramref name="channel"/> and pins it, replacing any older one.</summary>
+    public async Task<(bool Pinned, string? Error)> PostMenuAsync(ITextChannel channel)
+    {
+        var guildId = channel.GuildId;
+        var menuLock = _menuLocks.GetOrAdd(guildId, _ => new SemaphoreSlim(1, 1));
+        await menuLock.WaitAsync();
+        try
+        {
+            var state = await _store.GetAsync(guildId);
+            IUserMessage menu;
+            try
+            {
+                menu = await channel.SendMessageAsync(embed: BuildMenu(state, _music.GetPlayer(guildId)),
+                    components: BuildButtons(_music.GetPlayer(guildId)), allowedMentions: AllowedMentions.None);
+            }
+            catch (HttpException ex)
+            {
+                _logger.LogWarning(ex, "Couldn't post the music menu in channel {ChannelId}.", channel.Id);
+                return (false, $"I couldn't post the menu in {channel.Mention} - check I can send messages and embed " +
+                               "links there.");
+            }
+
+            var pinned = await TryPinAsync(menu);
+            await _store.MutateAsync(guildId, s =>
+            {
+                s.MenuChannelId = channel.Id;
+                s.MenuMessageId = menu.Id;
+                return true;
+            });
+
+            // Only one menu: take the old one down (deleting it unpins it too).
+            if (state.MenuChannelId is { } oldChannelId && state.MenuMessageId is { } oldId && oldId != menu.Id &&
+                await FetchMenuAsync(oldChannelId, oldId) is { } old)
+            {
+                try
+                {
+                    await old.DeleteAsync();
+                }
+                catch (HttpException ex)
+                {
+                    _logger.LogDebug(ex, "Couldn't delete the old music menu.");
+                    await TryUnpinAsync(old);
+                }
+            }
+
+            return (pinned, null);
+        }
+        finally
+        {
+            menuLock.Release();
+        }
+    }
+
+    /// <summary>A link to the server's menu, or null if none has been posted (or it's gone).</summary>
+    public async Task<string?> MenuLinkAsync(ulong guildId)
+    {
+        var state = await _store.GetAsync(guildId);
+        return state.MenuChannelId is { } channelId && state.MenuMessageId is { } messageId
+            ? $"https://discord.com/channels/{guildId}/{channelId}/{messageId}"
+            : null;
+    }
+
+    /// <summary>Redraws the menu in the background, so replies don't wait on it.</summary>
+    public void RefreshMenu(ulong guildId) => _ = Task.Run(async () =>
+    {
+        try
+        {
+            await RefreshMenuAsync(guildId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Couldn't update the music menu in guild {GuildId}.", guildId);
+        }
+    });
+
+    /// <summary>Where "Now playing" goes: the music channel, else the menu's channel, else where the request was made.</summary>
+    private async Task<ITextChannel> AnnouncementChannelAsync(SocketGuild guild, ITextChannel fallback)
+    {
+        if (_music.FindChannel(guild) is { } musicChannel)
+        {
+            return musicChannel;
+        }
+
+        var state = await _store.GetAsync(guild.Id);
+        return state.MenuChannelId is { } id && guild.GetTextChannel(id) is { } menuChannel ? menuChannel : fallback;
+    }
+
+    /// <summary>Plays the next turn in place of whatever's playing. False if nothing's waiting. Call with the
+    /// playback lock held.</summary>
+    private async Task<bool> PlayNextLockedAsync(MusicPlayer player)
+    {
+        while (await _store.MutateAsync(player.GuildId, MusicQueueRules.TakeNext) is { } song)
+        {
+            // Saved songs carry Lavalink's encoded track, so they play without another YouTube search.
+            if (!LavalinkTrack.TryParse(song.Track, null, out var track))
+            {
+                _logger.LogWarning("Dropping a saved song that can't be read: '{Title}' in guild {GuildId}.",
+                    song.Title, player.GuildId);
+                continue;
+            }
+
+            await player.PlayAsync(new QueueTrackItem(track, song), enqueue: false);
+            return true;
+        }
+
+        return false;
+    }
+
+    private Task OnTrackStartedAsync(MusicPlayer player, ITrackQueueItem item)
+    {
+        _votes.TryRemove(player.GuildId, out _);
+        RefreshMenu(player.GuildId);
+        return Task.CompletedTask;
+    }
+
+    private Task OnTrackEndedAsync(MusicPlayer player, ITrackQueueItem item, TrackEndReason reason)
+    {
+        // Off the player's event so starting the next song never waits on (or inside) the event that ended this one.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (reason == TrackEndReason.Finished && item is QueueTrackItem { Song: var song } &&
+                    (await _store.GetAsync(player.GuildId)).LoopQueue)
+                {
+                    await _store.MutateAsync(player.GuildId, state =>
+                    {
+                        MusicQueueRules.Requeue(state, song);
+                        return true;
+                    });
+                }
+
+                var playbackLock = await _music.AcquirePlaybackLockAsync(player.GuildId);
+                try
+                {
+                    // A skip or /play may have started something else in the meantime; only move on if what's
+                    // "current" is still the song that ended (or nothing).
+                    var stillCurrent = player.CurrentItem is null ||
+                                       (player.CurrentItem as QueueTrackItem)?.Song.Id == (item as QueueTrackItem)?.Song.Id;
+                    if (player.State != PlayerState.Destroyed && stillCurrent)
+                    {
+                        await PlayNextLockedAsync(player);
+                    }
+                }
+                finally
+                {
+                    playbackLock.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Couldn't play the next song in guild {GuildId}.", player.GuildId);
+            }
+            finally
+            {
+                RefreshMenu(player.GuildId);
+            }
+        });
+        return Task.CompletedTask;
+    }
+
+    private Task OnPlayerClosedAsync(ulong guildId)
+    {
+        _votes.TryRemove(guildId, out _);
+        RefreshMenu(guildId);
+        return Task.CompletedTask;
+    }
+
+    private async Task RefreshMenuAsync(ulong guildId)
+    {
+        var menuLock = _menuLocks.GetOrAdd(guildId, _ => new SemaphoreSlim(1, 1));
+        await menuLock.WaitAsync();
+        try
+        {
+            var state = await _store.GetAsync(guildId);
+            if (state.MenuChannelId is not { } channelId || state.MenuMessageId is not { } messageId)
+            {
+                return;
+            }
+
+            if (await FetchMenuAsync(channelId, messageId) is not { } menu)
+            {
+                // Deleted by someone: forget it, so this stops trying. /music-menu posts a new one.
+                await _store.MutateAsync(guildId, s =>
+                {
+                    if (s.MenuMessageId == messageId)
+                    {
+                        s.MenuChannelId = null;
+                        s.MenuMessageId = null;
+                    }
+
+                    return true;
+                });
+                return;
+            }
+
+            var player = _music.GetPlayer(guildId);
+            await menu.ModifyAsync(m =>
+            {
+                m.Embed = BuildMenu(state, player);
+                m.Components = BuildButtons(player);
+            });
+        }
+        finally
+        {
+            menuLock.Release();
+        }
+    }
+
+    private async Task<IUserMessage?> FetchMenuAsync(ulong channelId, ulong messageId)
+    {
+        if (_client.GetChannel(channelId) is not ITextChannel channel)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await channel.GetMessageAsync(messageId) as IUserMessage;
+        }
+        catch (HttpException ex)
+        {
+            _logger.LogDebug(ex, "Couldn't fetch the music menu {MessageId}.", messageId);
+            return null;
+        }
+    }
+
+    private Embed BuildMenu(MusicQueueState state, MusicPlayer? player)
+    {
+        var embed = new EmbedBuilder()
+            .WithColor(new Color(0x1DB954))
+            .WithTitle("🎶 Music queue")
+            .WithFooter($"Songs play in turns: one from each person, round and round. Up to {SongsPerPerson} waiting " +
+                        "each. Skipping takes votes from more than half the listeners - or the person who picked it." +
+                        (state.LoopQueue ? " Looping the queue: finished songs go back in." : ""));
+
+        if (player?.CurrentItem is { } current)
+        {
+            embed.WithDescription((player.State == PlayerState.Paused ? "⏸️ Paused" : "▶️ Playing") +
+                                  $" in <#{player.VoiceChannelId}>. Add songs any time - they join the turns.");
+            var song = (current as QueueTrackItem)?.Song;
+            var votes = _votes.TryGetValue(state.GuildId, out var v) && v.SongId == song?.Id ? v.Voters.Count : 0;
+            embed.AddField("Now playing", MusicFormatting.TrackLink(current.Track) +
+                                          (song is null ? "" : $" - <@{song.PickerId}>'s pick") +
+                                          (player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track ? " 🔂" : "") +
+                                          (votes > 0 ? $"\n⏭️ {votes} vote{(votes == 1 ? "" : "s")} to skip" : ""));
+        }
+        else
+        {
+            embed.WithDescription("Not playing right now. Add songs any time - they wait here. When you're ready, " +
+                                  "join a voice channel and press **Play**.");
+        }
+
+        var order = MusicQueueRules.Order(state);
+        embed.AddField("Up next", order.Count == 0
+            ? "*Nothing yet - press **Add song**, use `/add`, or ask me.*"
+            : FitField(order.Take(10).Select((s, i) => $"`{i + 1}.` {SongLink(s)} - <@{s.PickerId}>"), order.Count, "\n"));
+
+        var turns = state.Participants.Where(p => state.Songs.Any(s => s.PickerId == p)).ToList();
+        if (turns.Count > 0)
+        {
+            embed.AddField("Taking turns", FitField(turns.Select(p => $"<@{p}>"), turns.Count, " → "));
+        }
+
+        return embed.Build();
+    }
+
+    private static MessageComponent BuildButtons(MusicPlayer? player)
+    {
+        var builder = new ComponentBuilder()
+            .WithButton("Add song", AddButton, ButtonStyle.Success, new Emoji("➕"));
+
+        if (player?.CurrentItem is null)
+        {
+            builder.WithButton("Play", PlayButton, ButtonStyle.Primary, new Emoji("▶️"));
+        }
+        else
+        {
+            builder.WithButton("Vote skip", SkipButton, ButtonStyle.Primary, new Emoji("⏭️"));
+            builder = player.State == PlayerState.Paused
+                ? builder.WithButton("Resume", ResumeButton, ButtonStyle.Secondary, new Emoji("▶️"))
+                : builder.WithButton("Pause", PauseButton, ButtonStyle.Secondary, new Emoji("⏸️"));
+            builder.WithButton("Stop", StopButton, ButtonStyle.Danger, new Emoji("⏹️"));
+        }
+
+        return builder.WithButton("Remove mine", MineButton, ButtonStyle.Secondary, new Emoji("🗑️")).Build();
+    }
+
+    /// <summary>As many of <paramref name="items"/> as fit in an embed field (1024 characters; song links with long
+    /// titles get there fast), then "...and N more".</summary>
+    private static string FitField(IEnumerable<string> items, int total, string separator)
+    {
+        const int limit = EmbedFieldBuilder.MaxFieldValueLength - 30; // room for the "...and N more" line
+        var text = new StringBuilder();
+        var shown = 0;
+        foreach (var item in items)
+        {
+            if (text.Length + separator.Length + item.Length > limit)
+            {
+                break;
+            }
+
+            text.Append(shown == 0 ? "" : separator).Append(item);
+            shown++;
+        }
+
+        if (shown < total)
+        {
+            text.Append(shown == 0 ? "" : "\n").Append($"*...and {total - shown} more*");
+        }
+
+        return text.ToString();
+    }
+
+    public static string SongLink(QueuedSong song)
+    {
+        var title = Format.Sanitize(song.Title.Length > 80 ? song.Title[..79] + "…" : song.Title);
+        return Uri.TryCreate(song.Uri, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+            ? $"[{title.Replace("]", "\\]")}](<{uri.AbsoluteUri}>)"
+            : $"**{title}**";
+    }
+
+    public static string SongLength(QueuedSong song) => song.IsLiveStream ? "live" : MusicFormatting.Duration(song.Duration);
+
+    private async Task<bool> TryPinAsync(IUserMessage menu)
+    {
+        try
+        {
+            await menu.PinAsync();
+            return true;
+        }
+        catch (HttpException ex)
+        {
+            _logger.LogInformation(ex, "Couldn't pin the music menu in channel {ChannelId}.", menu.Channel.Id);
+            return false;
+        }
+    }
+
+    private async Task TryUnpinAsync(IUserMessage menu)
+    {
+        try
+        {
+            await menu.UnpinAsync();
+        }
+        catch (HttpException ex)
+        {
+            _logger.LogDebug(ex, "Couldn't unpin an old music menu in channel {ChannelId}.", menu.Channel.Id);
+        }
+    }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        // After a restart the menus still say what was playing before; set them straight once the bot is back.
+        _client.Ready += () =>
+        {
+            if (Interlocked.Exchange(ref _menusRestored, 1) == 0)
+            {
+                _ = Task.Run(async () =>
+                {
+                    foreach (var state in await _store.GetAllAsync())
+                    {
+                        if (state.MenuMessageId is not null)
+                        {
+                            RefreshMenu(state.GuildId);
+                        }
+                    }
+                });
+            }
+
+            return Task.CompletedTask;
+        };
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private sealed class SkipVotes
+    {
+        public Guid? SongId { get; set; }
+
+        public HashSet<ulong> Voters { get; } = [];
+    }
+}

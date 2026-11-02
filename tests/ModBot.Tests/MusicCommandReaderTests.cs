@@ -27,8 +27,6 @@ public sealed class MusicCommandReaderTests
     [InlineData("show me the queue", MusicCommand.ShowQueue)]
     [InlineData("what's next?", MusicCommand.ShowQueue)]
     [InlineData("what's in the queue", MusicCommand.ShowQueue)]
-    [InlineData("shuffle the queue", MusicCommand.Shuffle)]
-    [InlineData("mix up the songs", MusicCommand.Shuffle)]
     [InlineData("loop this song", MusicCommand.LoopSong)]
     [InlineData("put this on repeat", MusicCommand.LoopSong)]
     [InlineData("repeat the whole queue", MusicCommand.LoopQueue)]
@@ -36,18 +34,23 @@ public sealed class MusicCommandReaderTests
     [InlineData("loop off", MusicCommand.LoopOff)]
     [InlineData("clear the queue", MusicCommand.ClearQueue)]
     [InlineData("wipe the queue", MusicCommand.ClearQueue)]
-    [InlineData("start a music session", MusicCommand.StartSession)]
-    [InlineData("lets start the session", MusicCommand.StartSession)]
-    [InlineData("let's do a music session", MusicCommand.StartSession)]
-    [InlineData("open a session", MusicCommand.StartSession)]
-    [InlineData("start the music", MusicCommand.BeginSession)]
-    [InlineData("ok everyone's ready, start playing", MusicCommand.BeginSession)]
-    [InlineData("end the session", MusicCommand.EndSession)]
-    [InlineData("stop the music session", MusicCommand.EndSession)]
-    [InlineData("I want to leave the music session", MusicCommand.LeaveSession)]
-    [InlineData("take me out of the session", MusicCommand.LeaveSession)]
-    [InlineData("show the session menu", MusicCommand.ShowSession)]
-    [InlineData("bring up the music panel", MusicCommand.ShowSession)]
+    [InlineData("start a music session", MusicCommand.Start)]
+    [InlineData("lets start the session", MusicCommand.Start)]
+    [InlineData("let's do a music session", MusicCommand.Start)]
+    [InlineData("open a session", MusicCommand.Start)]
+    [InlineData("start the music", MusicCommand.Start)]
+    [InlineData("ok everyone's ready, start playing", MusicCommand.Start)]
+    [InlineData("end the session", MusicCommand.Stop)]
+    [InlineData("stop the music session", MusicCommand.Stop)]
+    [InlineData("I want to leave the music session", MusicCommand.RemoveMine)]
+    [InlineData("take me out of the session", MusicCommand.RemoveMine)]
+    [InlineData("show the session menu", MusicCommand.ShowMenu)]
+    [InlineData("bring up the music panel", MusicCommand.ShowMenu)]
+    [InlineData("where's the music menu?", MusicCommand.ShowMenu)]
+    [InlineData("play the queue", MusicCommand.Start)]
+    [InlineData("remove my songs", MusicCommand.RemoveMine)]
+    [InlineData("take all my songs out of the queue", MusicCommand.RemoveMine)]
+    [InlineData("clear my songs", MusicCommand.RemoveMine)] // not the whole queue
     public void Reads_plain_music_controls(string message, MusicCommand expected)
         => Assert.Equal(expected, MusicCommandReader.Read(message)?.Command);
 
@@ -57,10 +60,6 @@ public sealed class MusicCommandReaderTests
         Assert.Equal(new MusicCommandRequest(MusicCommand.Remove, 3), MusicCommandReader.Read("remove song 3 from the queue"));
         Assert.Equal(new MusicCommandRequest(MusicCommand.Remove, 4), MusicCommandReader.Read("take number 4 out of the queue"));
     }
-
-    [Fact]
-    public void Reads_where_to_move_a_song()
-        => Assert.Equal(new MusicCommandRequest(MusicCommand.Move, 5, 1), MusicCommandReader.Read("move song 5 to 1"));
 
     [Theory]
     [InlineData("i hate it when people skip songs")]

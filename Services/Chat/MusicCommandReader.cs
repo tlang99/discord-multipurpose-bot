@@ -11,37 +11,35 @@ public enum MusicCommand
     Stop,
     NowPlaying,
     ShowQueue,
-    Shuffle,
     LoopSong,
     LoopQueue,
     LoopOff,
     Remove,
-    Move,
+
+    /// <summary>Take all the person's own songs out of the queue.</summary>
+    RemoveMine,
     ClearQueue,
 
-    /// <summary>Opens a music session, or starts it if one is waiting.</summary>
-    StartSession,
+    /// <summary>Start playing the queue in the person's voice channel.</summary>
+    Start,
 
-    /// <summary>"Start the music": starts a waiting session's songs.</summary>
-    BeginSession,
-    EndSession,
-    LeaveSession,
-    ShowSession,
+    /// <summary>Point them to the music menu.</summary>
+    ShowMenu,
 }
 
-/// <param name="Position">For remove and move: the song's place in the queue.</param>
-/// <param name="To">For move: where it goes.</param>
-public record MusicCommandRequest(MusicCommand Command, int? Position = null, int? To = null);
+/// <param name="Position">For remove: the song's place in the queue.</param>
+public record MusicCommandRequest(MusicCommand Command, int? Position = null);
 
 /// <summary>
-/// Spots plainly worded music controls in a chat message ("skip this", "pause", "show the queue", "start a music
-/// session") without asking the model, which is slower and, when tested, mixed up some of them (it read "this song
-/// is awful, get rid of it" as removing song 1, and "ok keep going" as a skip).
+/// Spots plainly worded music controls in a chat message ("skip this", "pause", "show the queue", "start the music")
+/// without asking the model, which is slower and, when tested, mixed up some of them (it read "this song is awful,
+/// get rid of it" as removing song 1, and "ok keep going" as a skip).
 /// </summary>
 /// <remarks>
 /// The message is split into clauses ("this song sucks, skip it" has two), and a clause only counts if, after
 /// fillers like "can you" and "please" are trimmed, the whole of it is the command. So "skip it" is a skip, but "I hate
-/// it when people skip songs" is just chat.
+/// it when people skip songs" is just chat. "Music session" wording still works, mapped onto the standing queue:
+/// starting one starts the music, leaving one takes out your songs, ending one stops the music.
 /// </remarks>
 public static partial class MusicCommandReader
 {
@@ -62,17 +60,18 @@ public static partial class MusicCommandReader
         (Rx(@"(resume|unpause|continue|keep going|keep playing|play again|start it again)( (the|it))?( (music|song|track|playing))?"),
             _ => new(MusicCommand.Resume)),
 
-        // Sessions, before plain stop: "stop the session" ends a session, not the music alone.
+        // Your own songs, before the general remove/clear rules ("clear my songs" isn't clearing the queue).
+        (Rx(@"(remove|delete|drop|clear|take out|pull)( all)? my (songs|picks|tracks|stuff)( out)?( from the queue| out of the queue)?|take( all)? my (songs|picks|tracks) out( of the queue)?|(leave|exit|quit)( the| this| our)?( music| song)? session|(take|get) me out of( the| this)?( music)? (session|queue)|remove me from( the| this)?( music)? (session|queue)"),
+            _ => new(MusicCommand.RemoveMine)),
+
+        (Rx(@"(show|post|bring up|pull up|open|give me|where is|wheres)( me| us)?( the| a)?( music)?( session| queue)? (menu|panel)|(show|post)( me| us)?( the)?( music)? session"),
+            _ => new(MusicCommand.ShowMenu)),
+
+        // "Stop the session" stops the music, not just a song: before plain stop only for clarity, both stop.
         (Rx(@"(end|close|stop|finish|wrap up|shut down|cancel)( the| our| this)?( music| song)? session"),
-            _ => new(MusicCommand.EndSession)),
-        (Rx(@"(leave|exit|quit)( the| this| our)?( music| song)? session|(take|get) me out of( the| this)?( music)? session|remove me from( the| this)?( music)? session"),
-            _ => new(MusicCommand.LeaveSession)),
-        (Rx(@"(show|post|bring up|pull up|open|give me)( me| us)?( the| a)?( music)?( session)? (menu|panel)|(show|post)( me| us)?( the)?( music)? session"),
-            _ => new(MusicCommand.ShowSession)),
-        (Rx(@"(start|open|begin|make|create|kick off|set up|run|host|do|have)( up)?( a| the| us a| our| another| a new)?( new)? (music |song |listening )?session"),
-            _ => new(MusicCommand.StartSession)),
-        (Rx(@"(start|begin|kick off)( the| our)? (music|songs|playlist|queue)( now)?|start playing( (the|our) (songs|queue|playlist))?( now)?|(lets go|go ahead), start( it| the music)?"),
-            _ => new(MusicCommand.BeginSession)),
+            _ => new(MusicCommand.Stop)),
+        (Rx(@"(start|open|begin|make|create|kick off|set up|run|host|do|have)( up)?( a| the| us a| our| another| a new)?( new)? (music |song |listening )?session|(start|begin|kick off|play)( the| our)? (music|songs|playlist|queue)( now)?|start playing( (the|our) (songs|queue|playlist))?( now)?|(lets go|go ahead), start( it| the music)?"),
+            _ => new(MusicCommand.Start)),
 
         (Rx(@"stop( (the|this|that))?( (music|song|track|playing|player))?( and leave)?|(leave|disconnect from|disconnect|get out of)( the)?( voice( channel| chat)?| vc| call)|turn( the)? music off|turn off( the)? music|shut( the)? music off|shut off( the)? music"),
             _ => new(MusicCommand.Stop)),
@@ -81,13 +80,9 @@ public static partial class MusicCommandReader
             _ => new(MusicCommand.NowPlaying)),
         (Rx(@"(show|list|see|view|check)( me| us)?( the| whats in the)? (queue|playlist|song list|songs)|whats? (in|on) the (queue|playlist)|whats? (next|up next|coming up)|queue|whats? left in the queue"),
             _ => new(MusicCommand.ShowQueue)),
-        (Rx(@"shuffle( the)?( (queue|songs|playlist))?|mix( up)? the (queue|songs|playlist)( up)?"),
-            _ => new(MusicCommand.Shuffle)),
 
         (Rx(@"(remove|delete|take out|drop)( song| track| number| no| the song at( position)?)? #?(?<n>\d+)( out)?( from the queue| out of the queue)?|take( song| number)? #?(?<n>\d+) out( of the queue)?"),
             m => new(MusicCommand.Remove, int.Parse(m.Groups["n"].Value))),
-        (Rx(@"move( song| track| number)? #?(?<n>\d+) to( position| spot| number)? #?(?<to>\d+)"),
-            m => new(MusicCommand.Move, int.Parse(m.Groups["n"].Value), int.Parse(m.Groups["to"].Value))),
         (Rx(@"(clear|empty|wipe|clean out|clear out)( out)?( the)? (queue|playlist)"),
             _ => new(MusicCommand.ClearQueue)),
     ];
@@ -110,7 +105,7 @@ public static partial class MusicCommandReader
                 if (pattern.Match(clause) is { Success: true } match)
                 {
                     var request = read(match);
-                    if (request.Position is <= 0 or > 1000 || request.To is <= 0 or > 1000)
+                    if (request.Position is <= 0 or > 1000)
                     {
                         continue;
                     }

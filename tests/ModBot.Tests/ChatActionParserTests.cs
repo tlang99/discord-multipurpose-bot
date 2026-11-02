@@ -46,6 +46,18 @@ public sealed class ChatActionParserTests : IDisposable
         Assert.IsType<UnclearMusicAction>(await Parser(chat).ParseAsync("make the music better somehow"));
     }
 
+    [Theory]
+    [InlineData("play mr brightside", true)]
+    [InlineData("add mr brightside", false)]
+    [InlineData("can you queue up mr brightside", false)]
+    [InlineData("put mr brightside in the queue", false)]
+    public async Task Add_only_queues_while_play_also_starts_the_music(string message, bool starts)
+    {
+        var chat = new FakeChat("""{"action":"play_music","query":"mr brightside"}""");
+
+        Assert.Equal(new PlayMusicAction("mr brightside", starts), await Parser(chat).ParseAsync(message));
+    }
+
     [Fact]
     public async Task Chat_stays_chat()
         => Assert.Null(await Parser(new FakeChat("""{"action":"none"}""")).ParseAsync("what music do you like?"));

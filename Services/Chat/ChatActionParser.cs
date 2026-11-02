@@ -9,7 +9,8 @@ namespace ModBot.Services.Chat;
 /// <summary>Something a chat message asked the bot to do.</summary>
 public abstract record ChatAction;
 
-public record PlayMusicAction(string Query) : ChatAction;
+/// <param name="StartPlaying">False for "add X to the queue": queue it without starting the music.</param>
+public record PlayMusicAction(string Query, bool StartPlaying = true) : ChatAction;
 
 /// <param name="Players">Total squad size including the person asking, 2-6.</param>
 public record CreateLfgAction(int Players, LfgDetails Details) : ChatAction;
@@ -43,12 +44,12 @@ public record UnclearMusicAction : ChatAction;
 /// nobody asked for.</item>
 /// <item>Reminders: <see cref="ReminderRequestReader"/>, checked before the model is asked anything. Adding them as a
 /// fourth answer to the request check made the model worse at the other three.</item>
-/// <item>Music controls (skip, pause, the queue, music sessions...): <see cref="MusicCommandReader"/> first, for
-/// plainly worded ones. Looser wording goes to the model: "music_control" as an answer to the request check (tested:
-/// it caught 14 of 16 controls, the two misses being ones the reader handles, and flagged none of 11 chat messages,
-/// with no change to the other answers), then a second
-/// call to pick which. That second call mixed up some (it read "this song is awful, get rid of it" as removing song
-/// 1), so controls that can't be undone are never done on its say-so alone.</item>
+/// <item>Music controls (skip, pause, the queue, the menu...): <see cref="MusicCommandReader"/> first, for plainly
+/// worded ones. Looser wording goes to the model: "music_control" as an answer to the request check (tested: it
+/// caught 14 of 16 controls, the two misses being ones the reader handles, and flagged none of 11 chat messages, with
+/// no change to the other answers), then a second call to pick which. That second call mixed up some (it read "this
+/// song is awful, get rid of it" as removing a song), so controls that can't be undone are never done on its say-so
+/// alone.</item>
 /// </list>
 /// Only ever sees the asker's own message, never the channel history, so nothing someone else wrote earlier can make
 /// the bot act. No Discord types: running the action is the caller's job.
@@ -67,16 +68,15 @@ public partial class ChatActionParser
         "opinions, and general chat are none. When unsure, answer none.";
 
     private const string MusicControlSchema =
-        """{"type":"object","properties":{"command":{"type":"string","enum":["skip","pause","resume","stop","now_playing","show_queue","shuffle","loop_song","loop_queue","loop_off","clear_queue","start_session","begin_playing","end_session","leave_session","show_session","unclear"]}},"required":["command"]}""";
+        """{"type":"object","properties":{"command":{"type":"string","enum":["skip","pause","resume","stop","now_playing","show_queue","loop_song","loop_queue","loop_off","clear_queue","start_playing","remove_mine","show_menu","unclear"]}},"required":["command"]}""";
 
     private const string MusicControlPrompt =
         "The message asks a Discord music bot to control its music. Pick the command that matches: skip (skip or vote " +
         "to skip the current song), pause, resume (unpause), stop (stop the music and leave), now_playing (what song " +
-        "is on), show_queue (list upcoming songs), shuffle, loop_song (repeat this song), loop_queue (repeat the whole " +
-        "queue), loop_off (stop repeating), clear_queue (remove every upcoming song), start_session (open a new music " +
-        "session where people take turns adding songs), begin_playing (start playing the session's songs), " +
-        "end_session (close the music session), leave_session (the person leaves the session and their songs are " +
-        "removed), show_session (show the session menu). If none fit, answer unclear.";
+        "is on), show_queue (list the waiting songs), loop_song (repeat this song), loop_queue (repeat the whole " +
+        "queue), loop_off (stop repeating), clear_queue (remove every waiting song), start_playing (start playing the " +
+        "queue, or start a music session), remove_mine (take the person's own songs out of the queue, or leave the " +
+        "music session), show_menu (show the music menu). If none fit, answer unclear.";
 
     private const string PlaySchema =
         """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}""";
@@ -157,16 +157,13 @@ public partial class ChatActionParser
                 "stop" => MusicCommand.Stop,
                 "now_playing" => MusicCommand.NowPlaying,
                 "show_queue" => MusicCommand.ShowQueue,
-                "shuffle" => MusicCommand.Shuffle,
                 "loop_song" => MusicCommand.LoopSong,
                 "loop_queue" => MusicCommand.LoopQueue,
                 "loop_off" => MusicCommand.LoopOff,
                 "clear_queue" => MusicCommand.ClearQueue,
-                "start_session" => MusicCommand.StartSession,
-                "begin_playing" => MusicCommand.BeginSession,
-                "end_session" => MusicCommand.EndSession,
-                "leave_session" => MusicCommand.LeaveSession,
-                "show_session" => MusicCommand.ShowSession,
+                "start_playing" => MusicCommand.Start,
+                "remove_mine" => MusicCommand.RemoveMine,
+                "show_menu" => MusicCommand.ShowMenu,
                 _ => null,
             };
 
@@ -185,9 +182,11 @@ public partial class ChatActionParser
 
     private async Task<ChatAction> ReadSongAsync(string message, CancellationToken cancellationToken)
     {
+        // "Add X" / "queue X" builds up the queue; "play X" also starts the music if it isn't playing.
+        var start = !AddOnlyRegex().IsMatch(message);
         if (YouTubeLinkRegex().Match(message) is { Success: true } link)
         {
-            return new PlayMusicAction(link.Value);
+            return new PlayMusicAction(link.Value, start);
         }
 
         try
@@ -197,7 +196,7 @@ public partial class ChatActionParser
             var query = json.RootElement.GetProperty("query").GetString()?.Trim();
             if (!string.IsNullOrEmpty(query))
             {
-                return new PlayMusicAction(query.Length > 200 ? query[..200] : query);
+                return new PlayMusicAction(query.Length > 200 ? query[..200] : query, start);
             }
         }
         catch (Exception ex) when (ex is ChatServiceException or JsonException or KeyNotFoundException or InvalidOperationException)
@@ -210,4 +209,10 @@ public partial class ChatActionParser
 
     [GeneratedRegex(@"https?://(?:[\w-]+\.)*(?:youtube\.com|youtu\.be)/\S+", RegexOptions.IgnoreCase)]
     private static partial Regex YouTubeLinkRegex();
+
+    /// <summary>Asking to add or queue a song, rather than play it: "add X", "can you queue up X", "put X in the
+    /// queue".</summary>
+    [GeneratedRegex(@"^\W*(?:(?:hey|yo|ok|okay|please|pls|can you|could you|would you|will you)\s+)*(?:add|queue)\b|\b(?:to|in|on|into) the queue\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex AddOnlyRegex();
 }

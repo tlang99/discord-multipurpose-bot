@@ -115,7 +115,9 @@ builder.Services.AddSingleton<ILfgService, LfgService>();
 builder.Services.AddSingleton<ModBot.Modules.Lfg.LfgPoster>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicPlayerEvents>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicService>();
-builder.Services.AddSingleton<ModBot.Modules.Music.MusicSessionService>();
+builder.Services.AddSingleton<IMusicQueueStore, JsonMusicQueueStore>();
+builder.Services.AddSingleton<ModBot.Modules.Music.MusicQueueService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ModBot.Modules.Music.MusicQueueService>());
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicControls>();
 
 builder.Services.AddHttpClient<IImageModerationService, SightengineImageModerationService>(client =>

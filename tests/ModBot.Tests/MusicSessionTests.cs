@@ -2,7 +2,8 @@ using ModBot.Modules.Music;
 
 namespace ModBot.Tests;
 
-public sealed class MusicSessionTests
+/// <summary>The turn order (<see cref="FairOrder"/>) and how many votes a skip takes.</summary>
+public sealed class FairOrderTests
 {
     private const ulong Alice = 1, Bob = 2, Cara = 3;
 
@@ -70,5 +71,5 @@ public sealed class MusicSessionTests
     [InlineData(5, 3)]
     [InlineData(0, 1)] // nobody counted (e.g. a moderator outside the channel): one vote
     public void A_skip_needs_more_than_half_the_listeners(int listeners, int needed)
-        => Assert.Equal(needed, MusicSessionService.VotesNeeded(listeners));
+        => Assert.Equal(needed, MusicQueueService.VotesNeeded(listeners));
 }

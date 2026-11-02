@@ -20,14 +20,11 @@ public class MusicOptions
     /// <summary>Cap on the queue length per server, so one playlist can't queue thousands of songs.</summary>
     public int MaxQueueLength { get; set; } = 200;
 
-    /// <summary>In a music session, how many songs each person can have waiting at once, so everyone gets turns
-    /// without one person's playlist filling the queue.</summary>
-    public int SessionSongsPerPerson { get; set; } = 10;
+    /// <summary>How many songs each person can have waiting at once, so everyone gets turns without one person's
+    /// playlist filling the queue.</summary>
+    public int SongsPerPerson { get; set; } = 10;
 
-    /// <summary>A session that hasn't started yet closes after this many minutes with nobody touching it.</summary>
-    public int SessionLobbyIdleMinutes { get; set; } = 60;
-
-    /// <summary>The only text channel music commands work in, by name (case-insensitive). Song announcements go there
-    /// too, since they're posted where /play was used. Empty allows any channel.</summary>
+    /// <summary>The only text channel music commands work in, by name (case-insensitive). Song announcements and the
+    /// music menu go there too. Empty allows any channel.</summary>
     public string ChannelName { get; set; } = "music";
 }

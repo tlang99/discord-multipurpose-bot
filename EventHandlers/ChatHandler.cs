@@ -31,18 +31,19 @@ public partial class ChatHandler
         "under 1,500 characters unless someone asks for detail. Reply only as yourself, in your own words. Never " +
         "start your reply with a name and a colon, and never write lines for anyone else. Use Discord markdown " +
         "sparingly. Never write @everyone or @here, and don't try to ping people. Never claim you played, skipped, " +
-        "paused or stopped a song, changed the queue, started or ended a music session, posted an LFG or set a " +
-        "reminder: those requests are handled separately, so if someone asks how, tell them to ask you directly (e.g. " +
-        "\"play <song>\", \"skip this\", \"show the queue\", \"start a music session\", \"make an LFG for ranked\" or " +
-        "\"remind me in 20 minutes to check the oven\" - reminders need a time) or see /help. In a music session, " +
-        "everyone adds songs and they play in turns, one from each person; skipping a song takes votes from more than " +
-        "half the listeners.";
+        "paused or stopped a song, changed the queue, started the music, posted an LFG or set a reminder: those " +
+        "requests are handled separately, so if someone asks how, tell them to ask you directly (e.g. \"play <song>\", " +
+        "\"add <song> to the queue\", \"skip this\", \"show the queue\", \"start the music\", \"make an LFG for " +
+        "ranked\" or \"remind me in 20 minutes to check the oven\" - reminders need a time) or see /help. How the " +
+        "music works: there's one standing queue anyone can add to any time, even when nothing's playing; songs play " +
+        "in turns, one from each person; skipping a song takes votes from more than half the listeners, unless you " +
+        "picked it; and there's a pinned music menu with buttons in the music channel.";
 
     private readonly IChatService _chat;
     private readonly ChatActionParser _actionParser;
     private readonly MusicService _music;
     private readonly MusicControls _musicControls;
-    private readonly MusicSessionService _musicSessions;
+    private readonly MusicQueueService _musicQueue;
     private readonly LfgPoster _lfgPoster;
     private readonly ReminderService _reminders;
     private readonly IGuildSettingsStore _settingsStore;
@@ -52,7 +53,7 @@ public partial class ChatHandler
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
 
     public ChatHandler(IChatService chat, ChatActionParser actionParser, MusicService music,
-        MusicControls musicControls, MusicSessionService musicSessions, LfgPoster lfgPoster,
+        MusicControls musicControls, MusicQueueService musicQueue, LfgPoster lfgPoster,
         ReminderService reminders,
         IGuildSettingsStore settingsStore, ChatPersonality personality, IOptions<ChatOptions> options,
         ILogger<ChatHandler> logger)
@@ -61,7 +62,7 @@ public partial class ChatHandler
         _actionParser = actionParser;
         _music = music;
         _musicControls = musicControls;
-        _musicSessions = musicSessions;
+        _musicQueue = musicQueue;
         _lfgPoster = lfgPoster;
         _reminders = reminders;
         _settingsStore = settingsStore;
@@ -230,9 +231,11 @@ public partial class ChatHandler
                     return ($"Music goes in **#{_music.ChannelName}**, but this server doesn't have that channel yet.", false);
                 }
 
-                // In a music session this adds to the person's turns instead.
-                var result = await _musicControls.PlayAsync(asker, musicChannel, play.Query, replyShowsNowPlaying: false);
-                var where = result.Success && musicChannel.Id != channel.Id ? $" (in {musicChannel.Mention})" : "";
+                // Into the standing queue, in the person's turns. "Play" also starts the music if it isn't playing.
+                var result = play.StartPlaying
+                    ? await _musicControls.PlayAsync(asker, musicChannel, play.Query)
+                    : await _musicControls.AddAsync(asker, musicChannel, play.Query);
+                var where = result.Success && musicChannel.Id != channel.Id ? $" (music's in {musicChannel.Mention})" : "";
                 return ((result.Text ?? "Done.") + where, result.SuppressEmbeds);
             }
 
@@ -291,21 +294,20 @@ public partial class ChatHandler
     {
         [MusicCommand.Stop] = "stop the music",
         [MusicCommand.ClearQueue] = "clear the queue",
-        [MusicCommand.EndSession] = "end the session",
-        [MusicCommand.LeaveSession] = "leave the session",
+        [MusicCommand.RemoveMine] = "remove my songs",
     };
 
     /// <summary>
-    /// Runs a music control as the person who asked, through the same code as the slash commands and the session
-    /// menu, so the same rules apply (be in the bot's voice channel, a session's skips are votes, only the host ends
-    /// it).
+    /// Runs a music control as the person who asked, through the same code as the slash commands and the music menu,
+    /// so the same rules apply (be in the bot's voice channel to control it, skips are votes, only your own songs are
+    /// yours to remove).
     /// </summary>
     private async Task<MusicReply> RunMusicControlAsync(ChatAction action, SocketGuildUser asker, SocketTextChannel channel)
     {
         if (action is not MusicControlAction { Request: var request } control)
         {
             return MusicReply.Fail("I couldn't tell what you want me to do with the music. Try \"skip\", \"pause\", " +
-                                   "\"show the queue\" or \"start a music session\" - or see `/help`.");
+                                   "\"show the queue\" or \"start the music\" - or see `/help`.");
         }
 
         if (control.FromModel && PlainWordsNeeded.TryGetValue(request.Command, out var phrase))
@@ -315,7 +317,6 @@ public partial class ChatHandler
         }
 
         var guild = channel.Guild;
-        var session = _musicSessions.Get(guild.Id);
         switch (request.Command)
         {
             case MusicCommand.Skip:
@@ -329,25 +330,23 @@ public partial class ChatHandler
             case MusicCommand.NowPlaying:
                 return _musicControls.NowPlaying(asker);
             case MusicCommand.ShowQueue:
-                return _musicControls.Queue(asker);
-            case MusicCommand.Shuffle:
-                return await _musicControls.ShuffleAsync(asker);
+                return await _musicControls.QueueAsync(asker);
             case MusicCommand.LoopSong:
-                return _musicControls.Loop(asker, LoopMode.Song);
+                return await _musicControls.LoopAsync(asker, LoopMode.Song);
             case MusicCommand.LoopQueue:
-                return _musicControls.Loop(asker, LoopMode.Queue);
+                return await _musicControls.LoopAsync(asker, LoopMode.Queue);
             case MusicCommand.LoopOff:
-                return _musicControls.Loop(asker, LoopMode.Off);
+                return await _musicControls.LoopAsync(asker, LoopMode.Off);
             case MusicCommand.Remove:
                 return await _musicControls.RemoveAsync(asker, request.Position ?? 0);
-            case MusicCommand.Move:
-                return await _musicControls.MoveAsync(asker, request.Position ?? 0, request.To ?? 0);
+            case MusicCommand.RemoveMine:
+                return await _musicControls.RemoveMineAsync(asker);
             case MusicCommand.ClearQueue:
                 return await _musicControls.ClearQueueAsync(asker);
 
-            case MusicCommand.StartSession when session is null:
+            case MusicCommand.Start:
             {
-                // The menu goes where music does, wherever the request was made.
+                // "Now playing" goes where music does, wherever the request was made.
                 var musicChannel = _music.ChannelName.Length == 0 ? channel : _music.FindChannel(guild);
                 if (musicChannel is null)
                 {
@@ -355,29 +354,14 @@ public partial class ChatHandler
                                            "that channel yet.");
                 }
 
-                return await _musicSessions.OpenAsync(asker, musicChannel);
+                return await _musicControls.StartAsync(asker, musicChannel);
             }
 
-            case MusicCommand.StartSession or MusicCommand.BeginSession when session is { Started: false }:
-                return await _musicSessions.StartAsync(session, asker);
-
-            case MusicCommand.StartSession or MusicCommand.BeginSession when session is { Started: true }:
-                return MusicReply.Fail("The music session's already playing - ask me to play something to add your " +
-                                       "pick to the turns.");
-
-            case MusicCommand.BeginSession:
-                return MusicReply.Fail("There's no music session waiting to start. Say \"start a music session\" to " +
-                                       "open one, or \"play <song>\" to just play something.");
-
-            case MusicCommand.EndSession or MusicCommand.LeaveSession or MusicCommand.ShowSession when session is null:
-                return MusicReply.Fail("There's no music session right now. Say \"start a music session\" to open one.");
-
-            case MusicCommand.EndSession:
-                return await _musicSessions.EndAsync(session!, asker);
-            case MusicCommand.LeaveSession:
-                return await _musicSessions.LeaveAsync(session!, asker);
-            case MusicCommand.ShowSession:
-                return await _musicSessions.ShowMenuAsync(session!);
+            case MusicCommand.ShowMenu:
+                return await _musicQueue.MenuLinkAsync(guild.Id) is { } link
+                    ? MusicReply.Ok($"🎶 The music menu's [here]({link}) - it's pinned in the music channel.")
+                    : MusicReply.Fail("There's no music menu yet - a server admin can post one with `/music-menu` " +
+                                      "in the music channel. Meanwhile, ask me to play or add songs, or use `/queue`.");
 
             default:
                 return MusicReply.Fail("I'm not sure how to do that yet.");

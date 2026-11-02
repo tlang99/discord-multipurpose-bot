@@ -1,32 +1,46 @@
 using Discord;
 using Lavalink4NET.Players;
 using Lavalink4NET.Players.Queued;
+using Lavalink4NET.Protocol.Payloads.Events;
 using Lavalink4NET.Rest.Entities.Tracks;
+using Lavalink4NET.Tracks;
 using Microsoft.Extensions.Logging;
+using ModBot.Models;
 
 namespace ModBot.Modules.Music;
 
 public record MusicPlayerOptions : QueuedLavalinkPlayerOptions
 {
-    /// <summary>Where "Now playing" and playback errors get posted - the channel /play was first used in.</summary>
+    /// <summary>Where "Now playing" and playback errors get posted: the music channel.</summary>
     public ITextChannel? TextChannel { get; init; }
 
-    /// <summary>Told when songs start and when the player goes away (music sessions follow along).</summary>
+    /// <summary>Told when songs start and end and when the player goes away, so the standing queue can play the next
+    /// turn and keep its menu up to date.</summary>
     public MusicPlayerEvents? Events { get; init; }
 }
 
+/// <summary>A song from the standing queue, as the player plays it: keeps the saved song (and so who picked it).</summary>
+public sealed record QueueTrackItem(LavalinkTrack LavalinkTrack, QueuedSong Song) : ITrackQueueItem
+{
+    public TrackReference Reference => new(LavalinkTrack);
+
+    public LavalinkTrack Track => LavalinkTrack;
+
+    public string Identifier => LavalinkTrack.Identifier;
+
+    public T? As<T>() where T : class, ITrackQueueItem => this as T;
+}
+
 /// <summary>
-/// A queued Lavalink player that announces each song as it starts, so people in the voice channel can see what's
-/// playing without running /nowplaying.
+/// The Lavalink player. It plays one song at a time: the standing queue (<see cref="MusicQueueService"/>) holds what's
+/// waiting and hands over the next turn when a song ends, so Lavalink's own queue stays empty. Announces each song as
+/// it starts, so people in the voice channel can see what's playing.
 /// </summary>
 public sealed class MusicPlayer : QueuedLavalinkPlayer
 {
     private readonly ITextChannel? _textChannel;
     private readonly MusicPlayerEvents? _events;
     private readonly ILogger _logger;
-
-    // The song /play started directly is already announced in that command's reply, so skip it once here.
-    private string? _skipAnnouncementFor;
     private string? _lastAnnounced;
 
     public MusicPlayer(IPlayerProperties<MusicPlayer, MusicPlayerOptions> properties)
@@ -36,14 +50,6 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
         _events = properties.Options.Value.Events;
         _logger = properties.Logger;
     }
-
-    /// <summary>The channel announcements go to.</summary>
-    public ITextChannel? TextChannel => _textChannel;
-
-    public void SuppressNextAnnouncement(string trackIdentifier) => _skipAnnouncementFor = trackIdentifier;
-
-    /// <summary>Undoes <see cref="SuppressNextAnnouncement"/> when the song never started.</summary>
-    public void ClearSuppressedAnnouncement() => _skipAnnouncementFor = null;
 
     protected override async ValueTask NotifyTrackStartedAsync(ITrackQueueItem track, CancellationToken cancellationToken = default)
     {
@@ -60,19 +66,36 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
             return;
         }
 
-        var suppressed = identifier == _skipAnnouncementFor;
-        _skipAnnouncementFor = null;
-
         // On a looped song, announcing every repeat would just spam the channel.
         var repeat = RepeatMode == TrackRepeatMode.Track && identifier == _lastAnnounced;
         _lastAnnounced = identifier;
-        if (suppressed || repeat)
+        if (repeat)
         {
             return;
         }
 
         await SendAsync(MusicFormatting.NowPlayingEmbed(track.Track!, this,
-            track is SessionTrackItem pick ? $"Now playing - {pick.PickerName}'s pick" : "Now playing"));
+            track is QueueTrackItem item ? $"Now playing - {item.Song.PickerName}'s pick" : "Now playing"));
+    }
+
+    protected override async ValueTask NotifyTrackEndedAsync(ITrackQueueItem queueItem, TrackEndReason endReason,
+        CancellationToken cancellationToken = default)
+    {
+        // A looped song that can't load would otherwise be retried forever.
+        if (endReason == TrackEndReason.LoadFailed && RepeatMode == TrackRepeatMode.Track)
+        {
+            RepeatMode = TrackRepeatMode.None;
+        }
+
+        await base.NotifyTrackEndedAsync(queueItem, endReason, cancellationToken);
+
+        // Finished or failed: time for the next turn - unless the song is looping, which the base player replays.
+        // Stopped/replaced means a skip or /stop, which already decided what happens next.
+        var looped = endReason == TrackEndReason.Finished && RepeatMode == TrackRepeatMode.Track;
+        if (_events is not null && endReason is (TrackEndReason.Finished or TrackEndReason.LoadFailed) && !looped)
+        {
+            await _events.RaiseTrackEndedAsync(this, queueItem, endReason);
+        }
     }
 
     protected override async ValueTask DisposeAsyncCore()
@@ -95,11 +118,11 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
         if (_textChannel is not null)
         {
             // The real reason is in the log (one line per YouTube client tried); for the channel, the likely causes.
-            var next = Queue.Count > 0 ? "Skipping to the next song." : "Nothing else is queued.";
             await SendAsync(new EmbedBuilder()
                 .WithColor(Color.Red)
                 .WithDescription($"⚠️ YouTube wouldn't let me play {MusicFormatting.TrackLink(track.Track)}. It may be " +
-                                 $"age-restricted or blocked in this region, or YouTube is blocking the bot right now. {next}")
+                                 "age-restricted or blocked in this region, or YouTube is blocking the bot right now. " +
+                                 "Moving on to the next turn.")
                 .Build());
         }
     }
