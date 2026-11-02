@@ -156,6 +156,19 @@ it out (in `/lfg-setup` and the panel) until that's fixed. Removing the role alw
 - **Duplicates over losses:** a reminder is only removed after it's sent. If the bot stops at exactly that moment, the
   reminder is sent again on restart rather than lost.
 
+**Polls** — `/poll question:<text> answers:<a, b, c>` posts one of Discord's native polls in that channel:
+- **Answers:** up to 10, separated by commas, or by `|` if an answer has a comma in it (`Yes, tonight | No`). Leave
+  `answers` out for a Yes/No poll. Repeated answers are dropped.
+- **Options:** `hours` sets how long it runs (default `Polls:DefaultHours`, 24; up to 768, Discord's 32-day limit),
+  and `multiple:True` lets people pick more than one answer.
+- **Discord does the rest:** voting, live counts, closing on time and posting the result. The bot stores nothing.
+- **Ending early:** right-click the poll → **Apps** → **End poll**. It works for whoever asked for the poll and for
+  moderators (Move Members or Manage Messages). Discord only lets a poll's author end it, and that's the bot, so it
+  reads who asked from the "📊 Poll by @name" line above the poll (which doesn't ping).
+- **Rules:** the person needs **Send Messages** and **Create Polls** in the channel, the question and answers go
+  through the word filter (auto-mod on, moderators exempt), and each person can post one poll every
+  `Polls:CooldownSeconds` (60).
+
 **Command list** — `/help` shows members the commands they can use (LFG and music, with links to the channels
 they work in), visible only to them. `/help-post` (Manage Server) posts the same list in the current channel and
 pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
@@ -195,6 +208,14 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
     limits, delivered as a reply to that message. It's recognised without the model: a reminder phrase ("remind me",
     "set a reminder", "ping me") plus a time the reminder parser understands. Without a time ("remind me to eat") it's
     just chat, and the bot explains how to ask. Adding reminders to the model's check made it worse at the others.
+  - **Polls:** "@bot make a poll: what should we play? ranked, casual or zombies" posts the poll as a reply, like
+    `/poll`, with the same rules. "for 2 days" sets the length and "multiple choice" allows several answers. Like
+    reminders, it's recognised without the model, by a poll phrase ("make a poll", "start a vote", "poll everyone",
+    or a message starting "poll:"). Questions such as "how do I make a poll?" are just chat. When the question and
+    answers are laid out plainly (`question? a, b or c`, or `question options: a, b`), they're read with fixed rules.
+    Otherwise the model pulls them out, and only answers the person actually wrote are kept, because small models
+    add their own. With no answers it's a Yes/No poll. "@bot end my poll" ends their newest open poll in the
+    channel, or the one they replied to.
   - **Music:** "@bot add mr brightside" (or "queue up…", "put … in the queue") just queues a song, like `/add`;
     "play …" also starts the music, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
     this song", "remove song 3", "remove my songs", "start the music", "where's the music menu?" and the rest of
@@ -222,6 +243,7 @@ Services/
   News/            INewsFeedReader (RSS/Atom parsing), built-in game feed presets, news embed formatting
   Lfg/             ILfgService - LFG post rules (join/leave/start/cancel/expiry), in memory, no Discord types
   Reminders/       ReminderService (set/list/cancel rules) and ReminderTimeParser ("in 2h", "tomorrow 9am")
+  Polls/           PollRules (Discord's poll limits) and PollRequestReader (poll requests in chat)
   Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
 EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
@@ -395,6 +417,7 @@ somewhere else.
 | `/help-post` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the list |
 | AI chat (mention the bot) | — | Send Messages; Read Message History for context; Add Reactions for the ⏳ cooldown hint |
 | `/remind`, `/reminders list`, `/reminders cancel` | — (you can only see and cancel your own) | Send Messages in the channel it's set in |
+| `/poll`, **End poll** | Send Messages and Create Polls in the channel (ending someone else's poll: Move Members or Manage Messages) | Send Messages, Create Polls; Read Message History for "end my poll" in chat |
 
 `/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose
 highest role is below yours (the server owner can act on anyone), and the bot's own role has to be above theirs too.

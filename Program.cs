@@ -59,6 +59,7 @@ BindOptions<NewsOptions>(NewsOptions.SectionName);
 var musicOptions = BindOptions<MusicOptions>(MusicOptions.SectionName);
 BindOptions<LfgOptions>(LfgOptions.SectionName);
 BindOptions<ReminderOptions>(ReminderOptions.SectionName);
+BindOptions<PollOptions>(PollOptions.SectionName);
 
 builder.Services.AddSingleton(new DiscordSocketConfig
 {
@@ -97,6 +98,7 @@ builder.Services.AddSingleton<ModBot.Services.Reminders.ReminderService>();
 builder.Services.AddSingleton<ModBot.Services.Reminders.IReminderSender, DiscordReminderSender>();
 builder.Services.AddSingleton<ModBot.Services.Reminders.ReminderDeliverer>();
 builder.Services.AddSingleton<IChatSettingsStore, JsonChatSettingsStore>();
+builder.Services.AddSingleton<ModBot.Modules.Polls.PollPoster>();
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();
 

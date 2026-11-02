@@ -8,8 +8,10 @@ using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Modules.Lfg;
 using ModBot.Modules.Music;
+using ModBot.Modules.Polls;
 using ModBot.Services.Chat;
 using ModBot.Services.Moderation;
+using ModBot.Services.Polls;
 using ModBot.Services.Reminders;
 using ModBot.Services.Storage;
 
@@ -32,10 +34,11 @@ public partial class ChatHandler
         "under 1,500 characters unless someone asks for detail. Reply only as yourself, in your own words. Never " +
         "start your reply with a name and a colon, and never write lines for anyone else. Use Discord markdown " +
         "sparingly. Never write @everyone or @here, and don't try to ping people. Never claim you played, skipped, " +
-        "paused or stopped a song, changed the queue, started the music, posted an LFG or set a reminder: those " +
-        "requests are handled separately, so if someone asks how, tell them to ask you directly (e.g. \"play <song>\", " +
-        "\"add <song> to the queue\", \"skip this\", \"show the queue\", \"start the music\", \"make an LFG for " +
-        "ranked\" or \"remind me in 20 minutes to check the oven\" - reminders need a time) or see /help. How the " +
+        "paused or stopped a song, changed the queue, started the music, posted an LFG, set a reminder or posted or " +
+        "ended a poll: those requests are handled separately, so if someone asks how, tell them to ask you directly " +
+        "(e.g. \"play <song>\", \"add <song> to the queue\", \"skip this\", \"show the queue\", \"start the music\", " +
+        "\"make an LFG for ranked\", \"remind me in 20 minutes to check the oven\" - reminders need a time - \"make a " +
+        "poll: what should we play? ranked, casual or zombies\" or \"end my poll\") or see /help. How the " +
         "music works: there's one standing queue anyone can add to any time, even when nothing's playing; songs play " +
         "in turns, one from each person; skipping a song takes votes from more than half the listeners, unless you " +
         "picked it; and there's a pinned music menu with buttons in the music channel.";
@@ -47,6 +50,7 @@ public partial class ChatHandler
     private readonly MusicQueueService _musicQueue;
     private readonly LfgPoster _lfgPoster;
     private readonly ReminderService _reminders;
+    private readonly PollPoster _polls;
     private readonly IGuildSettingsStore _settingsStore;
     private readonly ChatPersonality _personality;
     private readonly ChatOptions _options;
@@ -55,7 +59,7 @@ public partial class ChatHandler
 
     public ChatHandler(IChatService chat, ChatActionParser actionParser, MusicService music,
         MusicControls musicControls, MusicQueueService musicQueue, LfgPoster lfgPoster,
-        ReminderService reminders,
+        ReminderService reminders, PollPoster polls,
         IGuildSettingsStore settingsStore, ChatPersonality personality, IOptions<ChatOptions> options,
         ILogger<ChatHandler> logger)
     {
@@ -66,6 +70,7 @@ public partial class ChatHandler
         _musicQueue = musicQueue;
         _lfgPoster = lfgPoster;
         _reminders = reminders;
+        _polls = polls;
         _settingsStore = settingsStore;
         _personality = personality;
         _options = options.Value;
@@ -125,9 +130,10 @@ public partial class ChatHandler
             try
             {
                 // "Play X" / "make an LFG" are done, not chatted about. Only the asker's own message is looked at.
-                if (_options.Actions && message.Author is SocketGuildUser)
+                if (_options.Actions && message.Author is SocketGuildUser &&
+                    Describe(message, guild, bot.Id, noteAttachments: false) is { Length: > 0 } request)
                 {
-                    action = await _actionParser.ParseAsync(question);
+                    action = await _actionParser.ParseAsync(request);
                 }
 
                 if (action is null)
@@ -165,7 +171,7 @@ public partial class ChatHandler
                     else
                     {
                         (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)message.Author, channel,
-                            message.Id);
+                            message);
                     }
                 }
                 catch (Exception ex)
@@ -173,6 +179,12 @@ public partial class ChatHandler
                     // Lavalink or Discord failing mid-action: say so instead of leaving the request unanswered.
                     _logger.LogWarning(ex, "Chat action {Action} failed in guild {GuildId}.", action.GetType().Name, guild.Id);
                     text = "Something went wrong doing that - try again in a bit, or use the slash command.";
+                }
+
+                // A posted poll is its own answer (it's a reply to the request); every other action replies.
+                if (action is CreatePollAction && text.Length == 0)
+                {
+                    return;
                 }
 
                 // Song and playlist titles are third-party text, so action replies follow the word rules too.
@@ -210,12 +222,14 @@ public partial class ChatHandler
     /// Does what the message asked, as the person who asked, through the same code as /play, /lfg and /remind (so the
     /// same rules apply: in a voice channel to play, one open LFG each, the reminder limits). Music and LFG posts go to
     /// their own channels wherever the request was made; reminders are delivered here, replying to the request.
-    /// Returns the reply, and whether to hide link previews in it.
+    /// Polls are posted right here, as a reply to the request. Returns the reply (empty when the action already
+    /// answered), and whether to hide link previews in it.
     /// </summary>
     private async Task<(string Text, bool SuppressEmbeds)> RunActionAsync(ChatAction action, SocketGuildUser asker,
-        SocketTextChannel channel, ulong requestMessageId)
+        SocketTextChannel channel, SocketUserMessage request)
     {
         var guild = channel.Guild;
+        var requestMessageId = request.Id;
         switch (action)
         {
             case PlayMusicAction play:
@@ -267,6 +281,28 @@ public partial class ChatHandler
                     sourceMessageId: requestMessageId);
                 return (result.Message, false);
             }
+
+            case CreatePollAction poll:
+            {
+                var check = PollRules.Check(poll.Question, poll.Answers, poll.Hours ?? _polls.DefaultHours,
+                    poll.AllowMultiple);
+                if (check.Draft is not { } draft)
+                {
+                    return (check.Problem!, false);
+                }
+
+                // The poll is the answer; only a problem gets a reply of its own.
+                return (await _polls.PostReplyAsync(asker, channel, draft, request, poll.FromModel) ?? "", false);
+            }
+
+            case UnclearPollAction:
+                return ("I couldn't tell what the poll should ask, or what the choices are. Try \"make a poll: what " +
+                        "should we play? ranked, casual or zombies\", or use `/poll`.", false);
+
+            case EndPollAction end:
+                // The reply's own target, which is there even when Discord doesn't attach the message itself.
+                return (await _polls.EndRequestedAsync(asker, channel, request.Reference?.MessageId.ToNullable(),
+                    end.SaidMine), true);
 
             case UnclearSongAction:
                 return ("I couldn't tell which song you want - try \"play <song name>\", or use `/play`.", false);
@@ -513,8 +549,9 @@ public partial class ChatHandler
     }
 
     /// <summary>The message as readable text: mentions turned into names (the bot's own mention dropped), custom
-    /// emoji into :name:, and a note for attachments.</summary>
-    private static string Describe(IMessage message, SocketGuild guild, ulong botId)
+    /// emoji into :name:, and a note for attachments (unless <paramref name="noteAttachments"/> is false: the action
+    /// parser gets the words alone, or the note would end up in a poll answer).</summary>
+    private static string Describe(IMessage message, SocketGuild guild, ulong botId, bool noteAttachments = true)
     {
         var text = UserMentionRegex().Replace(message.Content, m =>
         {
@@ -525,7 +562,7 @@ public partial class ChatHandler
         text = ChannelMentionRegex().Replace(text, m => "#" + (guild.GetChannel(ulong.Parse(m.Groups[1].Value))?.Name ?? "channel"));
         text = CustomEmojiRegex().Replace(text, m => $":{m.Groups[1].Value}:").Trim();
 
-        if (message.Attachments.Count > 0)
+        if (noteAttachments && message.Attachments.Count > 0)
         {
             text = $"{text} [{message.Attachments.Count} attachment(s)]".Trim();
         }

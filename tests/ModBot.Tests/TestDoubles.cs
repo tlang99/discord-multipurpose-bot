@@ -21,7 +21,8 @@ internal sealed class NoServerPersonality : IChatSettingsStore
 }
 
 /// <summary>A chat service that answers with fixed text, or throws.</summary>
-internal sealed class FakeChat(string reply, bool fail = false) : IChatService
+/// <param name="failJson">Also throw from <see cref="CompleteJsonAsync"/>, like a model that's down.</param>
+internal sealed class FakeChat(string reply, bool fail = false, bool failJson = false) : IChatService
 {
     public int Calls { get; private set; }
 
@@ -33,7 +34,8 @@ internal sealed class FakeChat(string reply, bool fail = false) : IChatService
     }
 
     public Task<string> CompleteJsonAsync(string systemPrompt, string userMessage, string jsonSchema,
-        CancellationToken cancellationToken = default) => Task.FromResult(reply);
+        CancellationToken cancellationToken = default)
+        => failJson ? throw new ChatServiceException("boom") : Task.FromResult(reply);
 }
 
 /// <summary>A JSON reminder store in a temp folder, deleted afterwards.</summary>
