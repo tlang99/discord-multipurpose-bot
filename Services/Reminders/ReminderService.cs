@@ -15,7 +15,7 @@ public record ReminderResult(bool Success, string Message, Reminder? Reminder = 
 /// Setting, listing and cancelling reminders, shared by /remind and the chatbot ("remind me in 20 minutes to check
 /// the oven") so both follow the same rules: a time the parser understands, between a minute and
 /// <see cref="ReminderOptions.MaxDays"/> away, the server's word filter, and a cap per person. Delivery is
-/// ReminderDeliveryService's job.
+/// <see cref="ReminderDeliverer"/>'s job.
 /// </summary>
 public class ReminderService
 {

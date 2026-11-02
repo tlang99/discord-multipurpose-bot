@@ -104,6 +104,8 @@ builder.Services.AddSingleton<IWarningStore, JsonWarningStore>();
 builder.Services.AddSingleton<INewsSubscriptionStore, JsonNewsSubscriptionStore>();
 builder.Services.AddSingleton<IReminderStore, JsonReminderStore>();
 builder.Services.AddSingleton<ModBot.Services.Reminders.ReminderService>();
+builder.Services.AddSingleton<ModBot.Services.Reminders.IReminderSender, DiscordReminderSender>();
+builder.Services.AddSingleton<ModBot.Services.Reminders.ReminderDeliverer>();
 builder.Services.AddSingleton<IChatSettingsStore, JsonChatSettingsStore>();
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();
