@@ -110,6 +110,30 @@ public class PollRequestReaderTests
         Assert.True(request.AllowMultiple);
     }
 
+    [Fact]
+    public void Joins_a_question_before_the_phrase_to_answers_after_it()
+    {
+        var request = PollRequestReader.Read("what should we play tonight? make a poll: ranked or casual");
+
+        Assert.NotNull(request);
+        Assert.Equal("what should we play tonight?", request.Question);
+        Assert.Equal(["ranked", "casual"], request.Answers);
+    }
+
+    [Theory]
+    [InlineData("hey what's up, make a poll: pizza or tacos?")]
+    [InlineData("i want to know what you all think, make a poll: ranked or casual?")]
+    public void A_question_word_earlier_in_the_sentence_doesnt_block_it(string message)
+        => Assert.NotNull(PollRequestReader.Read(message));
+
+    [Theory]
+    [InlineData("what should we eat tonight?", true)]
+    [InlineData("Which map?", true)]
+    [InlineData("Game night on Friday?", false)]
+    [InlineData("Should we play ranked?", false)]
+    public void Spots_open_questions(string question, bool expected)
+        => Assert.Equal(expected, PollRequestReader.IsOpenQuestion(question));
+
     [Theory]
     [InlineData("is game night friday? can you make a poll?", "is game night friday?")]
     [InlineData("pizza or tacos? make a poll pls", "pizza or tacos?")]
@@ -167,6 +191,10 @@ public class PollRequestReaderTests
     [InlineData("the poll was rigged lol")]
     [InlineData("what did the poll say")]
     [InlineData("i voted in the poll")]
+    [InlineData("don't make a poll yet")]
+    [InlineData("did you make a poll?")]
+    [InlineData("should we make a poll?")]
+    [InlineData("lol we should do a vote on that")]
     [InlineData("start a vote to skip this song")] // the music's vote skip
     [InlineData("make a vote skip happen")]
     public void Ignores_non_requests(string message) => Assert.Null(PollRequestReader.Read(message));
@@ -203,7 +231,7 @@ public class PollRequestReaderTests
 
     [Fact]
     public void Keeps_emoji_answers_the_person_wrote()
-        => Assert.Equal(["🍕", "🌮"], PollRequestReader.KeepAnswersFrom("🍕 or 🌮", ["🍕", "🌮", "🍔"]));
+        => Assert.Equal(["🍕", "🌮"], PollRequestReader.KeepAnswersFrom("🍕 or 🌮?", ["🍕", "🌮", "🍔"]));
 }
 
 public sealed class ChatPollParsingTests : IDisposable
@@ -261,6 +289,19 @@ public sealed class ChatPollParsingTests : IDisposable
 
         Assert.Equal(PollRules.YesNo, Assert.IsType<CreatePollAction>(action).Answers);
     }
+
+    [Fact]
+    public async Task An_open_question_without_choices_asks_for_them()
+    {
+        var chat = new FakeChat("""{"question":"What should we eat tonight?","answers":[]}""");
+
+        Assert.IsType<UnclearPollAction>(await Parser(chat).ParseAsync("make a poll: what should we eat tonight"));
+    }
+
+    [Fact]
+    public async Task A_model_thats_down_is_reported_not_blamed_on_the_wording()
+        => await Assert.ThrowsAsync<ChatServiceException>(
+            () => Parser(new FakeChat("", fail: true, failJson: true)).ParseAsync("make a poll about the raid"));
 
     [Fact]
     public async Task A_model_failure_asks_again_instead_of_guessing()

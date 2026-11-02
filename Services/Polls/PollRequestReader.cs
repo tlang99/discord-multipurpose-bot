@@ -35,19 +35,27 @@ public static partial class PollRequestReader
 
         // What comes after the phrase is the poll; if nothing does ("is game night friday? make a poll for 2 days"),
         // what came before is. The length and multiple-choice wording come off first, so they don't count as the poll.
+        // The lead-in to the phrase isn't part of it either: "is game night friday? can you [make a poll]".
         var text = TakeSettings(message[(phrase.Index + phrase.Length)..], ref hours, ref allowMultiple);
+        var before = TrailingLeadInRegex().Replace(message[..phrase.Index], "");
         if (NothingLeftRegex().IsMatch(StripFiller(text)))
         {
-            // Without the lead-in to the phrase: "is game night friday? can you [make a poll]".
-            text = TakeSettings(TrailingLeadInRegex().Replace(message[..phrase.Index], ""), ref hours,
-                ref allowMultiple);
+            text = TakeSettings(before, ref hours, ref allowMultiple);
+        }
+        else if (!text.Contains('?') && !OptionsLabelRegex().IsMatch(text) && LastQuestion(before) is { } question)
+        {
+            // The question first and the answers after: "what should we play? make a poll: ranked or casual".
+            text = $"{question} {StripFiller(text)}";
         }
 
         // Line breaks are kept: they can separate answers.
         text = StripFiller(SpacesRegex().Replace(text, " "));
-        var (question, answers) = ReadLaidOut(text);
-        return new PollRequest(text, hours, allowMultiple, question, answers);
+        var (laidOutQuestion, answers) = ReadLaidOut(text);
+        return new PollRequest(text, hours, allowMultiple, laidOutQuestion, answers);
     }
+
+    /// <summary>A question Yes and No don't answer: "what should we eat?", "which map?", "who's coming?".</summary>
+    public static bool IsOpenQuestion(string question) => OpenQuestionRegex().IsMatch(question);
 
     /// <summary>True for "end my poll", "close the poll please", "can you stop this vote". Ending can't be undone, so
     /// the whole message has to be the request: "don't end my poll yet" or "who's going to close the poll?" aren't.</summary>
@@ -98,7 +106,8 @@ public static partial class PollRequestReader
     public static IReadOnlyList<string> KeepAnswersFrom(string message, IEnumerable<string> answers)
     {
         var listed = ListMarked(message, Normalize);
-        var listedAsWritten = ListMarked(message, t => WhitespaceRegex().Replace(t, " ").Trim());
+        var listedAsWritten = ListMarked(message,
+            t => TrailingPunctuationRegex().Replace(WhitespaceRegex().Replace(t, " ").Trim(), "").TrimStart(':', ' '));
         bool InList(string list, string answer) => list.Contains($" {answer} |") || list.Contains($"| {answer} ");
 
         var kept = new List<string>();
@@ -180,12 +189,30 @@ public static partial class PollRequestReader
         return text;
     }
 
-    /// <summary>"how do I make a poll": asking about it, not asking for it. Only the sentence the phrase is in counts,
-    /// so a poll question written first ("what should we play tonight? make a poll") is still a request.</summary>
+    /// <summary>
+    /// "how do I make a poll", "don't make a poll yet", "did you make a poll?", "we should do a vote": talking about
+    /// a poll, not asking for one. Only the part of the sentence right before the phrase counts (back to the last
+    /// comma or sentence end), so "what should we play tonight? make a poll" and "hey what's up, make a poll" are
+    /// still requests.
+    /// </summary>
     private static bool IsQuestionAbout(string message, int phraseIndex)
     {
         var before = message[..phraseIndex];
-        return QuestionLeadRegex().IsMatch(before[(before.LastIndexOfAny(['?', '.', '!', '\n']) + 1)..]);
+        return QuestionLeadRegex().IsMatch(before[(before.LastIndexOfAny(['?', '.', '!', '\n', ',']) + 1)..]);
+    }
+
+    /// <summary>The question that <paramref name="text"/> ends with ("lol ok. what should we play?" → "what should
+    /// we play?"), or null if it doesn't end with one.</summary>
+    private static string? LastQuestion(string text)
+    {
+        text = text.Trim();
+        if (text.Length < 2 || !text.EndsWith('?'))
+        {
+            return null;
+        }
+
+        var question = text[(text.LastIndexOfAny(['?', '.', '!', '\n'], text.Length - 2) + 1)..].Trim();
+        return question.Length > 1 ? question : null;
     }
 
     private static string Normalize(string text) => WhitespaceRegex().Replace(NonWordRegex().Replace(text.ToLowerInvariant(), " "), " ").Trim();
@@ -199,7 +226,7 @@ public static partial class PollRequestReader
     [GeneratedRegex(@"^\W*(?:(?:hey|yo|ok|okay|please|pls|can\s+you|could\s+you|would\s+you|will\s+you|go\s+ahead\s+and)[\s,]+)*(?:end|close|stop|finish|lock)\s+(?:the\s+|my\s+|this\s+|that\s+|our\s+)?(?:poll|vote)\b(?:[\s,]+(?:now|please|pls|early|for\s+me))*[\s.!?]*$", RegexOptions.IgnoreCase)]
     private static partial Regex EndRequestRegex();
 
-    [GeneratedRegex(@"\b(?:how|where|why|what)\b|\b(?:can|could|do|may|should)\s+i\b|\bis\s+there\b|\bare\s+you\s+able\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:how|where|why|what)\b|\b(?:can|could|do|may|should)\s+i\b|\bis\s+there\b|\bare\s+you\s+able\b|\b(?:don'?t|do\s+not|didn'?t|did|never|won'?t|shouldn'?t|no\s+need\s+to|not\s+going\s+to)\b|\b(?:should|could|shall)\s+we\b|\bwe\s+(?:should|could|might|can)\b|\blet'?s\s+not\b", RegexOptions.IgnoreCase)]
     private static partial Regex QuestionLeadRegex();
 
     /// <summary>"for 2 days", "for an hour", "for 3h", "for a week" (<c>length</c>), or "multiple choice", "allow
@@ -213,6 +240,9 @@ public static partial class PollRequestReader
     /// <summary>Not after "or": in "for 2 days or for a week" it's the last answer.</summary>
     [GeneratedRegex(@"(?<!\bor[\s,]*)[\s,]*(?:\band\s+)?\b" + SettingPattern + @"[\s.!]*$", RegexOptions.IgnoreCase)]
     private static partial Regex TrailingSettingRegex();
+
+    [GeneratedRegex(@"^\W*(?:what|which|who|whom|whose|where|when|how|why)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex OpenQuestionRegex();
 
     /// <summary>"can you", "could you please", "hey", "ok so" right before the poll phrase.</summary>
     [GeneratedRegex(@"(?:\b(?:hey|yo|ok|okay|so|please|pls|(?:can|could|would|will)\s+you(?:\s+please)?)[\s,]*)+$", RegexOptions.IgnoreCase)]

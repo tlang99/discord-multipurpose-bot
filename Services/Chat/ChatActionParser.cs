@@ -239,10 +239,22 @@ public partial class ChatActionParser
             var offered = json.RootElement.GetProperty("answers").EnumerateArray()
                 .Select(a => a.GetString() ?? "");
             var answers = PollRequestReader.KeepAnswersFrom(request.Text, offered);
-            return new CreatePollAction(question, answers.Count >= PollRules.MinAnswers ? answers : PollRules.YesNo,
-                request.Hours, request.AllowMultiple, FromModel: true);
+            if (answers.Count < PollRules.MinAnswers)
+            {
+                // No choices given: Yes/No, unless the question can't be answered that way ("what should we eat?").
+                if (PollRequestReader.IsOpenQuestion(question))
+                {
+                    return new UnclearPollAction();
+                }
+
+                answers = PollRules.YesNo;
+            }
+
+            return new CreatePollAction(question, answers, request.Hours, request.AllowMultiple, FromModel: true);
         }
-        catch (Exception ex) when (ex is ChatServiceException or JsonException or KeyNotFoundException or InvalidOperationException)
+        // A model that's down or misconfigured (ChatServiceException) isn't caught: the chat handler says what's wrong
+        // with the AI connection, rather than asking the person to reword a request that was fine.
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
         {
             _logger.LogDebug(ex, "Couldn't work out the poll from a chat message.");
             return new UnclearPollAction();
