@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UserSecretsId>7e2b6c6f-3b0f-4b9a-9b9e-modbot-secrets</UserSecretsId>
+    <!-- The test project lives under tests/; keep its files (and its bin/obj) out of the bot. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);tests/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

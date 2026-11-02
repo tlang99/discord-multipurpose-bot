@@ -67,6 +67,7 @@ builder.Services.Configure<SightengineOptions>(builder.Configuration.GetSection(
 builder.Services.Configure<NewsOptions>(builder.Configuration.GetSection(NewsOptions.SectionName));
 builder.Services.Configure<MusicOptions>(builder.Configuration.GetSection(MusicOptions.SectionName));
 builder.Services.Configure<LfgOptions>(builder.Configuration.GetSection(LfgOptions.SectionName));
+builder.Services.Configure<ReminderOptions>(builder.Configuration.GetSection(ReminderOptions.SectionName));
 var musicOptions = builder.Configuration.GetSection(MusicOptions.SectionName).Get<MusicOptions>() ?? new MusicOptions();
 
 builder.Services.AddSingleton(new DiscordSocketConfig
@@ -101,6 +102,10 @@ builder.Services.AddSingleton(provider => new InteractionService(
 builder.Services.AddSingleton<IGuildSettingsStore, JsonGuildSettingsStore>();
 builder.Services.AddSingleton<IWarningStore, JsonWarningStore>();
 builder.Services.AddSingleton<INewsSubscriptionStore, JsonNewsSubscriptionStore>();
+builder.Services.AddSingleton<IReminderStore, JsonReminderStore>();
+builder.Services.AddSingleton<ModBot.Services.Reminders.ReminderService>();
+builder.Services.AddSingleton<ModBot.Services.Reminders.IReminderSender, DiscordReminderSender>();
+builder.Services.AddSingleton<ModBot.Services.Reminders.ReminderDeliverer>();
 builder.Services.AddSingleton<IChatSettingsStore, JsonChatSettingsStore>();
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();
@@ -167,6 +172,7 @@ builder.Services.AddSingleton<ChatHandler>();
 builder.Services.AddHostedService<DiscordBotService>();
 builder.Services.AddHostedService<NewsPollingService>();
 builder.Services.AddHostedService<LfgExpiryService>();
+builder.Services.AddHostedService<ReminderDeliveryService>();
 
 var host = builder.Build();
 

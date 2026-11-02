@@ -115,6 +115,25 @@ above `@LFG` in Server Settings → Roles. Because members give themselves `@LFG
 gains any permission beyond `@everyone`'s, or a channel override that grants something, the bot refuses to hand
 it out (in `/lfg-setup` and the panel) until that's fixed. Removing the role always works.
 
+**Reminders** — `/remind when:<time> what:<text>` pings you in that channel when it's due:
+- **Times:** `when` takes relative times (`10m`, `2h30m`, `in 3 days`, `half an hour`) or clock times (`at 5pm`,
+  `tomorrow 9am`, `tonight at 8`). A clock time already past today means tomorrow, and `at 5` with no am/pm means
+  whichever comes next.
+- **Time zone:** clock times are read in `Reminders:TimeZone` (an IANA or Windows name; empty uses the bot machine's
+  zone). Replies use Discord timestamps, so everyone sees the time in their own zone.
+- **Managing:** `/reminders list` shows yours with a short code each, and `/reminders cancel id:<code>` cancels one.
+- **Limits:** between a minute and `Reminders:MaxDays` (365) away, and up to `Reminders:MaxPerUser` (25) pending per
+  person per server.
+- **Safety:** the text goes through the word filter when set (auto-mod on, moderators exempt), and the reminder only
+  pings its owner.
+- **Persistence:** reminders are saved in `data/reminders.json`. Ones that came due while the bot was offline are
+  delivered once it's back and ready, marked late. If the channel can't be used any more, the bot DMs the person
+  instead.
+- **Retries:** if neither works (say Discord is having a moment), it retries with growing gaps of 2, 4, 8… minutes, up
+  to an hour. It gives up after 10 attempts or a day.
+- **Duplicates over losses:** a reminder is only removed after it's sent. If the bot stops at exactly that moment, the
+  reminder is sent again on restart rather than lost.
+
 **Command list** — `/help` shows members the commands they can use (LFG and music, with links to the channels
 they work in), visible only to them. `/help-post` (Manage Server) posts the same list in the current channel and
 pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
@@ -150,6 +169,10 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
   - **Details:** the model turns requests like "put on some lofi beats" into a search, and YouTube links are used as
     written. LFG details (squad size, mode, rank, mic, PC/console only) are read with fixed keyword rules, because the
     small model invented details. Notes aren't read from chat; use `/lfg` for those.
+  - **Reminders:** "@bot remind me in 20 minutes to check the oven" sets a reminder like `/remind`, with the same
+    limits, delivered as a reply to that message. It's recognised without the model: a reminder phrase ("remind me",
+    "set a reminder", "ping me") plus a time the reminder parser understands. Without a time ("remind me to eat") it's
+    just chat, and the bot explains how to ask. Adding reminders to the model's check made it worse at the others.
   - **Turning it off:** `Chat:Actions: false`. Each mention then skips the extra check and just chats.
 - Turn the feature off with `Chat:Enabled: false`.
 
@@ -164,12 +187,14 @@ Services/
   ContentModeration/ IImageModerationService - image/GIF classification, implemented against Sightengine
   News/            INewsFeedReader (RSS/Atom parsing), built-in game feed presets, news embed formatting
   Lfg/             ILfgService - LFG post rules (join/leave/start/cancel/expiry), in memory, no Discord types
+  Reminders/       ReminderService (set/list/cancel rules) and ReminderTimeParser ("in 2h", "tomorrow 9am")
   Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
 EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
   Music/           Music commands plus the Lavalink player that announces songs (Lavalink4NET does the rest)
   Lfg/             /lfg command, its button handlers, and the LFG card's embed/buttons
 lavalink/          Config for the Lavalink music server (the server itself is downloaded, not committed)
+tests/            ModBot.Tests (xUnit): text readers, reminder rules, news write-up checks
 Hosting/           DiscordBotService - owns the client lifecycle and wires events to handlers
                    NewsPollingService - background timer that posts new articles for /news subscriptions
                    LfgExpiryService - closes LFG posts that didn't fill up in time
@@ -300,6 +325,18 @@ bot logs a warning at startup.
 dotnet run
 ```
 
+### Tests
+
+The tests in `tests/ModBot.Tests` cover the logic that's easy to get subtly wrong: reading times, reminder requests
+and LFG details from text, the reminder rules, and the news write-up checks. Run them with:
+
+```bash
+dotnet test tests/ModBot.Tests
+```
+
+While the bot is running its build output is locked; add `--artifacts-path ../modbot-test-build` to build the tests
+somewhere else.
+
 ## Permissions reference
 
 | Command | Required user permission | Required bot permission |
@@ -318,6 +355,7 @@ dotnet run
 | `/help` | — | — |
 | `/help-post` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the list |
 | AI chat (mention the bot) | — | Send Messages; Read Message History for context; Add Reactions for the ⏳ cooldown hint |
+| `/remind`, `/reminders list`, `/reminders cancel` | — (you can only see and cancel your own) | Send Messages in the channel it's set in |
 
 `/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose
 highest role is below yours (the server owner can act on anyone), and the bot's own role has to be above theirs too.

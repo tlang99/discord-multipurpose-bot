@@ -96,7 +96,10 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "`/pause` · `/resume` · `/skip` · `/stop`\n" +
                 "`/nowplaying` · `/queue` - see what's playing and what's next\n" +
                 "`/remove` · `/move` · `/shuffle` · `/loop` · `/clearqueue` - manage the queue\n" +
-                "Controls only work from the voice channel the bot is in.");
+                "Controls only work from the voice channel the bot is in.")
+            .AddField("⏰ Reminders",
+                "`/remind` - e.g. `when: in 2h` `what: start the raid`, and I'll ping you in that channel\n" +
+                "`/reminders list` · `/reminders cancel` - see or cancel yours");
 
         if (_chat.IsEnabled)
         {
@@ -104,8 +107,8 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 $"Mention {Context.Guild.CurrentUser.Mention} in a message, or reply to one of mine, and I'll answer. " +
                 "I read the last few messages in the channel for context." +
                 (_chat.Actions
-                    ? "\nYou can also just ask: \"play never gonna give you up\" or \"make an lfg for ranked, need 3 " +
-                      "more, mic required\"."
+                    ? "\nYou can also just ask: \"play never gonna give you up\", \"make an lfg for ranked, need 3 " +
+                      "more, mic required\" or \"remind me in 20 minutes to check the oven\"."
                     : ""));
         }
 
