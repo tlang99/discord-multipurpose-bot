@@ -191,9 +191,16 @@ saved in `data/server-settings.json`:
 - Admins can also switch features from chat: "@bot disable polls", "@bot turn music off for this server". Plain "turn
   off the music" still just stops the song.
 
-**Logs** — when a server adds or removes the bot, it's logged with the server's name and ID. Startup logs every server
-the bot is in. Every line logged while handling something from a server ends with `=> Server name (ID)`, and settings
-changes log who made them.
+**Logs** — shown in the console and also written to `logs/modbot-<date>.log`, one file per day, appended to. Files
+older than `Logging:File:RetainDays` days (default 5) are deleted at startup and each new day. Set `Logging:File:Folder`
+to empty to turn the files off. Each entry is one line, so a file can be searched by server name or ID:
+- **Servers:** when a server adds or removes the bot (name, ID, owner, member count), and at startup every server the
+  bot is in.
+- **Use:** every command, button and pop-up that works (who, which channel, how long it took) or fails (and why), each
+  chatbot answer and chat action, auto-mod removals, and settings changes with who made them. What people say to the
+  chatbot isn't logged, only that it answered.
+- **The server tag:** every line from a server ends with `=> Server name (ID)`.
+- **Less noise:** web-request and Lavalink chatter only shows at warning level and up.
 
 **AI chat** — mention the bot in a message (or reply to one of its messages) and it answers, using a model served
 by [Ollama](https://ollama.com): on the same machine by default, or Ollama's cloud (see Setup step 6).

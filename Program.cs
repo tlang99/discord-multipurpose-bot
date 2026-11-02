@@ -28,6 +28,15 @@ builder.Configuration.AddUserSecrets<BotOptions>(optional: true);
 // Show the "=> Server name (ID)" tag DiscordBotService puts on every log line from a server.
 builder.Logging.AddSimpleConsole(options => options.IncludeScopes = true);
 
+// Also keep the log in daily files (logs/modbot-<date>.log, the last Logging:File:RetainDays days, default 5).
+builder.Logging.AddProvider(new FileLoggerProvider(
+    builder.Configuration.GetSection("Logging:File").Get<FileLoggerOptions>() ?? new FileLoggerOptions()));
+
+// Every web request logs four lines and the music library logs every player change, which buries the bot's own
+// lines. Only their warnings and errors are kept, in the console and the file alike.
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+builder.Logging.AddFilter("Lavalink4NET", LogLevel.Warning);
+
 // appsettings.json is not committed (it holds each person's own settings); the template is appsettings.example.json.
 // Without it the bot still runs on the built-in defaults, but say so in case the copy step was missed.
 var missingAppSettings = !File.Exists(Path.Combine(builder.Environment.ContentRootPath, "appsettings.json"));
