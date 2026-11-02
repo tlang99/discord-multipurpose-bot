@@ -91,6 +91,9 @@ public class AutoModerationHandler
             return;
         }
 
+        _logger.LogInformation("Auto-mod removed a message from {User} ({UserId}) in #{Channel}: {Reason}.",
+            message.Author.Username, message.Author.Id, channel.Name, violationReason);
+
         await _moderationService.LogActionAsync(
             channel.Guild,
             "Auto-Moderation",

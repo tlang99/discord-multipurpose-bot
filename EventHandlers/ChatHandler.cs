@@ -222,6 +222,10 @@ public partial class ChatHandler
                     text = "Something went wrong doing that - try again in a bit, or use the slash command.";
                 }
 
+                _logger.LogInformation("Chat action {Action} for {User} ({UserId}) in #{Channel}: {Result}",
+                    action.GetType().Name.Replace("Action", ""), message.Author.Username, message.Author.Id,
+                    channel.Name, text.Length == 0 ? "done" : TextTools.Truncate(text.ReplaceLineEndings(" "), 150));
+
                 // A posted poll is its own answer (it's a reply to the request); every other action replies.
                 if (action is CreatePollAction && text.Length == 0)
                 {
@@ -256,6 +260,9 @@ public partial class ChatHandler
                     "Try asking another way.";
         }
 
+        // Not what was said, only that it happened: the conversation itself stays out of the log.
+        _logger.LogInformation("Chat answered {User} ({UserId}) in #{Channel} ({Length} characters).",
+            message.Author.Username, message.Author.Id, channel.Name, reply.Length);
         await ReplyAsync(message, reply);
     }
 

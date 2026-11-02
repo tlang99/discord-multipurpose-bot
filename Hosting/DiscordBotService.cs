@@ -137,9 +137,14 @@ public class DiscordBotService : BackgroundService
     private IDisposable? ServerScope(IGuild? guild)
         => guild is null ? null : _logger.BeginScope("{Server}", Describe(guild));
 
+    /// <summary>When each interaction arrived, so the "done" line can say how long it took. Commands run in the
+    /// background, so the start and the end are in different handlers.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, long> _started = new();
+
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction)
     {
         using var scope = ServerScope((interaction.Channel as IGuildChannel)?.Guild);
+        _started[interaction.Id] = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             var context = new SocketInteractionContext(_client, interaction);
@@ -163,15 +168,29 @@ public class DiscordBotService : BackgroundService
     /// </summary>
     private async Task OnInteractionExecutedAsync(ICommandInfo? command, IInteractionContext context, IResult result)
     {
+        var took = _started.TryRemove(context.Interaction.Id, out var start)
+            ? (long)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds
+            : -1;
+        var what = context.Interaction switch
+        {
+            ISlashCommandInteraction slash => $"/{slash.Data.Name}" +
+                                              (command?.Name is { } sub && sub != slash.Data.Name ? $" {sub}" : ""),
+            IComponentInteraction button => $"button {button.Data.CustomId}",
+            IModalInteraction modal => $"pop-up {modal.Data.CustomId}",
+            _ => command?.Name ?? "interaction",
+        };
+
+        // Successful use too, not just failures, so the log shows how each server uses the bot.
         if (result.IsSuccess)
         {
+            _logger.LogInformation("{What} by {User} ({UserId}) in #{Channel} - done in {Took} ms.", what,
+                context.User.Username, context.User.Id, (context.Channel as IGuildChannel)?.Name ?? "DM", took);
             return;
         }
 
-        // Exceptions are logged in full by the InteractionService's own Log event ("[App Commands]"), but without saying
-        // where, so this line names the server and who ran it.
+        // Exceptions are also logged in full by the InteractionService's own Log event ("[App Commands]"); this line
+        // adds who ran it and where. It already carries the server tag: it runs inside OnInteractionCreatedAsync's scope.
         var name = command?.Name ?? "unknown";
-        using var scope = ServerScope(context.Guild);
         _logger.Log(result.Error == InteractionCommandError.UnmetPrecondition ? LogLevel.Information : LogLevel.Warning,
             "/{Command} failed for user {UserId} in channel {ChannelId}: {Error} - {Reason}", name, context.User.Id,
             context.Channel?.Id, result.Error, result.ErrorReason);
