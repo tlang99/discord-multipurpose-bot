@@ -85,7 +85,8 @@ pointing to that channel. The bot leaves after `Music:IdleTimeoutSeconds`
 
 **Music sessions** — for listening together: everyone builds up a queue first, then the songs play in turns.
 - `/session open` posts a session menu with buttons: **Add song** (a pop-up), **Start**, **Vote skip**, **Leave**
-  and **End**. While a session is open, `/play` and "@bot play ..." add to it too.
+  and **End**. It's pinned so it's easy to find again (if the bot has Pin Messages), and unpinned when the session
+  ends. While a session is open, `/play` and "@bot play ..." add to it too.
 - Before it starts, anyone can add songs from anywhere. The host (whoever opened it) presses **Start** from a voice
   channel (or uses `/session start`), and the bot joins it. After that, adding a song means being in that channel.
 - **Turns:** one song from each person, in the order they joined, round and round, so someone who adds ten songs
@@ -376,7 +377,7 @@ somewhere else.
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work without being in voice; all music commands must be used in `#music`) | — |
-| `/session` | — (`start` and `end`: the session's host, or Move Members or Manage Messages; must be used in `#music`) | Send Messages, Embed Links (for the menu); Connect and Speak in the voice channel |
+| `/session` | — (`start` and `end`: the session's host, or Move Members or Manage Messages; must be used in `#music`) | Send Messages, Embed Links (for the menu); Pin Messages to pin it (optional); Connect and Speak in the voice channel |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
 | `/lfg-setup` | Manage Server, plus Send Messages and Pin Messages in that channel | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Pin Messages to pin the panel |
 | `/help` | — | — |

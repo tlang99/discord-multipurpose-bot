@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using Discord;
+using Discord.Net;
 using Discord.WebSocket;
 using Lavalink4NET.Players;
 using Lavalink4NET.Players.Queued;
@@ -110,7 +111,10 @@ public class MusicSessionService
                                    "messages there.");
         }
 
-        return MusicReply.Ok($"🎶 {user.Mention} opened a music session{MenuLinkText(session)}! Everyone add songs " +
+        // Pinned, so it's one click away however far the "Now playing" posts push it up.
+        var pinned = await TryPinAsync(session.Menu);
+        return MusicReply.Ok($"🎶 {user.Mention} opened a music session{MenuLinkText(session)}" +
+                             (pinned ? " (pinned)" : "") + "! Everyone add songs " +
                              "(the **Add song** button, `/play`, or just ask me), and when you're ready, " +
                              $"{user.Mention} presses **Start**. Songs take turns: one from each person, round and round.");
     }
@@ -463,8 +467,10 @@ public class MusicSessionService
             var old = session.Menu;
             session.Menu = await session.Channel.SendMessageAsync(embed: await BuildMenuAsync(session),
                 components: BuildButtons(session), allowedMentions: AllowedMentions.None);
+            await TryPinAsync(session.Menu);
             if (old is not null)
             {
+                // Deleting it unpins it too. If it can't be deleted, at least don't leave two menus pinned.
                 try
                 {
                     await old.DeleteAsync();
@@ -472,6 +478,7 @@ public class MusicSessionService
                 catch (Exception ex)
                 {
                     _logger.LogDebug(ex, "Couldn't delete an old music session menu.");
+                    await TryUnpinAsync(old);
                 }
             }
         }
@@ -530,10 +537,45 @@ public class MusicSessionService
                 m.Embed = embed;
                 m.Components = buttons;
             });
+
+            // An old session's menu has nothing left to do, and pins are limited (50 a channel).
+            if (endedNote is not null)
+            {
+                await TryUnpinAsync(menu);
+            }
         }
         finally
         {
             session.MenuLock.Release();
+        }
+    }
+
+    /// <summary>Pins the menu; false if the bot can't (it needs Pin Messages), which is fine: the menu works anyway.</summary>
+    private async Task<bool> TryPinAsync(IUserMessage menu)
+    {
+        try
+        {
+            await menu.PinAsync();
+            return true;
+        }
+        catch (HttpException ex)
+        {
+            _logger.LogInformation(ex, "Couldn't pin the music session menu in channel {ChannelId}.", menu.Channel.Id);
+            return false;
+        }
+    }
+
+    /// <summary>Unpins the menu. Tried even if pinning failed: the message object is a snapshot from when it was sent,
+    /// so it can't say whether it's pinned now (and a moderator may have pinned it by hand).</summary>
+    private async Task TryUnpinAsync(IUserMessage menu)
+    {
+        try
+        {
+            await menu.UnpinAsync();
+        }
+        catch (HttpException ex)
+        {
+            _logger.LogDebug(ex, "Couldn't unpin an old music session menu in channel {ChannelId}.", menu.Channel.Id);
         }
     }
 
