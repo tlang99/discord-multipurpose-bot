@@ -1,3 +1,4 @@
+using System.Reflection;
 using ModBot.Models;
 using ModBot.Services.Chat;
 using ModBot.Services.Storage;
@@ -52,5 +53,37 @@ internal sealed class TempReminderStore : IDisposable
         {
             Directory.Delete(_directory, recursive: true);
         }
+    }
+}
+
+/// <summary>
+/// A stand-in for any Discord.Net interface (a member, channel or server), built with <see cref="Create{T}"/>. It
+/// answers the members a test sets up, by name (e.g. "get_Id", "GetPermissions"), records every call, and refuses
+/// anything else, so a test fails loudly if the code under test starts relying on something new.
+/// </summary>
+public class DiscordFake : DispatchProxy
+{
+    public Dictionary<string, object?> Answers { get; private set; } = [];
+
+    /// <summary>The names of the members called, in order.</summary>
+    public List<string> Calls { get; } = [];
+
+    public static T Create<T>(Dictionary<string, object?> answers) where T : class
+    {
+        var fake = DispatchProxy.Create<T, DiscordFake>();
+        ((DiscordFake)(object)fake).Answers = answers;
+        return fake;
+    }
+
+    /// <summary>The fake behind <paramref name="proxy"/>, to look at its calls.</summary>
+    public static DiscordFake Of(object proxy) => (DiscordFake)proxy;
+
+    protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+    {
+        var name = targetMethod?.Name ?? "";
+        Calls.Add(name);
+        return Answers.TryGetValue(name, out var answer)
+            ? answer
+            : throw new NotSupportedException($"The fake doesn't support {name}.");
     }
 }

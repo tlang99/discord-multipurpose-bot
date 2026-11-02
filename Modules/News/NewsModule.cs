@@ -3,6 +3,7 @@ using Discord;
 using Discord.Interactions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.News;
@@ -17,6 +18,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 {
     private const int MaxSubscriptionsPerGuild = 10;
     private const int MaxKeywordsPerList = 100;
+    private const string NoSuchFeed = "No followed feed has that name - check `/news list`.";
 
     private readonly INewsSubscriptionStore _store;
     private readonly INewsFeedReader _feedReader;
@@ -109,7 +111,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 
         if (!found)
         {
-            await RespondAsync("No followed feed has that name - check `/news list`.", ephemeral: true);
+            await RespondAsync(NoSuchFeed, ephemeral: true);
             return;
         }
 
@@ -136,7 +138,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 
         if (!found)
         {
-            await RespondAsync("No followed feed has that name - check `/news list`.", ephemeral: true);
+            await RespondAsync(NoSuchFeed, ephemeral: true);
             return;
         }
 
@@ -157,7 +159,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
         var subscription = await _store.GetAsync(Context.Guild.Id, name.Trim());
         if (subscription is null)
         {
-            await RespondAsync("No followed feed has that name - check `/news list`.", ephemeral: true);
+            await RespondAsync(NoSuchFeed, ephemeral: true);
             return;
         }
 
@@ -176,7 +178,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
         var removed = await _store.RemoveAsync(Context.Guild.Id, name.Trim());
         await RespondAsync(removed
             ? $"Stopped following **{name.Trim().ToLowerInvariant()}**."
-            : "No followed feed has that name - check `/news list`.", ephemeral: true);
+            : NoSuchFeed, ephemeral: true);
     }
 
     [SlashCommand("list", "Lists the news feeds this server follows.")]
@@ -201,7 +203,7 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
         var subscription = await _store.GetAsync(Context.Guild.Id, name.Trim());
         if (subscription is null)
         {
-            await RespondAsync("No followed feed has that name - check `/news list`.", ephemeral: true);
+            await RespondAsync(NoSuchFeed, ephemeral: true);
             return;
         }
 
@@ -251,12 +253,9 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
             return;
         }
 
-        var botPermissions = Context.Guild.CurrentUser.GetPermissions(channel);
-        if (!botPermissions.ViewChannel || !botPermissions.SendMessages || !botPermissions.EmbedLinks)
+        if (ChannelAccess.WhyBotCantPostEmbeds(Context.Guild.CurrentUser, channel, "news") is { } problem)
         {
-            await RespondAsync(
-                $"I need **View Channel**, **Send Messages**, and **Embed Links** in {channel.Mention} to post news there.",
-                ephemeral: true);
+            await RespondAsync(problem, ephemeral: true);
             return;
         }
 

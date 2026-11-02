@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Discord;
 using ModBot.Models;
 
 namespace ModBot.Services.Moderation;
@@ -12,6 +13,15 @@ public static class TextFilter
     private static readonly Regex InviteLinkRegex = new(
         @"(discord\.gg|discord(?:app)?\.com/invite)/\S+",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>Members with Manage Messages aren't held to the word rules, anywhere they apply (auto-mod, chat,
+    /// reminders, song titles).</summary>
+    public static bool IsExempt(IGuildUser? user) => user?.GuildPermissions.ManageMessages == true;
+
+    /// <summary>Whether text from <paramref name="author"/> is checked: auto-mod is on and they aren't exempt. Pass
+    /// null for the bot's own text, which is always checked while auto-mod is on.</summary>
+    public static bool AppliesTo(GuildSettings settings, IGuildUser? author)
+        => settings.AutoModEnabled && !IsExempt(author);
 
     /// <summary>Why <paramref name="content"/> breaks the guild's text rules (e.g. "contained profanity"), or null if
     /// it doesn't. Ignores <see cref="GuildSettings.AutoModEnabled"/>; callers decide whether that applies.</summary>

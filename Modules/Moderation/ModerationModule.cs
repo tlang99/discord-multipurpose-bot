@@ -1,5 +1,6 @@
 using Discord;
 using Discord.Interactions;
+using ModBot.Models;
 using ModBot.Services.Moderation;
 using ModBot.Services.Storage;
 
@@ -20,85 +21,55 @@ public class ModerationModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("kick", "Kicks a member from the server.")]
     [RequireUserPermission(GuildPermission.KickMembers)]
     [RequireBotPermission(GuildPermission.KickMembers)]
-    public async Task KickAsync(
+    public Task KickAsync(
         IGuildUser user,
         [Summary(description: "Why this member is being kicked.")] string reason = "No reason provided")
-    {
-        await DeferAsync();
-        var result = await _moderationService.KickAsync(user, Context.User, reason);
-        await FollowupAsync(result.Message);
-    }
+        => RunAsync(() => _moderationService.KickAsync(user, Context.User, reason));
 
     [SlashCommand("ban", "Bans a user from the server.")]
     [RequireUserPermission(GuildPermission.BanMembers)]
     [RequireBotPermission(GuildPermission.BanMembers)]
-    public async Task BanAsync(
+    public Task BanAsync(
         IUser user,
         [Summary(description: "Why this user is being banned.")] string reason = "No reason provided",
         [Summary("delete-message-days", "Days of message history to delete (0-7).")]
         [MinValue(0)][MaxValue(7)] int deleteMessageDays = 0)
-    {
-        await DeferAsync();
-        var result = await _moderationService.BanAsync(Context.Guild, user, Context.User, reason, deleteMessageDays);
-        await FollowupAsync(result.Message);
-    }
+        => RunAsync(() => _moderationService.BanAsync(Context.Guild, user, Context.User, reason, deleteMessageDays));
 
     [SlashCommand("unban", "Unbans a user by their ID.")]
     [RequireUserPermission(GuildPermission.BanMembers)]
     [RequireBotPermission(GuildPermission.BanMembers)]
-    public async Task UnbanAsync(
+    public Task UnbanAsync(
         [Summary("user-id", "The Discord ID of the user to unban.")] string userId,
         [Summary(description: "Why this user is being unbanned.")] string reason = "No reason provided")
-    {
-        await DeferAsync();
-
-        if (!ulong.TryParse(userId, out var parsedId))
-        {
-            await FollowupAsync("That doesn't look like a valid user ID.");
-            return;
-        }
-
-        var result = await _moderationService.UnbanAsync(Context.Guild, parsedId, Context.User, reason);
-        await FollowupAsync(result.Message);
-    }
+        => RunAsync(() => ulong.TryParse(userId, out var parsedId)
+            ? _moderationService.UnbanAsync(Context.Guild, parsedId, Context.User, reason)
+            : Task.FromResult(ModerationResult.Fail("That doesn't look like a valid user ID.")));
 
     [SlashCommand("timeout", "Temporarily restricts a member from interacting in the server.")]
     [RequireUserPermission(GuildPermission.ModerateMembers)]
     [RequireBotPermission(GuildPermission.ModerateMembers)]
-    public async Task TimeoutAsync(
+    public Task TimeoutAsync(
         IGuildUser user,
         [Summary(description: "Duration of the timeout, in minutes (max 40320 = 28 days).")]
         [MinValue(1)][MaxValue(40320)] int minutes,
         [Summary(description: "Why this member is being timed out.")] string reason = "No reason provided")
-    {
-        await DeferAsync();
-        var duration = TimeSpan.FromMinutes(minutes);
-        var result = await _moderationService.TimeoutAsync(user, Context.User, duration, reason);
-        await FollowupAsync(result.Message);
-    }
+        => RunAsync(() => _moderationService.TimeoutAsync(user, Context.User, TimeSpan.FromMinutes(minutes), reason));
 
     [SlashCommand("untimeout", "Removes an active timeout from a member.")]
     [RequireUserPermission(GuildPermission.ModerateMembers)]
     [RequireBotPermission(GuildPermission.ModerateMembers)]
-    public async Task RemoveTimeoutAsync(
+    public Task RemoveTimeoutAsync(
         IGuildUser user,
         [Summary(description: "Why this timeout is being removed.")] string reason = "No reason provided")
-    {
-        await DeferAsync();
-        var result = await _moderationService.RemoveTimeoutAsync(user, Context.User, reason);
-        await FollowupAsync(result.Message);
-    }
+        => RunAsync(() => _moderationService.RemoveTimeoutAsync(user, Context.User, reason));
 
     [SlashCommand("warn", "Issues a warning to a member.")]
     [RequireUserPermission(GuildPermission.ModerateMembers)]
-    public async Task WarnAsync(
+    public Task WarnAsync(
         IUser user,
         [Summary(description: "Why this member is being warned.")] string reason = "No reason provided")
-    {
-        await DeferAsync();
-        var result = await _moderationService.WarnAsync(Context.Guild, user, Context.User, reason);
-        await FollowupAsync(result.Message);
-    }
+        => RunAsync(() => _moderationService.WarnAsync(Context.Guild, user, Context.User, reason));
 
     [SlashCommand("warnings", "Lists the warnings a member has received.")]
     [RequireUserPermission(GuildPermission.ModerateMembers)]
@@ -172,5 +143,14 @@ public class ModerationModule : InteractionModuleBase<SocketInteractionContext>
             reason: $"Deleted {deletable.Count} message(s) in #{channel.Name}");
 
         await FollowupAsync($"Deleted **{deletable.Count}** message(s).", ephemeral: true);
+    }
+
+    /// <summary>Acknowledges first (moderation actions can take longer than Discord's 3 seconds), then posts the
+    /// result publicly.</summary>
+    private async Task RunAsync(Func<Task<ModerationResult>> action)
+    {
+        await DeferAsync();
+        var result = await action();
+        await FollowupAsync(result.Message);
     }
 }

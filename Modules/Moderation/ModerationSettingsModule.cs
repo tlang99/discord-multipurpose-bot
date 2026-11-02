@@ -1,5 +1,6 @@
 using Discord;
 using Discord.Interactions;
+using ModBot.Models;
 using ModBot.Services.ContentModeration;
 using ModBot.Services.Moderation;
 using ModBot.Services.Storage;
@@ -57,58 +58,34 @@ public class AutoModModule : InteractionModuleBase<SocketInteractionContext>
     }
 
     [SlashCommand("enable", "Turns automatic content moderation on or off.")]
-    public async Task EnableAsync(bool enabled)
-    {
-        await _settingsStore.UpdateAsync(Context.Guild.Id, s => s.AutoModEnabled = enabled);
-        await RespondAsync($"Auto-moderation is now **{(enabled ? "enabled" : "disabled")}**.");
-    }
+    public Task EnableAsync(bool enabled) => ToggleAsync(s => s.AutoModEnabled = enabled, "Auto-moderation", enabled);
 
     [SlashCommand("block-invites", "Turns automatic deletion of Discord invite links on or off.")]
-    public async Task BlockInvitesAsync(bool enabled)
-    {
-        await _settingsStore.UpdateAsync(Context.Guild.Id, s => s.BlockInviteLinks = enabled);
-        await RespondAsync($"Blocking invite links is now **{(enabled ? "enabled" : "disabled")}**.");
-    }
+    public Task BlockInvitesAsync(bool enabled)
+        => ToggleAsync(s => s.BlockInviteLinks = enabled, "Blocking invite links", enabled);
 
     [SlashCommand("profanity-filter", "Turns the built-in profanity word filter on or off.")]
-    public async Task ProfanityFilterAsync(bool enabled)
-    {
-        await _settingsStore.UpdateAsync(Context.Guild.Id, s => s.ProfanityFilterEnabled = enabled);
-        await RespondAsync($"The built-in profanity filter is now **{(enabled ? "enabled" : "disabled")}**.");
-    }
+    public Task ProfanityFilterAsync(bool enabled)
+        => ToggleAsync(s => s.ProfanityFilterEnabled = enabled, "The built-in profanity filter", enabled);
 
     [SlashCommand("image-moderation", "Turns automatic scanning of images/GIFs for explicit, suggestive, or offensive content on or off.")]
-    public async Task ImageModerationAsync(bool enabled)
-    {
-        await _settingsStore.UpdateAsync(Context.Guild.Id, s => s.ImageModerationEnabled = enabled);
-
-        var warning = enabled && !_imageModerationService.IsConfigured
-            ? "\n⚠️ No image moderation provider is configured yet (no Sightengine API credentials), so this will have no effect until one is set up."
-            : string.Empty;
-
-        await RespondAsync($"Image/GIF content scanning is now **{(enabled ? "enabled" : "disabled")}**.{warning}");
-    }
+    public Task ImageModerationAsync(bool enabled)
+        => ToggleAsync(s => s.ImageModerationEnabled = enabled, "Image/GIF content scanning", enabled,
+            enabled && !_imageModerationService.IsConfigured
+                ? "\n⚠️ No image moderation provider is configured yet (no Sightengine API credentials), so this will have no effect until one is set up."
+                : "");
 
     [SlashCommand("block-explicit-images", "Turns automatic removal of explicit images/GIFs on or off.")]
-    public async Task BlockExplicitImagesAsync(bool enabled)
-    {
-        await _settingsStore.UpdateAsync(Context.Guild.Id, s => s.BlockExplicitImages = enabled);
-        await RespondAsync($"Blocking explicit images/GIFs is now **{(enabled ? "enabled" : "disabled")}**.");
-    }
+    public Task BlockExplicitImagesAsync(bool enabled)
+        => ToggleAsync(s => s.BlockExplicitImages = enabled, "Blocking explicit images/GIFs", enabled);
 
     [SlashCommand("block-suggestive-images", "Turns automatic removal of suggestive (but not explicit) images/GIFs on or off.")]
-    public async Task BlockSuggestiveImagesAsync(bool enabled)
-    {
-        await _settingsStore.UpdateAsync(Context.Guild.Id, s => s.BlockSuggestiveImages = enabled);
-        await RespondAsync($"Blocking suggestive images/GIFs is now **{(enabled ? "enabled" : "disabled")}**.");
-    }
+    public Task BlockSuggestiveImagesAsync(bool enabled)
+        => ToggleAsync(s => s.BlockSuggestiveImages = enabled, "Blocking suggestive images/GIFs", enabled);
 
     [SlashCommand("block-offensive-images", "Turns automatic removal of offensive images/GIFs (hate symbols, obscene gestures) on or off.")]
-    public async Task BlockOffensiveImagesAsync(bool enabled)
-    {
-        await _settingsStore.UpdateAsync(Context.Guild.Id, s => s.BlockOffensiveImages = enabled);
-        await RespondAsync($"Blocking offensive images/GIFs is now **{(enabled ? "enabled" : "disabled")}**.");
-    }
+    public Task BlockOffensiveImagesAsync(bool enabled)
+        => ToggleAsync(s => s.BlockOffensiveImages = enabled, "Blocking offensive images/GIFs", enabled);
 
     [SlashCommand("scan-nsfw-channels", "Controls whether channels marked NSFW in Discord are still scanned for images/GIFs.")]
     public async Task ScanNsfwChannelsAsync(bool enabled)
@@ -168,5 +145,12 @@ public class AutoModModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         await RespondAsync($"Banned words: `{string.Join("`, `", settings.BannedWords)}`", ephemeral: true);
+    }
+
+    /// <summary>Saves an on/off setting and says "<paramref name="what"/> is now **enabled**" (or disabled).</summary>
+    private async Task ToggleAsync(Action<GuildSettings> set, string what, bool enabled, string note = "")
+    {
+        await _settingsStore.UpdateAsync(Context.Guild.Id, set);
+        await RespondAsync($"{what} is now **{(enabled ? "enabled" : "disabled")}**.{note}");
     }
 }

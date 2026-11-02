@@ -52,23 +52,10 @@ public class AutoModerationHandler
 
     public async Task HandleMessageAsync(SocketMessage rawMessage)
     {
-        if (rawMessage is not SocketUserMessage message)
-        {
-            return;
-        }
-
-        if (message.Author.IsBot || message.Author.IsWebhook)
-        {
-            return;
-        }
-
-        if (message.Channel is not SocketTextChannel channel)
-        {
-            return;
-        }
-
-        if (message.Author is SocketGuildUser author &&
-            author.GuildPermissions.ManageMessages)
+        if (rawMessage is not SocketUserMessage message ||
+            message.Author.IsBot || message.Author.IsWebhook ||
+            message.Channel is not SocketTextChannel channel ||
+            TextFilter.IsExempt(message.Author as SocketGuildUser))
         {
             return;
         }

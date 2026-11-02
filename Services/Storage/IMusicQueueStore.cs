@@ -13,4 +13,12 @@ public interface IMusicQueueStore
     /// <summary>Changes the server's queue in one locked step (so two changes at once can't undo each other) and
     /// returns what <paramref name="change"/> returned.</summary>
     Task<T> MutateAsync<T>(ulong guildId, Func<MusicQueueState, T> change);
+
+    /// <summary>Changes the server's queue in one locked step.</summary>
+    Task MutateAsync(ulong guildId, Action<MusicQueueState> change)
+        => MutateAsync(guildId, state =>
+        {
+            change(state);
+            return true;
+        });
 }

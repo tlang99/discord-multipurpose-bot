@@ -1,6 +1,7 @@
 using Discord;
 using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
+using ModBot.Common;
 using ModBot.Models;
 using ModBot.Services.Reminders;
 
@@ -43,7 +44,7 @@ public class DiscordReminderSender : IReminderSender
         }
 
         return guild.GetChannel(reminder.ChannelId) is { } channel and IMessageChannel &&
-               ReminderPermissions.CanPost(member, channel) && ReminderPermissions.CanPost(guild.CurrentUser, channel)
+               ChannelAccess.CanPost(member, channel) && ChannelAccess.CanPost(guild.CurrentUser, channel)
             ? ReminderRecipient.CanPostInChannel
             : ReminderRecipient.CantPostInChannel;
     }

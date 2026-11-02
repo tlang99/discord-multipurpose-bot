@@ -2,6 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.Lfg;
@@ -32,27 +33,18 @@ public class LfgPoster
     }
 
     /// <summary>The configured LFG channel's name, or empty when LFG posts can go anywhere.</summary>
-    public string ChannelName => _options.ChannelName.Trim().TrimStart('#');
+    public string ChannelName => ConfiguredChannels.ChannelName(_options.ChannelName);
 
-    public string PingRoleName => _options.PingRoleName.Trim().TrimStart('@');
+    public string PingRoleName => ConfiguredChannels.RoleName(_options.PingRoleName);
 
     public TimeSpan PingCooldown => TimeSpan.FromMinutes(Math.Max(0, _options.PingCooldownMinutes));
 
     public TimeSpan Lifetime => TimeSpan.FromMinutes(Math.Clamp(_options.ExpiryMinutes, 5, 24 * 60));
 
     /// <summary>The configured LFG channel, or null if the server doesn't have it.</summary>
-    public ITextChannel? FindChannel(SocketGuild guild)
-        => ChannelName.Length == 0
-            ? null
-            : guild.TextChannels.FirstOrDefault(c => c.Name.Equals(ChannelName, StringComparison.OrdinalIgnoreCase));
+    public ITextChannel? FindChannel(SocketGuild guild) => ConfiguredChannels.Find(guild, ChannelName);
 
-    public IRole? FindPingRole(SocketGuild guild)
-    {
-        var name = PingRoleName;
-        return name.Length == 0
-            ? null
-            : guild.Roles.FirstOrDefault(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-    }
+    public IRole? FindPingRole(SocketGuild guild) => ConfiguredChannels.FindRole(guild, PingRoleName);
 
     /// <summary>Posts the card in <paramref name="channel"/> for <paramref name="host"/>, pinging the LFG role if
     /// allowed. The channel is the caller's decision; this only checks the bot can post there.</summary>
@@ -60,11 +52,9 @@ public class LfgPoster
         LfgDetails details, string? note)
     {
         var guild = host.Guild;
-        var botPermissions = guild.CurrentUser.GetPermissions(channel);
-        if (!botPermissions.ViewChannel || !botPermissions.SendMessages || !botPermissions.EmbedLinks)
+        if (ChannelAccess.WhyBotCantPostEmbeds(guild.CurrentUser, channel, "LFGs") is { } problem)
         {
-            return new(false, $"I need **View Channel**, **Send Messages**, and **Embed Links** in {channel.Mention} " +
-                              "to post LFGs there.");
+            return new(false, problem);
         }
 
         note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
@@ -143,6 +133,5 @@ public class LfgPoster
             CardLink(post));
     }
 
-    private static string CardLink(LfgPost post)
-        => $"https://discord.com/channels/{post.GuildId}/{post.ChannelId}/{post.MessageId}";
+    private static string CardLink(LfgPost post) => MessageTools.Link(post.GuildId, post.ChannelId, post.MessageId);
 }

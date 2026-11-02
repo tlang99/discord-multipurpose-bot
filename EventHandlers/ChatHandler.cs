@@ -4,6 +4,7 @@ using Discord;
 using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Modules.Lfg;
 using ModBot.Modules.Music;
@@ -89,18 +90,15 @@ public partial class ChatHandler
             return;
         }
 
-        var permissions = bot.GetPermissions(channel);
-        var canSend = channel is SocketThreadChannel ? permissions.SendMessagesInThreads : permissions.SendMessages;
-        if (!permissions.ViewChannel || !canSend)
+        if (!ChannelAccess.CanPost(bot, channel))
         {
             return;
         }
 
         // Auto-mod is about to remove a question that breaks the word filter; don't answer it.
         var settings = await _settingsStore.GetAsync(guild.Id);
-        var filterApplies = settings.AutoModEnabled &&
-                            (message.Author as SocketGuildUser)?.GuildPermissions.ManageMessages != true;
-        if (filterApplies && TextFilter.FindViolation(message.Content, settings) is not null)
+        if (TextFilter.AppliesTo(settings, message.Author as SocketGuildUser) &&
+            TextFilter.FindViolation(message.Content, settings) is not null)
         {
             return;
         }
@@ -196,10 +194,7 @@ public partial class ChatHandler
 
         reply ??= "I couldn't come up with an answer right now - try again in a bit.";
 
-        if (reply.Length > DiscordMessageLimit)
-        {
-            reply = reply[..(DiscordMessageLimit - 3)].TrimEnd() + "...";
-        }
+        reply = TextTools.Truncate(reply, DiscordMessageLimit);
 
         // The model can be talked into saying anything, so its answers follow the same word rules as members.
         if (settings.AutoModEnabled && TextFilter.FindViolation(reply, settings) is not null)
@@ -225,10 +220,9 @@ public partial class ChatHandler
         {
             case PlayMusicAction play:
             {
-                var musicChannel = _music.ChannelName.Length == 0 ? channel : _music.FindChannel(guild);
-                if (musicChannel is null)
+                if (MusicChannel(channel) is not { } musicChannel)
                 {
-                    return ($"Music goes in **#{_music.ChannelName}**, but this server doesn't have that channel yet.", false);
+                    return (ConfiguredChannels.Missing("Music goes", _music.ChannelName), false);
                 }
 
                 // Into the standing queue, in the person's turns. "Play" also starts the music if it isn't playing.
@@ -241,19 +235,13 @@ public partial class ChatHandler
 
             case CreateLfgAction lfg:
             {
-                var lfgChannel = _lfgPoster.ChannelName.Length == 0 ? channel : _lfgPoster.FindChannel(guild);
-                if (lfgChannel is null)
+                if (ConfiguredChannels.FindOr(guild, _lfgPoster.ChannelName, channel) is not { } lfgChannel)
                 {
-                    return ($"LFG posts go in **#{_lfgPoster.ChannelName}**, but this server doesn't have that channel yet.",
-                        false);
+                    return (ConfiguredChannels.Missing("LFG posts go", _lfgPoster.ChannelName), false);
                 }
 
                 // Posting for someone is only allowed where they could post themselves.
-                var askerPermissions = asker.GetPermissions(lfgChannel);
-                var askerCanSend = lfgChannel is IThreadChannel
-                    ? askerPermissions.SendMessagesInThreads
-                    : askerPermissions.SendMessages;
-                if (!askerPermissions.ViewChannel || !askerCanSend)
+                if (!ChannelAccess.CanPost(asker, lfgChannel))
                 {
                     return ($"You can't post in {lfgChannel.Mention}, so I can't post an LFG there for you.", false);
                 }
@@ -275,7 +263,7 @@ public partial class ChatHandler
 
                 // Same exemption as auto-mod: moderators aren't held to the word filter.
                 var result = await _reminders.CreateAtAsync(guild.Id, channel.Id, asker.Id, reminder.DueAt,
-                    reminder.Text, applyWordFilter: !asker.GuildPermissions.ManageMessages,
+                    reminder.Text, applyWordFilter: !TextFilter.IsExempt(asker),
                     sourceMessageId: requestMessageId);
                 return (result.Message, false);
             }
@@ -352,14 +340,9 @@ public partial class ChatHandler
             case MusicCommand.Start:
             {
                 // "Now playing" goes where music does, wherever the request was made.
-                var musicChannel = _music.ChannelName.Length == 0 ? channel : _music.FindChannel(guild);
-                if (musicChannel is null)
-                {
-                    return MusicReply.Fail($"Music goes in **#{_music.ChannelName}**, but this server doesn't have " +
-                                           "that channel yet.");
-                }
-
-                return await _musicControls.StartAsync(asker, musicChannel);
+                return MusicChannel(channel) is { } musicChannel
+                    ? await _musicControls.StartAsync(asker, musicChannel)
+                    : MusicReply.Fail(ConfiguredChannels.Missing("Music goes", _music.ChannelName));
             }
 
             case MusicCommand.ShowMenu:
@@ -372,6 +355,11 @@ public partial class ChatHandler
                 return MusicReply.Fail("I'm not sure how to do that yet.");
         }
     }
+
+    /// <summary>Where music goes for a request made in <paramref name="asked"/>: the music channel, or right there if
+    /// music isn't limited to one. Null if the server doesn't have the music channel.</summary>
+    private ITextChannel? MusicChannel(SocketTextChannel asked)
+        => ConfiguredChannels.FindOr(asked.Guild, _music.ChannelName, asked);
 
     /// <summary>All the text in an embed, for the word filter.</summary>
     private static string EmbedText(Embed? embed)

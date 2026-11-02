@@ -1,7 +1,8 @@
 using Discord;
 using Discord.Interactions;
-using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
+using ModBot.Services.Chat;
 using ModBot.Services.Storage;
 
 namespace ModBot.Modules.Chat;
@@ -24,12 +25,12 @@ public class ChatModule : InteractionModuleBase<SocketInteractionContext>
         private const string InputId = "personality";
 
         private readonly IChatSettingsStore _store;
-        private readonly ChatOptions _options;
+        private readonly ChatPersonality _personality;
 
-        public PersonalityModule(IChatSettingsStore store, IOptions<ChatOptions> options)
+        public PersonalityModule(IChatSettingsStore store, ChatPersonality personality)
         {
             _store = store;
-            _options = options.Value;
+            _personality = personality;
         }
 
         [SlashCommand("set", "Edit the chatbot's personality in a pop-up, starting from the current one.")]
@@ -93,20 +94,10 @@ public class ChatModule : InteractionModuleBase<SocketInteractionContext>
             await RespondAsync("The chatbot is back to its default personality.", ephemeral: true);
         }
 
-        private async Task<(string Text, bool IsCustom)> CurrentAsync()
-        {
-            var custom = await _store.GetPersonalityAsync(Context.Guild.Id);
-            if (!string.IsNullOrWhiteSpace(custom))
-            {
-                return (custom, true);
-            }
-
-            return (string.IsNullOrWhiteSpace(_options.Personality) ? ChatOptions.DefaultPersonality : _options.Personality,
-                false);
-        }
+        private Task<(string Text, bool IsCustom)> CurrentAsync() => _personality.GetWithSourceAsync(Context.Guild.Id);
 
         private static Embed PersonalityEmbed(string title, string text, string footer) => new EmbedBuilder()
-            .WithColor(new Color(0x5865F2))
+            .WithColor(Colors.Bot)
             .WithTitle(title)
             .WithDescription(text)
             .WithFooter(footer)

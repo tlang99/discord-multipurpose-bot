@@ -9,6 +9,7 @@ using Lavalink4NET.Tracks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.Storage;
@@ -54,7 +55,7 @@ public class MusicQueueService : IHostedService
     /// <summary>...and never more often than this.</summary>
     private static readonly TimeSpan RepostAtMostEvery = TimeSpan.FromMinutes(1);
 
-    private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _menuLocks = new();
+    private readonly KeyedLock<ulong> _menuLocks = new();
 
     /// <summary>Where each server's menu is, so every message in the server needn't read the saved queue to check.</summary>
     private readonly ConcurrentDictionary<ulong, (ulong ChannelId, ulong MessageId)> _menus = new();
@@ -112,7 +113,7 @@ public class MusicQueueService : IHostedService
         var playlistName = lookup.PlaylistName;
         var filtered = 0;
         var settings = await _settings.GetAsync(user.Guild.Id);
-        if (settings.AutoModEnabled && !user.GuildPermissions.ManageMessages)
+        if (TextFilter.AppliesTo(settings, user))
         {
             tracks = tracks.Where(t => TextFilter.FindViolation(t.Title, settings) is null).ToList();
             filtered = lookup.Tracks.Count - tracks.Count;
@@ -159,7 +160,7 @@ public class MusicQueueService : IHostedService
             ? $"**{added.Count}** songs from **{Format.Sanitize(playlistName!)}**" +
               (added.Count < songs.Count ? $" (the most you can have waiting is {SongsPerPerson})" : "") +
               (filtered > 0 ? $" (skipped {filtered} whose titles break the word filter)" : "")
-            : $"{SongLink(added[0])} ({SongLength(added[0])})";
+            : $"{MusicFormatting.SongLink(added[0])} ({MusicFormatting.SongLength(added[0])})";
         var text = new StringBuilder($"➕ {user.Mention} added {what}");
 
         var player = _music.GetPlayer(user.Guild.Id);
@@ -209,18 +210,12 @@ public class MusicQueueService : IHostedService
             return MusicReply.Fail(joinError);
         }
 
-        var playbackLock = await _music.AcquirePlaybackLockAsync(user.Guild.Id);
-        try
+        // Someone else may have started it while the bot was joining.
+        var started = await _music.WithPlaybackLockAsync(user.Guild.Id,
+            async () => player.CurrentItem is not null || await PlayNextLockedAsync(player));
+        if (!started)
         {
-            // Someone else may have started it while the bot was joining.
-            if (player.CurrentItem is null && !await PlayNextLockedAsync(player))
-            {
-                return MusicReply.Fail("There's nothing in the queue yet - add some songs first.");
-            }
-        }
-        finally
-        {
-            playbackLock.Release();
+            return MusicReply.Fail("There's nothing in the queue yet - add some songs first.");
         }
 
         return MusicReply.Ok($"▶️ {user.Mention} started the music in <#{player.VoiceChannelId}>.");
@@ -285,31 +280,33 @@ public class MusicQueueService : IHostedService
                                  $"(**{count}/{needed}** - more than half the listeners skips it).") with { Announce = false };
         }
 
-        bool next;
-        var playbackLock = await _music.AcquirePlaybackLockAsync(user.Guild.Id);
-        try
+        // Null when the song had already finished.
+        var next = await _music.WithPlaybackLockAsync<bool?>(user.Guild.Id, async () =>
         {
             // Only skip the song that was voted on: if it ended while the votes came in, the next one is innocent.
             if (player.CurrentItem is null || (player.CurrentItem as QueueTrackItem)?.Song.Id != song?.Id)
             {
-                return MusicReply.Fail("That song already finished.");
+                return null;
             }
 
             // A looped song is skipped for good, rather than the loop carrying on to the next person's song.
             player.RepeatMode = Lavalink4NET.Players.Queued.TrackRepeatMode.None;
-            next = await PlayNextLockedAsync(player);
-            if (!next)
+            var playedNext = await PlayNextLockedAsync(player);
+            if (!playedNext)
             {
                 await player.StopAsync();
             }
-        }
-        finally
+
+            return playedNext;
+        });
+
+        if (next is null)
         {
-            playbackLock.Release();
+            return MusicReply.Fail("That song already finished.");
         }
 
         return MusicReply.Ok($"⏭️ Skipped {MusicFormatting.TrackLink(current.Track)} ({reason})." +
-                             (next ? "" : " That was the last song in the queue."));
+                             (next.Value ? "" : " That was the last song in the queue."));
     }
 
     /// <summary>Removes the song at <paramref name="position"/> in play order: your own, or anyone's for moderators.</summary>
@@ -333,7 +330,7 @@ public class MusicQueueService : IHostedService
         }
 
         RefreshMenu(user.Guild.Id);
-        return MusicReply.Ok($"🗑️ Removed {SongLink(removed!)} from the queue.");
+        return MusicReply.Ok($"🗑️ Removed {MusicFormatting.SongLink(removed!)} from the queue.");
     }
 
     public async Task<MusicReply> RemoveMineAsync(SocketGuildUser user)
@@ -377,9 +374,7 @@ public class MusicQueueService : IHostedService
     public async Task<(bool Pinned, string? Error)> PostMenuAsync(ITextChannel channel)
     {
         var guildId = channel.GuildId;
-        var menuLock = _menuLocks.GetOrAdd(guildId, _ => new SemaphoreSlim(1, 1));
-        await menuLock.WaitAsync();
-        try
+        return await _menuLocks.RunAsync<(bool, string?)>(guildId, async () =>
         {
             var state = await _store.GetAsync(guildId);
             IUserMessage menu;
@@ -396,12 +391,11 @@ public class MusicQueueService : IHostedService
             }
 
             _menus[guildId] = (channel.Id, menu.Id);
-            var pinned = await TryPinAsync(menu);
+            var pinned = await MessageTools.TryPinAsync(menu, _logger, "the music menu");
             await _store.MutateAsync(guildId, s =>
             {
                 s.MenuChannelId = channel.Id;
                 s.MenuMessageId = menu.Id;
-                return true;
             });
 
             // Only one menu: take the old one down (deleting it unpins it too).
@@ -420,11 +414,7 @@ public class MusicQueueService : IHostedService
             }
 
             return (pinned, null);
-        }
-        finally
-        {
-            menuLock.Release();
-        }
+        });
     }
 
     /// <summary>A link to the server's menu, or null if none has been posted (or it's gone).</summary>
@@ -432,22 +422,14 @@ public class MusicQueueService : IHostedService
     {
         var state = await _store.GetAsync(guildId);
         return state.MenuChannelId is { } channelId && state.MenuMessageId is { } messageId
-            ? $"https://discord.com/channels/{guildId}/{channelId}/{messageId}"
+            ? MessageTools.Link(guildId, channelId, messageId)
             : null;
     }
 
     /// <summary>Redraws the menu in the background, so replies don't wait on it.</summary>
-    public void RefreshMenu(ulong guildId) => _ = Task.Run(async () =>
-    {
-        try
-        {
-            await RefreshMenuAsync(guildId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Couldn't update the music menu in guild {GuildId}.", guildId);
-        }
-    });
+    public void RefreshMenu(ulong guildId)
+        => Background.Run(_logger, () => RefreshMenuAsync(guildId), LogLevel.Debug,
+            "Couldn't update the music menu in guild {GuildId}.", guildId);
 
     /// <summary>Where "Now playing" goes: the music channel, else the menu's channel, else where the request was made.</summary>
     private async Task<ITextChannel> AnnouncementChannelAsync(SocketGuild guild, ITextChannel fallback)
@@ -492,46 +474,30 @@ public class MusicQueueService : IHostedService
     private Task OnTrackEndedAsync(MusicPlayer player, ITrackQueueItem item, TrackEndReason reason)
     {
         // Off the player's event so starting the next song never waits on (or inside) the event that ended this one.
-        _ = Task.Run(async () =>
+        Background.Run(_logger, async () =>
         {
             try
             {
                 if (reason == TrackEndReason.Finished && item is QueueTrackItem { Song: var song } &&
                     (await _store.GetAsync(player.GuildId)).LoopQueue)
                 {
-                    await _store.MutateAsync(player.GuildId, state =>
-                    {
-                        MusicQueueRules.Requeue(state, song);
-                        return true;
-                    });
+                    await _store.MutateAsync(player.GuildId, state => MusicQueueRules.Requeue(state, song));
                 }
 
-                var playbackLock = await _music.AcquirePlaybackLockAsync(player.GuildId);
-                try
+                await _music.WithPlaybackLockAsync(player.GuildId, async () =>
                 {
                     // A skip or /play may have started something else in the meantime; only move on if what's
                     // "current" is still the song that ended (or nothing).
                     var stillCurrent = player.CurrentItem is null ||
                                        (player.CurrentItem as QueueTrackItem)?.Song.Id == (item as QueueTrackItem)?.Song.Id;
-                    if (player.State != PlayerState.Destroyed && stillCurrent)
-                    {
-                        await PlayNextLockedAsync(player);
-                    }
-                }
-                finally
-                {
-                    playbackLock.Release();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Couldn't play the next song in guild {GuildId}.", player.GuildId);
+                    return player.State != PlayerState.Destroyed && stillCurrent && await PlayNextLockedAsync(player);
+                });
             }
             finally
             {
                 RefreshMenu(player.GuildId);
             }
-        });
+        }, LogLevel.Warning, "Couldn't play the next song in guild {GuildId}.", player.GuildId);
         return Task.CompletedTask;
     }
 
@@ -542,11 +508,8 @@ public class MusicQueueService : IHostedService
         return Task.CompletedTask;
     }
 
-    private async Task RefreshMenuAsync(ulong guildId)
-    {
-        var menuLock = _menuLocks.GetOrAdd(guildId, _ => new SemaphoreSlim(1, 1));
-        await menuLock.WaitAsync();
-        try
+    private Task RefreshMenuAsync(ulong guildId)
+        => _menuLocks.RunAsync(guildId, async () =>
         {
             var state = await _store.GetAsync(guildId);
             if (state.MenuChannelId is not { } channelId || state.MenuMessageId is not { } messageId)
@@ -566,8 +529,6 @@ public class MusicQueueService : IHostedService
                         s.MenuChannelId = null;
                         s.MenuMessageId = null;
                     }
-
-                    return true;
                 });
                 return;
             }
@@ -578,12 +539,7 @@ public class MusicQueueService : IHostedService
                 m.Embed = BuildMenu(state, player);
                 m.Components = BuildButtons(player);
             });
-        }
-        finally
-        {
-            menuLock.Release();
-        }
-    }
+        });
 
     private async Task<IUserMessage?> FetchMenuAsync(ulong channelId, ulong messageId)
     {
@@ -606,7 +562,7 @@ public class MusicQueueService : IHostedService
     private Embed BuildMenu(MusicQueueState state, MusicPlayer? player)
     {
         var embed = new EmbedBuilder()
-            .WithColor(new Color(0x1DB954))
+            .WithColor(Colors.Music)
             .WithTitle(MenuTitle)
             .WithFooter($"Songs play in turns: one from each person, round and round. Up to {SongsPerPerson} waiting " +
                         "each. Skipping takes votes from more than half the listeners - or the person who picked it." +
@@ -632,7 +588,8 @@ public class MusicQueueService : IHostedService
         var order = MusicQueueRules.Order(state);
         embed.AddField("Up next", order.Count == 0
             ? "*Nothing yet - press **Add song**, use `/add`, or ask me.*"
-            : FitField(order.Take(10).Select((s, i) => $"`{i + 1}.` {SongLink(s)} - <@{s.PickerId}>"), order.Count, "\n"));
+            : FitField(order.Take(10).Select((s, i) => $"`{i + 1}.` {MusicFormatting.SongLink(s)} - <@{s.PickerId}>"),
+                order.Count, "\n"));
 
         var turns = state.Participants.Where(p => state.Songs.Any(s => s.PickerId == p)).ToList();
         if (turns.Count > 0)
@@ -688,30 +645,6 @@ public class MusicQueueService : IHostedService
         }
 
         return text.ToString();
-    }
-
-    public static string SongLink(QueuedSong song)
-    {
-        var title = Format.Sanitize(song.Title.Length > 80 ? song.Title[..79] + "…" : song.Title);
-        return Uri.TryCreate(song.Uri, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
-            ? $"[{title.Replace("]", "\\]")}](<{uri.AbsoluteUri}>)"
-            : $"**{title}**";
-    }
-
-    public static string SongLength(QueuedSong song) => song.IsLiveStream ? "live" : MusicFormatting.Duration(song.Duration);
-
-    private async Task<bool> TryPinAsync(IUserMessage menu)
-    {
-        try
-        {
-            await menu.PinAsync();
-            return true;
-        }
-        catch (HttpException ex)
-        {
-            _logger.LogInformation(ex, "Couldn't pin the music menu in channel {ChannelId}.", menu.Channel.Id);
-            return false;
-        }
     }
 
     private async Task TryUnpinAsync(IUserMessage menu)
@@ -773,17 +706,8 @@ public class MusicQueueService : IHostedService
         {
             if (fromBot && channel.Guild.CurrentUser.GetPermissions(channel).ManageMessages)
             {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await message.DeleteAsync();
-                    }
-                    catch (HttpException ex)
-                    {
-                        _logger.LogDebug(ex, "Couldn't delete the pin notice for the music menu.");
-                    }
-                });
+                Background.Run(_logger, () => message.DeleteAsync(), LogLevel.Debug,
+                    "Couldn't delete the pin notice for the music menu.");
             }
 
             return Task.CompletedTask;
@@ -820,7 +744,7 @@ public class MusicQueueService : IHostedService
             timer.Pending = pending = new CancellationTokenSource();
         }
 
-        _ = Task.Run(async () =>
+        Background.Run(_logger, async () =>
         {
             try
             {
@@ -843,19 +767,12 @@ public class MusicQueueService : IHostedService
                 timer.LastRepost = DateTimeOffset.UtcNow;
             }
 
-            try
+            // Only if this is still where the menu lives (an admin may have moved it meanwhile).
+            if (_menus.TryGetValue(channel.GuildId, out var menu) && menu.ChannelId == channel.Id)
             {
-                // Only if this is still where the menu lives (an admin may have moved it meanwhile).
-                if (_menus.TryGetValue(channel.GuildId, out var menu) && menu.ChannelId == channel.Id)
-                {
-                    await PostMenuAsync(channel);
-                }
+                await PostMenuAsync(channel);
             }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Couldn't move the music menu to the bottom of channel {ChannelId}.", channel.Id);
-            }
-        });
+        }, LogLevel.Debug, "Couldn't move the music menu to the bottom of channel {ChannelId}.", channel.Id);
     }
 
     private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;

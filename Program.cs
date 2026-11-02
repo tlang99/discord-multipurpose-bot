@@ -29,46 +29,36 @@ builder.Configuration.AddUserSecrets<BotOptions>(optional: true);
 // Without it the bot still runs on the built-in defaults, but say so in case the copy step was missed.
 var missingAppSettings = !File.Exists(Path.Combine(builder.Environment.ContentRootPath, "appsettings.json"));
 
-// Allow plain env vars as a convenient alternative to the Section__Key syntax.
-var envToken = Environment.GetEnvironmentVariable("BOT_TOKEN");
-if (!string.IsNullOrWhiteSpace(envToken))
+// Plain env vars as a convenient alternative to the Section__Key syntax. OLLAMA_API_KEY is Ollama's own name for it,
+// so a key already set up for the Ollama CLI works here too.
+foreach (var (variable, key) in new[]
 {
-    builder.Configuration[$"{BotOptions.SectionName}:Token"] = envToken;
+    ("BOT_TOKEN", $"{BotOptions.SectionName}:Token"),
+    ("SIGHTENGINE_API_USER", $"{SightengineOptions.SectionName}:ApiUser"),
+    ("SIGHTENGINE_API_SECRET", $"{SightengineOptions.SectionName}:ApiSecret"),
+    ("LAVALINK_PASSWORD", $"{MusicOptions.SectionName}:LavalinkPassword"),
+    ("OLLAMA_API_KEY", $"{ChatOptions.SectionName}:ApiKey"),
+})
+{
+    if (Environment.GetEnvironmentVariable(variable) is { } value && !string.IsNullOrWhiteSpace(value))
+    {
+        builder.Configuration[key] = value;
+    }
 }
 
-var envSightengineUser = Environment.GetEnvironmentVariable("SIGHTENGINE_API_USER");
-if (!string.IsNullOrWhiteSpace(envSightengineUser))
+T BindOptions<T>(string section) where T : class, new()
 {
-    builder.Configuration[$"{SightengineOptions.SectionName}:ApiUser"] = envSightengineUser;
+    builder.Services.Configure<T>(builder.Configuration.GetSection(section));
+    return builder.Configuration.GetSection(section).Get<T>() ?? new T();
 }
 
-var envSightengineSecret = Environment.GetEnvironmentVariable("SIGHTENGINE_API_SECRET");
-if (!string.IsNullOrWhiteSpace(envSightengineSecret))
-{
-    builder.Configuration[$"{SightengineOptions.SectionName}:ApiSecret"] = envSightengineSecret;
-}
-
-var envLavalinkPassword = Environment.GetEnvironmentVariable("LAVALINK_PASSWORD");
-if (!string.IsNullOrWhiteSpace(envLavalinkPassword))
-{
-    builder.Configuration[$"{MusicOptions.SectionName}:LavalinkPassword"] = envLavalinkPassword;
-}
-
-// Ollama's own name for the variable, so a key already set up for the Ollama CLI works here too.
-var envOllamaKey = Environment.GetEnvironmentVariable("OLLAMA_API_KEY");
-if (!string.IsNullOrWhiteSpace(envOllamaKey))
-{
-    builder.Configuration[$"{ChatOptions.SectionName}:ApiKey"] = envOllamaKey;
-}
-
-builder.Services.Configure<BotOptions>(builder.Configuration.GetSection(BotOptions.SectionName));
-builder.Services.Configure<ChatOptions>(builder.Configuration.GetSection(ChatOptions.SectionName));
-builder.Services.Configure<SightengineOptions>(builder.Configuration.GetSection(SightengineOptions.SectionName));
-builder.Services.Configure<NewsOptions>(builder.Configuration.GetSection(NewsOptions.SectionName));
-builder.Services.Configure<MusicOptions>(builder.Configuration.GetSection(MusicOptions.SectionName));
-builder.Services.Configure<LfgOptions>(builder.Configuration.GetSection(LfgOptions.SectionName));
-builder.Services.Configure<ReminderOptions>(builder.Configuration.GetSection(ReminderOptions.SectionName));
-var musicOptions = builder.Configuration.GetSection(MusicOptions.SectionName).Get<MusicOptions>() ?? new MusicOptions();
+BindOptions<BotOptions>(BotOptions.SectionName);
+var chatOptions = BindOptions<ChatOptions>(ChatOptions.SectionName);
+BindOptions<SightengineOptions>(SightengineOptions.SectionName);
+BindOptions<NewsOptions>(NewsOptions.SectionName);
+var musicOptions = BindOptions<MusicOptions>(MusicOptions.SectionName);
+BindOptions<LfgOptions>(LfgOptions.SectionName);
+BindOptions<ReminderOptions>(ReminderOptions.SectionName);
 
 builder.Services.AddSingleton(new DiscordSocketConfig
 {
@@ -152,7 +142,6 @@ builder.Services.ConfigureInactivityTracking(options =>
 });
 
 // Chatbot: Ollama (ollama.com or self-hosted, see Chat:OllamaUrl) behind IChatService.
-var chatOptions = builder.Configuration.GetSection(ChatOptions.SectionName).Get<ChatOptions>() ?? new ChatOptions();
 builder.Services.AddHttpClient<IChatService, OllamaChatService>(client =>
 {
     if (Uri.TryCreate(chatOptions.OllamaUrl.TrimEnd('/') + "/", UriKind.Absolute, out var ollamaUri))
@@ -181,12 +170,17 @@ builder.Services.AddHostedService<ReminderDeliveryService>();
 
 var host = builder.Build();
 
+void WarnAtStartup(string category, string message, params object?[] args)
+#pragma warning disable CA2254 // Every message is a constant below.
+    => host.Services.GetRequiredService<ILoggerFactory>().CreateLogger(category).LogWarning(message, args);
+#pragma warning restore CA2254
+
 // The default Lavalink password is only acceptable while Lavalink is reachable from this machine alone. Pointed at
 // another machine (or a Docker port), it would leave the music server's control channel open over plain HTTP.
 if (musicOptions.LavalinkPassword == new MusicOptions().LavalinkPassword &&
     Uri.TryCreate(musicOptions.LavalinkUrl, UriKind.Absolute, out var lavalinkUri) && !lavalinkUri.IsLoopback)
 {
-    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Music").LogWarning(
+    WarnAtStartup("ModBot.Music",
         "Lavalink at {Url} is not on this machine but still uses the default password. Set the same new password " +
         "with LAVALINK_SERVER_PASSWORD for Lavalink and LAVALINK_PASSWORD for the bot (see lavalink/README.md).",
         musicOptions.LavalinkUrl);
@@ -194,7 +188,7 @@ if (musicOptions.LavalinkPassword == new MusicOptions().LavalinkPassword &&
 
 if (missingAppSettings)
 {
-    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot").LogWarning(
+    WarnAtStartup("ModBot",
         "No appsettings.json found in {Path}, so the built-in defaults are used. Copy appsettings.example.json to " +
         "appsettings.json to change settings.", builder.Environment.ContentRootPath);
 }
@@ -204,7 +198,7 @@ if (chatOptions.IsEnabled &&
     ollamaUrl.Host.EndsWith("ollama.com", StringComparison.OrdinalIgnoreCase) &&
     string.IsNullOrWhiteSpace(chatOptions.ApiKey))
 {
-    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Chat").LogWarning(
+    WarnAtStartup("ModBot.Chat",
         "The chatbot uses {Url} but no API key is set, so every reply will fail. Create one at " +
         "https://ollama.com/settings/keys and set it with OLLAMA_API_KEY (see README).", chatOptions.OllamaUrl);
 }

@@ -4,12 +4,8 @@ namespace ModBot.Services.Storage;
 
 public class JsonWarningStore : IWarningStore
 {
-    private readonly JsonFileRepository<List<Warning>> _repository;
-
-    public JsonWarningStore()
-    {
-        _repository = new JsonFileRepository<List<Warning>>(Path.Combine("data", "warnings.json"));
-    }
+    private readonly JsonFileRepository<List<Warning>> _repository =
+        JsonFileRepository<List<Warning>>.InDataFolder("warnings.json");
 
     public async Task<Warning> AddWarningAsync(ulong guildId, ulong userId, ulong moderatorId, string reason)
     {
@@ -21,43 +17,19 @@ public class JsonWarningStore : IWarningStore
             Reason = reason
         };
 
-        var key = Key(guildId, userId);
-        await _repository.MutateAsync(data =>
+        await _repository.MutateOrCreateAsync(Key(guildId, userId), () => [], list =>
         {
-            if (!data.TryGetValue(key, out var list))
-            {
-                list = new List<Warning>();
-                data[key] = list;
-            }
-
             list.Add(warning);
+            return true;
         });
-
         return warning;
     }
 
     public async Task<IReadOnlyList<Warning>> GetWarningsAsync(ulong guildId, ulong userId)
-    {
-        var list = await _repository.GetAsync(Key(guildId, userId));
-        return list ?? new List<Warning>();
-    }
+        => await _repository.GetAsync(Key(guildId, userId)) ?? [];
 
-    public async Task<int> ClearWarningsAsync(ulong guildId, ulong userId)
-    {
-        var key = Key(guildId, userId);
-        var removedCount = 0;
-
-        await _repository.MutateAsync(data =>
-        {
-            if (data.TryGetValue(key, out var list))
-            {
-                removedCount = list.Count;
-                data.Remove(key);
-            }
-        });
-
-        return removedCount;
-    }
+    public Task<int> ClearWarningsAsync(ulong guildId, ulong userId)
+        => _repository.MutateAsync(data => data.Remove(Key(guildId, userId), out var list) ? list.Count : 0);
 
     private static string Key(ulong guildId, ulong userId) => $"{guildId}:{userId}";
 }

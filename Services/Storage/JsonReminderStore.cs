@@ -16,95 +16,68 @@ public class JsonReminderStore : IReminderStore
         _repository = new JsonFileRepository<Reminder>(filePath);
     }
 
-    public async Task<ReminderAddResult> TryAddAsync(Reminder reminder, int maxPerUser)
-    {
-        var result = ReminderAddResult.Added;
-        await _repository.MutateAsync(data =>
+    public Task<ReminderAddResult> TryAddAsync(Reminder reminder, int maxPerUser)
+        => _repository.MutateAsync(data =>
         {
             if (data.ContainsKey(reminder.Id))
             {
-                result = ReminderAddResult.IdTaken;
+                return ReminderAddResult.IdTaken;
             }
-            else if (data.Values.Count(r => r.GuildId == reminder.GuildId && r.UserId == reminder.UserId) >= maxPerUser)
+
+            if (data.Values.Count(r => r.GuildId == reminder.GuildId && r.UserId == reminder.UserId) >= maxPerUser)
             {
-                result = ReminderAddResult.LimitReached;
+                return ReminderAddResult.LimitReached;
             }
-            else
-            {
-                data[reminder.Id] = reminder;
-            }
+
+            data[reminder.Id] = reminder;
+            return ReminderAddResult.Added;
         });
-        return result;
-    }
 
-    public async Task<IReadOnlyList<Reminder>> GetForUserAsync(ulong guildId, ulong userId)
-        => (await _repository.GetAllAsync())
-            .Where(r => r.GuildId == guildId && r.UserId == userId)
-            .OrderBy(r => r.DueAt)
-            .ToList();
+    public Task<IReadOnlyList<Reminder>> GetForUserAsync(ulong guildId, ulong userId)
+        => GetSortedAsync(r => r.GuildId == guildId && r.UserId == userId);
 
-    public async Task<IReadOnlyList<Reminder>> GetDueAsync(DateTimeOffset now)
-        => (await _repository.GetAllAsync())
-            .Where(r => r.DueAt <= now && (r.NextAttemptAt is null || r.NextAttemptAt <= now) &&
-                        (r.ClaimedUntil is null || r.ClaimedUntil <= now))
-            .OrderBy(r => r.DueAt)
-            .ToList();
+    public Task<IReadOnlyList<Reminder>> GetDueAsync(DateTimeOffset now)
+        => GetSortedAsync(r => r.DueAt <= now && (r.NextAttemptAt is null || r.NextAttemptAt <= now) &&
+                               !IsClaimed(r, now));
 
-    public async Task<bool> TryClaimAsync(string id, DateTimeOffset now, DateTimeOffset claimUntil)
-    {
-        var claimed = false;
-        await _repository.MutateAsync(data =>
+    public Task<bool> TryClaimAsync(string id, DateTimeOffset now, DateTimeOffset claimUntil)
+        => _repository.MutateAsync(data =>
         {
-            if (data.TryGetValue(id, out var reminder) && (reminder.ClaimedUntil is null || reminder.ClaimedUntil <= now))
+            if (!data.TryGetValue(id, out var reminder) || IsClaimed(reminder, now))
             {
-                reminder.ClaimedUntil = claimUntil;
-                claimed = true;
+                return false;
             }
-        });
-        return claimed;
-    }
 
-    public async Task<(ReminderCancelResult Result, Reminder? Reminder)> TryCancelAsync(string id, ulong guildId,
+            reminder.ClaimedUntil = claimUntil;
+            return true;
+        });
+
+    public Task<(ReminderCancelResult Result, Reminder? Reminder)> TryCancelAsync(string id, ulong guildId,
         ulong userId, DateTimeOffset now)
-    {
-        (ReminderCancelResult, Reminder?) result = (ReminderCancelResult.NotFound, null);
-        await _repository.MutateAsync(data =>
+        => _repository.MutateAsync<(ReminderCancelResult, Reminder?)>(data =>
         {
             if (!data.TryGetValue(id, out var reminder) || reminder.GuildId != guildId || reminder.UserId != userId)
             {
-                return;
+                return (ReminderCancelResult.NotFound, null);
             }
 
-            if (reminder.ClaimedUntil is { } until && until > now)
+            if (IsClaimed(reminder, now))
             {
-                result = (ReminderCancelResult.InFlight, reminder);
-                return;
+                return (ReminderCancelResult.InFlight, reminder);
             }
 
             data.Remove(id);
-            result = (ReminderCancelResult.Cancelled, reminder);
+            return (ReminderCancelResult.Cancelled, reminder);
         });
-        return result;
-    }
 
-    public async Task<bool> UpdateAsync(string id, Action<Reminder> update)
-    {
-        var found = false;
-        await _repository.MutateAsync(data =>
-        {
-            if (data.TryGetValue(id, out var reminder))
-            {
-                found = true;
-                update(reminder);
-            }
-        });
-        return found;
-    }
+    public Task<bool> UpdateAsync(string id, Action<Reminder> update) => _repository.UpdateAsync(id, update);
 
-    public async Task<bool> RemoveAsync(string id)
-    {
-        var removed = false;
-        await _repository.MutateAsync(data => removed = data.Remove(id));
-        return removed;
-    }
+    public Task<bool> RemoveAsync(string id) => _repository.RemoveAsync(id);
+
+    /// <summary>A delivery holds an unexpired claim on it.</summary>
+    private static bool IsClaimed(Reminder reminder, DateTimeOffset now)
+        => reminder.ClaimedUntil is { } until && until > now;
+
+    private async Task<IReadOnlyList<Reminder>> GetSortedAsync(Func<Reminder, bool> filter)
+        => (await _repository.GetAllAsync()).Where(filter).OrderBy(r => r.DueAt).ToList();
 }

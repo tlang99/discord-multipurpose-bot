@@ -21,19 +21,6 @@ public class JsonMusicQueueStore : IMusicQueueStore
 
     public Task<IReadOnlyCollection<MusicQueueState>> GetAllAsync() => _repository.GetAllAsync();
 
-    public async Task<T> MutateAsync<T>(ulong guildId, Func<MusicQueueState, T> change)
-    {
-        T result = default!;
-        await _repository.MutateAsync(data =>
-        {
-            var key = guildId.ToString();
-            if (!data.TryGetValue(key, out var state))
-            {
-                data[key] = state = new MusicQueueState { GuildId = guildId };
-            }
-
-            result = change(state);
-        });
-        return result;
-    }
+    public Task<T> MutateAsync<T>(ulong guildId, Func<MusicQueueState, T> change)
+        => _repository.MutateOrCreateAsync(guildId.ToString(), () => new MusicQueueState { GuildId = guildId }, change);
 }

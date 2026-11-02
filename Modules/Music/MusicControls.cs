@@ -3,6 +3,7 @@ using Discord;
 using Discord.WebSocket;
 using Lavalink4NET.Players;
 using Lavalink4NET.Players.Queued;
+using ModBot.Common;
 using ModBot.Services.Moderation;
 
 namespace ModBot.Modules.Music;
@@ -162,14 +163,14 @@ public class MusicControls
         for (var i = start; i < Math.Min(start + QueuePageSize, order.Count); i++)
         {
             var song = order[i];
-            text.AppendLine($"`{i + 1}.` {MusicQueueService.SongLink(song)} ({MusicQueueService.SongLength(song)}) - " +
+            text.AppendLine($"`{i + 1}.` {MusicFormatting.SongLink(song)} ({MusicFormatting.SongLength(song)}) - " +
                             $"<@{song.PickerId}>");
         }
 
         var total = order.Where(s => !s.IsLiveStream).Aggregate(TimeSpan.Zero, (sum, s) => sum + s.Duration);
         var loop = player?.RepeatMode == TrackRepeatMode.Track ? "Current song" : state.LoopQueue ? "Whole queue" : "Off";
         var embed = new EmbedBuilder()
-            .WithColor(new Color(0x1DB954))
+            .WithColor(Colors.Music)
             .WithTitle("Queue - in turn order")
             .WithDescription(text.ToString())
             .WithFooter($"{order.Count} song(s) waiting · {MusicFormatting.Duration(total)} total · Loop: {loop} · " +
