@@ -2,7 +2,9 @@ using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
+using ModBot.Models;
 using ModBot.Services.Polls;
+using ModBot.Services.Settings;
 
 namespace ModBot.Modules.Polls;
 
@@ -20,6 +22,7 @@ public class PollModule : InteractionModuleBase<SocketInteractionContext>
         _logger = logger;
     }
 
+    [RequireFeature(ServerFeature.Polls)]
     [SlashCommand("poll", "Posts a poll in this channel. Leave out the answers for a Yes/No poll.")]
     public async Task PollAsync(
         [Summary("question", "What to ask")] [MaxLength(PollRules.MaxQuestionLength)] string question,

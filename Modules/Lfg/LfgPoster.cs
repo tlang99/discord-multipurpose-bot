@@ -6,6 +6,7 @@ using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.Lfg;
+using ModBot.Services.Settings;
 
 namespace ModBot.Modules.Lfg;
 
@@ -22,29 +23,55 @@ public class LfgPoster
     public const int MaxNoteLength = 100;
 
     private readonly ILfgService _lfg;
+    private readonly ServerSettingsService _serverSettings;
     private readonly LfgOptions _options;
     private readonly ILogger<LfgPoster> _logger;
 
-    public LfgPoster(ILfgService lfg, IOptions<LfgOptions> options, ILogger<LfgPoster> logger)
+    public LfgPoster(ILfgService lfg, ServerSettingsService serverSettings, IOptions<LfgOptions> options,
+        ILogger<LfgPoster> logger)
     {
         _lfg = lfg;
+        _serverSettings = serverSettings;
         _options = options.Value;
         _logger = logger;
     }
-
-    /// <summary>The configured LFG channel's name, or empty when LFG posts can go anywhere.</summary>
-    public string ChannelName => ConfiguredChannels.ChannelName(_options.ChannelName);
-
-    public string PingRoleName => ConfiguredChannels.RoleName(_options.PingRoleName);
 
     public TimeSpan PingCooldown => TimeSpan.FromMinutes(Math.Max(0, _options.PingCooldownMinutes));
 
     public TimeSpan Lifetime => TimeSpan.FromMinutes(Math.Clamp(_options.ExpiryMinutes, 5, 24 * 60));
 
-    /// <summary>The configured LFG channel, or null if the server doesn't have it.</summary>
-    public ITextChannel? FindChannel(SocketGuild guild) => ConfiguredChannels.Find(guild, ChannelName);
+    /// <summary>
+    /// Why members must not be able to give themselves this role, or null if it's safe. The panel lets anyone take the
+    /// ping role, so it must be harmless: any server permission, or a channel override that grants something (e.g.
+    /// access to a hidden channel), would let members escalate their own access just by clicking a button. Checked
+    /// when the role is picked (/settings lfg-pings), at /lfg-setup, and on every click.
+    /// </summary>
+    public static string? WhyUnsafeToSelfAssign(IGuild guild, IRole role)
+    {
+        if (role.Id == guild.EveryoneRole.Id)
+        {
+            return "is @everyone";
+        }
 
-    public IRole? FindPingRole(SocketGuild guild) => ConfiguredChannels.FindRole(guild, PingRoleName);
+        if (role.IsManaged)
+        {
+            return "belongs to an integration";
+        }
+
+        // Only permissions beyond what @everyone already has count: a manually created role comes with defaults like
+        // View Channels, which grant nothing new.
+        var extra = new GuildPermissions(role.Permissions.RawValue & ~guild.EveryoneRole.Permissions.RawValue);
+        if (extra.RawValue != 0)
+        {
+            var names = extra.ToList();
+            return $"has server permissions beyond @everyone's ({string.Join(", ", names.Take(3))}" +
+                   $"{(names.Count > 3 ? ", ..." : "")})";
+        }
+
+        var grantingChannel = (guild as SocketGuild)?.Channels.FirstOrDefault(c =>
+            c.GetPermissionOverwrite(role) is { AllowValue: not 0 });
+        return grantingChannel is null ? null : $"grants permissions in #{grantingChannel.Name}";
+    }
 
     /// <summary>Posts the card in <paramref name="channel"/> for <paramref name="host"/>, pinging the LFG role if
     /// allowed. The channel is the caller's decision; this only checks the bot can post there.</summary>
@@ -75,15 +102,19 @@ public class LfgPoster
 
         // Ping the opt-in LFG role, if the server has one - at most once per cooldown per host. When it doesn't ping,
         // say why in the host's confirmation instead of skipping silently.
-        var pingRole = FindPingRole(guild);
+        var ping = await _serverSettings.LfgPingRoleAsync(guild);
+        var pingRole = ping.Role;
         string? pingText = null;
         var pingMentions = AllowedMentions.None;
         string? pingStatus = null;
         if (pingRole is null)
         {
-            pingStatus = PingRoleName.Length == 0
+            pingStatus = ping.Off
                 ? null
-                : "No @LFG ping: pings aren't set up yet - a server admin can run `/lfg-setup`.";
+                : ping.Name.Length == 0
+                    ? "No ping: the LFG ping role this server picked has been deleted - a server admin can pick " +
+                      "another with `/settings lfg-pings`."
+                    : $"No @{ping.Name} ping: pings aren't set up yet - a server admin can run `/lfg-setup`.";
         }
         else if (!pingRole.IsMentionable && !guild.CurrentUser.GuildPermissions.MentionEveryone)
         {

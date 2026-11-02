@@ -25,6 +25,9 @@ var builder = Host.CreateApplicationBuilder(args);
 // User secrets need to be added explicitly so a token works outside Development too.
 builder.Configuration.AddUserSecrets<BotOptions>(optional: true);
 
+// Show the "=> Server name (ID)" tag DiscordBotService puts on every log line from a server.
+builder.Logging.AddSimpleConsole(options => options.IncludeScopes = true);
+
 // appsettings.json is not committed (it holds each person's own settings); the template is appsettings.example.json.
 // Without it the bot still runs on the built-in defaults, but say so in case the copy step was missed.
 var missingAppSettings = !File.Exists(Path.Combine(builder.Environment.ContentRootPath, "appsettings.json"));
@@ -98,6 +101,12 @@ builder.Services.AddSingleton<ModBot.Services.Reminders.ReminderService>();
 builder.Services.AddSingleton<ModBot.Services.Reminders.IReminderSender, DiscordReminderSender>();
 builder.Services.AddSingleton<ModBot.Services.Reminders.ReminderDeliverer>();
 builder.Services.AddSingleton<IChatSettingsStore, JsonChatSettingsStore>();
+
+// Each server's own choices (/settings): which features are on, and their channels and LFG role. appsettings.json
+// holds the defaults for servers that haven't changed them.
+builder.Services.AddSingleton<IServerSettingsStore, JsonServerSettingsStore>();
+builder.Services.AddSingleton<ModBot.Services.Settings.ServerSettingsService>();
+builder.Services.AddSingleton<ModBot.Modules.Settings.ServerFeatureSwitch>();
 builder.Services.AddSingleton<ModBot.Modules.Polls.PollPoster>();
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();

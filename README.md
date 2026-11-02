@@ -12,7 +12,7 @@ modular so new feature areas can be added later without touching moderation code
 **Server configuration**: `/modlog set|disable|show` (where moderation actions get logged) and `/automod`, which
 controls every aspect of passive content filtering — see the table below.
 
-**Auto-moderation** runs on every incoming message (members with `Manage Messages` are exempt) and checks, in
+**Auto-moderation** is off in a new server until it runs `/automod enable`. Once on, it runs on every incoming message (members with `Manage Messages` are exempt) and checks, in
 order:
 1. **Invite links** — optional, off by default (`/automod block-invites`).
 2. **Custom banned words** — your own list, managed with `/automod word-add|word-remove|word-list`.
@@ -98,8 +98,8 @@ Commands:
 
 Adding works from anywhere. Controlling playback (pause, stop, loop, voting) only works from the bot's voice
 channel, except for moderators (Move Members or Manage Messages), who can control it from anywhere. Only YouTube
-links are accepted. All music commands only work in the text channel named by `Music:ChannelName` (default `music`;
-empty allows any channel), so replies (and "Now playing" posts, in servers without a menu) stay out of the main chat.
+links are accepted. Once a server picks a music channel with `/settings channel`, music commands only work there, so replies
+(and "Now playing" posts, in servers without a menu) stay out of the main chat. Until then they work in any channel.
 Elsewhere the bot replies privately pointing to that channel. The bot leaves voice after `Music:IdleTimeoutSeconds`
 (default 2 minutes) with nobody listening or nothing playing; the queue stays. If Lavalink isn't running, the music
 commands say so and everything else keeps working. A saved song that YouTube won't play any more is skipped with a
@@ -118,8 +118,8 @@ mic:True`. Every option is optional:
 - `mic` — whether a mic is required. `platform` — crossplay (default), PC only, or console only.
 - `note` — free text, up to 100 characters.
 
-The chosen details show as tags on the card (e.g. "🏆 Gold+ · 🎧 Mic required · 🖥️ PC only"). `/lfg` only works
-in the channel named by `Lfg:ChannelName` (default `lfg-mw4`; empty allows any channel). Elsewhere it replies
+The chosen details show as tags on the card (e.g. "🏆 Gold+ · 🎧 Mic required · 🖥️ PC only").
+Once a server picks an LFG channel with `/settings channel`, `/lfg` only works there (until then, anywhere). Elsewhere it replies
 privately with a link to that channel. The card has buttons:
 - **Join** / **Leave** — anyone. The squad list on the card updates as people come and go.
 - **Start now** — host only: close early with whoever has joined (needs at least one other player).
@@ -169,10 +169,31 @@ it out (in `/lfg-setup` and the panel) until that's fixed. Removing the role alw
   through the word filter (auto-mod on, moderators exempt), and each person can post one poll every
   `Polls:CooldownSeconds` (60).
 
-**Command list** — `/help` shows members the commands they can use (LFG and music, with links to the channels
+**Command list** — `/help` shows members the commands they can use (only the features the server has on, with links to the channels
 they work in), visible only to them. `/help-post` (Manage Server) posts the same list in the current channel and
 pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
 change, delete the old post and run `/help-post` again.
+
+**Per-server settings** — every server that adds the bot can set things up for itself with `/settings` (Manage
+Server). appsettings.json only holds the defaults for servers that haven't changed anything. Each server's choices are
+saved in `data/server-settings.json`:
+- `/settings show` — everything at a glance: which features are on, the music and LFG channels, the LFG ping role and
+  whether auto-mod is on.
+- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls or reminders on or off. Turning music off
+  stops what's playing. Things already underway still finish: LFG posts can be cancelled, polls ended, and reminders
+  are delivered.
+- `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.
+  Channels are saved by ID, so renaming one doesn't break it.
+- `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
+  pings off, or leave both out for the default.
+- Moderation is per server too: `/automod` (auto-mod is **off** in a new server until it runs `/automod enable`) and `/modlog`. So is the
+  chatbot's personality (`/chat personality`).
+- Admins can also switch features from chat: "@bot disable polls", "@bot turn music off for this server". Plain "turn
+  off the music" still just stops the song.
+
+**Logs** — when a server adds or removes the bot, it's logged with the server's name and ID. Startup logs every server
+the bot is in. Every line logged while handling something from a server ends with `=> Server name (ID)`, and settings
+changes log who made them.
 
 **AI chat** — mention the bot in a message (or reply to one of its messages) and it answers, using a model served
 by [Ollama](https://ollama.com): on the same machine by default, or Ollama's cloud (see Setup step 6).
@@ -244,6 +265,7 @@ Services/
   Lfg/             ILfgService - LFG post rules (join/leave/start/cancel/expiry), in memory, no Discord types
   Reminders/       ReminderService (set/list/cancel rules) and ReminderTimeParser ("in 2h", "tomorrow 9am")
   Polls/           PollRules (Discord's poll limits) and PollRequestReader (poll requests in chat)
+  Settings/        ServerSettingsService (each server's /settings, with the defaults) and SettingsRequestReader
   Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
 EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
@@ -384,6 +406,26 @@ bot logs a warning at startup.
 dotnet run
 ```
 
+### 8. Servers' saved data
+
+Each server that adds the bot starts on the defaults: auto-mod **off** (`/automod enable` turns it on), every
+feature on, and music and LFG working in any channel until an admin picks one with `/settings channel`. What servers
+change is saved in `data/`, one file per kind of data with each server's entry under its server ID:
+`server-settings.json`, `guild-settings.json`, `chat-settings.json`, `warnings.json`, `reminders.json`,
+`news-subscriptions.json` and `music-queue.json`. `data/` is git-ignored. Back it up, since losing it resets every
+server.
+
+> **To do: removing a server's data when it leaves.** When a server removes the bot, its entries are kept (the log
+> says "Removed from server Name (ID)"), so its settings are still there if it adds the bot back. Nothing deletes them
+> yet. Until that's automated, clean up by hand: stop the bot, then remove that server's entries from each file in
+> `data/`. The entries are keyed by its server ID (from that log line). Reminders, warnings and news subscriptions
+> carry a `GuildId` field instead of being keyed by it. Then start the bot again. A later change should do this
+> automatically, for example a while after the server leaves, in case it was removed by mistake.
+
+**Upgrading from before per-server settings:** `Music:ChannelName` and `Lfg:ChannelName` are gone. If your own
+server relied on `#music` or `#lfg-mw4`, run `/settings channel` there once for each. The old keys in your
+`appsettings.json` are just ignored.
+
 ### Tests
 
 The tests in `tests/ModBot.Tests` cover the logic that's easy to get subtly wrong: reading times, reminder requests
@@ -408,7 +450,7 @@ somewhere else.
 | `/modlog`, `/automod`, `/chat personality` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/add`, `/play`, `/start` | — (`/play` starts the music, and `/start` plays the queue, in your voice channel; adding works from anywhere) | View Channel, Connect, Speak (in the voice channel) |
-| Other music commands | — (controlling playback needs you in the bot's voice channel unless you have Move Members or Manage Messages; `/queue`, `/nowplaying`, `/remove` and `/remove-mine` work from anywhere; all music commands must be used in `#music`) | — |
+| Other music commands | — (controlling playback needs you in the bot's voice channel unless you have Move Members or Manage Messages; `/queue`, `/nowplaying`, `/remove` and `/remove-mine` work from anywhere; all music commands must be used in the music channel, once the server picks one with `/settings channel`) | — |
 | `/music-menu` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the menu; Manage Messages to delete the pin notices (optional) |
 | `/clearqueue`, removing others' songs | Move Members or Manage Messages | — |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
@@ -417,6 +459,7 @@ somewhere else.
 | `/help-post` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the list |
 | AI chat (mention the bot) | — | Send Messages; Read Message History for context; Add Reactions for the ⏳ cooldown hint |
 | `/remind`, `/reminders list`, `/reminders cancel` | — (you can only see and cancel your own) | Send Messages in the channel it's set in |
+| `/settings` | Manage Server | Embed Links in a channel picked with `/settings channel` |
 | `/poll`, **End poll** | Send Messages and Create Polls in the channel (ending someone else's poll: Move Members or Manage Messages) | Send Messages, Create Polls; Read Message History for "end my poll" in chat |
 
 `/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose

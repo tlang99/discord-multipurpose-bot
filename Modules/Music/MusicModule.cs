@@ -2,6 +2,8 @@ using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using ModBot.Common;
+using ModBot.Models;
+using ModBot.Services.Settings;
 
 namespace ModBot.Modules.Music;
 
@@ -13,6 +15,7 @@ namespace ModBot.Modules.Music;
 /// <see cref="MusicControls"/>, shared with the chatbot. The pinned menu's buttons are handled here too.
 /// </summary>
 [RequireContext(ContextType.Guild)]
+[RequireFeature(ServerFeature.Music)]
 [RequireMusicChannel]
 public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 {

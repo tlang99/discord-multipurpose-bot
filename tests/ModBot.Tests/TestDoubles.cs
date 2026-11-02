@@ -9,7 +9,7 @@ namespace ModBot.Tests;
 internal sealed class FakeGuildSettings : IGuildSettingsStore
 {
     public Task<GuildSettings> GetAsync(ulong guildId)
-        => Task.FromResult(new GuildSettings { GuildId = guildId, BannedWords = ["badword"] });
+        => Task.FromResult(new GuildSettings { GuildId = guildId, AutoModEnabled = true, BannedWords = ["badword"] });
 
     public Task UpdateAsync(ulong guildId, Action<GuildSettings> update) => Task.CompletedTask;
 }

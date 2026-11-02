@@ -11,7 +11,9 @@ public class GuildSettings
 
     public ulong? ModLogChannelId { get; set; }
 
-    public bool AutoModEnabled { get; set; } = true;
+    /// <summary>Off until a server turns it on with /automod enable, so a server that adds the bot isn't moderated (or
+    /// its images sent to Sightengine) before it asks to be.</summary>
+    public bool AutoModEnabled { get; set; }
 
     public bool BlockInviteLinks { get; set; } = false;
 

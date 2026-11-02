@@ -58,6 +58,8 @@ public class DiscordBotService : BackgroundService
         _client.Log += LogAsync;
         _interactions.Log += LogAsync;
         _client.Ready += OnReadyAsync;
+        _client.JoinedGuild += OnJoinedGuildAsync;
+        _client.LeftGuild += OnLeftGuildAsync;
         _client.InteractionCreated += OnInteractionCreatedAsync;
         _interactions.InteractionExecuted += OnInteractionExecutedAsync;
         _client.MessageReceived += OnMessageReceivedAsync;
@@ -86,6 +88,10 @@ public class DiscordBotService : BackgroundService
 
     private async Task OnReadyAsync()
     {
+        // Which servers the bot is in, each time it connects, so a problem in one can be matched to its name and ID.
+        _logger.LogInformation("Connected as {Bot} to {Count} server(s): {Servers}", _client.CurrentUser,
+            _client.Guilds.Count, string.Join(", ", _client.Guilds.OrderBy(g => g.Name).Select(Describe)));
+
         try
         {
             if (_options.TestGuildId is ulong guildId)
@@ -105,8 +111,35 @@ public class DiscordBotService : BackgroundService
         }
     }
 
+    private Task OnJoinedGuildAsync(SocketGuild guild)
+    {
+        _logger.LogInformation("Added to server {Server}, owner {OwnerId}, {Members} members. Now in {Count} server(s).",
+            Describe(guild), guild.OwnerId, guild.MemberCount, _client.Guilds.Count);
+        return Task.CompletedTask;
+    }
+
+    private Task OnLeftGuildAsync(SocketGuild guild)
+    {
+        // Its saved settings are kept, so they're still there if it adds the bot back.
+        _logger.LogInformation("Removed from server {Server}. Now in {Count} server(s).", Describe(guild),
+            _client.Guilds.Count);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>"Server name (ID)" for the logs.</summary>
+    private static string Describe(IGuild guild) => $"{guild.Name} ({guild.Id})";
+
+    /// <summary>
+    /// Tags every log line written while handling something from a server (a command, button, or message, including
+    /// work they start in the background) with that server's name and ID, so a problem can be traced to the server it
+    /// happened in. Shown on each line in the console as "=> Server name (ID)".
+    /// </summary>
+    private IDisposable? ServerScope(IGuild? guild)
+        => guild is null ? null : _logger.BeginScope("{Server}", Describe(guild));
+
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction)
     {
+        using var scope = ServerScope((interaction.Channel as IGuildChannel)?.Guild);
         try
         {
             var context = new SocketInteractionContext(_client, interaction);
@@ -135,12 +168,13 @@ public class DiscordBotService : BackgroundService
             return;
         }
 
-        // Exceptions are already logged in full by the InteractionService's own Log event ("[App Commands]").
+        // Exceptions are logged in full by the InteractionService's own Log event ("[App Commands]"), but without saying
+        // where, so this line names the server and who ran it.
         var name = command?.Name ?? "unknown";
-        if (result.Error != InteractionCommandError.Exception)
-        {
-            _logger.LogWarning("/{Command} failed: {Error} - {Reason}", name, result.Error, result.ErrorReason);
-        }
+        using var scope = ServerScope(context.Guild);
+        _logger.Log(result.Error == InteractionCommandError.UnmetPrecondition ? LogLevel.Information : LogLevel.Warning,
+            "/{Command} failed for user {UserId} in channel {ChannelId}: {Error} - {Reason}", name, context.User.Id,
+            context.Channel?.Id, result.Error, result.ErrorReason);
 
         var message = result.Error switch
         {
@@ -169,6 +203,8 @@ public class DiscordBotService : BackgroundService
 
     private Task OnMessageReceivedAsync(SocketMessage message)
     {
+        // Started inside the scope, so anything the handlers log carries the server.
+        using var scope = ServerScope((message.Channel as IGuildChannel)?.Guild);
         Background.Run(_logger, () => _autoModerationHandler.HandleMessageAsync(message), LogLevel.Error,
             "Unhandled exception in auto-moderation handler.");
 
