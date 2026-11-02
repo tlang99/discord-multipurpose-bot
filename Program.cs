@@ -113,7 +113,10 @@ builder.Services.AddSingleton<IModerationService, ModerationService>();
 // LFG posts are held in memory only (see ILfgService), so this is the single source of truth while the bot runs.
 builder.Services.AddSingleton<ILfgService, LfgService>();
 builder.Services.AddSingleton<ModBot.Modules.Lfg.LfgPoster>();
+builder.Services.AddSingleton<ModBot.Modules.Music.MusicPlayerEvents>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicService>();
+builder.Services.AddSingleton<ModBot.Modules.Music.MusicSessionService>();
+builder.Services.AddSingleton<ModBot.Modules.Music.MusicControls>();
 
 builder.Services.AddHttpClient<IImageModerationService, SightengineImageModerationService>(client =>
 {

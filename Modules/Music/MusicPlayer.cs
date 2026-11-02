@@ -10,6 +10,9 @@ public record MusicPlayerOptions : QueuedLavalinkPlayerOptions
 {
     /// <summary>Where "Now playing" and playback errors get posted - the channel /play was first used in.</summary>
     public ITextChannel? TextChannel { get; init; }
+
+    /// <summary>Told when songs start and when the player goes away (music sessions follow along).</summary>
+    public MusicPlayerEvents? Events { get; init; }
 }
 
 /// <summary>
@@ -19,6 +22,7 @@ public record MusicPlayerOptions : QueuedLavalinkPlayerOptions
 public sealed class MusicPlayer : QueuedLavalinkPlayer
 {
     private readonly ITextChannel? _textChannel;
+    private readonly MusicPlayerEvents? _events;
     private readonly ILogger _logger;
 
     // The song /play started directly is already announced in that command's reply, so skip it once here.
@@ -29,8 +33,12 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
         : base(properties)
     {
         _textChannel = properties.Options.Value.TextChannel;
+        _events = properties.Options.Value.Events;
         _logger = properties.Logger;
     }
+
+    /// <summary>The channel announcements go to.</summary>
+    public ITextChannel? TextChannel => _textChannel;
 
     public void SuppressNextAnnouncement(string trackIdentifier) => _skipAnnouncementFor = trackIdentifier;
 
@@ -40,6 +48,11 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
     protected override async ValueTask NotifyTrackStartedAsync(ITrackQueueItem track, CancellationToken cancellationToken = default)
     {
         await base.NotifyTrackStartedAsync(track, cancellationToken);
+
+        if (_events is not null)
+        {
+            await _events.RaiseTrackStartedAsync(this, track);
+        }
 
         var identifier = track.Track?.Identifier;
         if (identifier is null || _textChannel is null)
@@ -58,7 +71,17 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
             return;
         }
 
-        await SendAsync(MusicFormatting.NowPlayingEmbed(track.Track!, this, "Now playing"));
+        await SendAsync(MusicFormatting.NowPlayingEmbed(track.Track!, this,
+            track is SessionTrackItem pick ? $"Now playing - {pick.PickerName}'s pick" : "Now playing"));
+    }
+
+    protected override async ValueTask DisposeAsyncCore()
+    {
+        await base.DisposeAsyncCore();
+        if (_events is not null)
+        {
+            await _events.RaisePlayerClosedAsync(GuildId);
+        }
     }
 
     protected override async ValueTask NotifyTrackExceptionAsync(ITrackQueueItem track, TrackException exception,

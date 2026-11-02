@@ -17,10 +17,18 @@ namespace ModBot.Modules.Music;
 /// <param name="SuppressEmbeds">Hide link previews, for replies that link a song.</param>
 public record MusicPlayResult(bool Success, string? Text, Embed? Embed = null, bool SuppressEmbeds = false);
 
+/// <summary>The songs a search or link found, or why there aren't any.</summary>
+/// <param name="PlaylistName">Set when the link was a playlist (then <paramref name="Tracks"/> is all of it).</param>
+public record TrackLookup(IReadOnlyList<LavalinkTrack> Tracks, string? PlaylistName, string? Error)
+{
+    public bool IsPlaylist => PlaylistName is not null;
+}
+
 /// <summary>
 /// Playing music: joining the requester's voice channel, finding the song and queueing it. Shared by /play and the
 /// chatbot ("play never gonna give you up") so both follow the same rules (YouTube links only, the queue limit, the
-/// requester must be in a voice channel). Also owns the per-server queue lock the other music commands take.
+/// requester must be in a voice channel). Also owns the per-server queue lock the other music commands take, and the
+/// hooks music sessions use to follow what the player does.
 /// </summary>
 public class MusicService
 {
@@ -32,17 +40,20 @@ public class MusicService
     /// <summary>Hosts play requests accept links from (plus their subdomains, e.g. www., m., music.youtube.com).</summary>
     private static readonly string[] AllowedLinkHosts = ["youtube.com", "youtu.be"];
 
-    /// <summary>Per-server lock around changing the queue (/play, /skip, /remove, /move, /shuffle, /clearqueue). One
-    /// small entry per server that has used music; never removed.</summary>
+    /// <summary>Per-server lock around changing the queue (/play, /skip, /remove, /move, /shuffle, /clearqueue, and
+    /// music sessions). One small entry per server that has used music; never removed.</summary>
     private readonly ConcurrentDictionary<ulong, SemaphoreSlim> _queueLocks = new();
 
     private readonly IAudioService _audioService;
+    private readonly MusicPlayerEvents _events;
     private readonly MusicOptions _options;
     private readonly ILogger<MusicService> _logger;
 
-    public MusicService(IAudioService audioService, IOptions<MusicOptions> options, ILogger<MusicService> logger)
+    public MusicService(IAudioService audioService, MusicPlayerEvents events, IOptions<MusicOptions> options,
+        ILogger<MusicService> logger)
     {
         _audioService = audioService;
+        _events = events;
         _options = options.Value;
         _logger = logger;
     }
@@ -50,11 +61,20 @@ public class MusicService
     /// <summary>The configured music channel's name, or empty when music commands work anywhere.</summary>
     public string ChannelName => _options.ChannelName.Trim().TrimStart('#');
 
+    public int MaxQueueLength => _options.MaxQueueLength;
+
     /// <summary>The configured music channel, or null if the server doesn't have it.</summary>
     public ITextChannel? FindChannel(SocketGuild guild)
         => ChannelName.Length == 0
             ? null
             : guild.TextChannels.FirstOrDefault(c => c.Name.Equals(ChannelName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The server's live player, or null if the bot isn't playing there.</summary>
+    public MusicPlayer? GetPlayer(ulong guildId)
+        => _audioService.Players.TryGetPlayer<MusicPlayer>(guildId, out var player) &&
+           player is not null && player.State != PlayerState.Destroyed
+            ? player
+            : null;
 
     /// <summary>Waits for this server's queue lock. Callers must <c>Release()</c> it in a <c>finally</c>, and keep the
     /// locked section short: other music commands in the server wait on it, within Discord's 3-second reply window.</summary>
@@ -73,23 +93,9 @@ public class MusicService
     public async Task<MusicPlayResult> PlayAsync(SocketGuildUser user, ITextChannel announcementChannel, string query,
         bool replyShowsNowPlaying)
     {
-        query = query.Trim();
-        if (query.Length == 0)
+        if (CheckQuery(query) is { } badQuery)
         {
-            return new(false, "Tell me what to play.");
-        }
-
-        var isLink = Uri.TryCreate(query, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
-
-        // Only hand Lavalink links to sites it's meant to play, rather than relying on its config alone to refuse
-        // the rest. Checked before joining the voice channel, so a bad link doesn't make the bot join and then fail.
-        if (isLink && !IsAllowedLinkHost(uri!.Host))
-        {
-            // SoundCloud only serves audio in a format Lavalink can't play yet (lavalink/README.md).
-            return new(false, HostMatches(uri.Host, "soundcloud.com")
-                ? "SoundCloud links don't work right now (the music server can't play SoundCloud's audio format " +
-                  "yet). Try searching for the song by name instead - that uses YouTube."
-                : "I can only play YouTube links. To find a song from somewhere else, search for it by name instead.");
+            return new(false, badQuery);
         }
 
         if (GetJoinProblem(user) is { } problem)
@@ -103,24 +109,10 @@ public class MusicService
             return new(false, joinError);
         }
 
-        var searchMode = isLink ? TrackSearchMode.None : TrackSearchMode.YouTube;
-
-        TrackLoadResult result;
-        try
+        var lookup = await FindTracksAsync(query, user.Guild.Id);
+        if (lookup.Error is not null)
         {
-            result = await _audioService.Tracks.LoadTracksAsync(query, searchMode);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Track lookup failed for '{Query}' in guild {GuildId}.", query, user.Guild.Id);
-            return new(false, "Something went wrong looking that up - try again in a moment.");
-        }
-
-        if (!result.HasMatches)
-        {
-            return new(false, result.IsFailed
-                ? $"Couldn't load that{(result.Exception?.Message is { } reason ? $": {Format.Sanitize(reason)}" : ".")}"
-                : isLink ? "That link isn't a YouTube song or playlist I can play." : "No results found.");
+            return new(false, lookup.Error);
         }
 
         // One queue change at a time per server from here: otherwise two requests at once could both see room in the
@@ -138,10 +130,7 @@ public class MusicService
                 return new(false, $"The queue is full ({_options.MaxQueueLength} songs). Skip or remove some first.");
             }
 
-            // A search returns several matches - only the top one is wanted. A playlist link means all of them.
-            tracks = result.IsPlaylist
-                ? result.Tracks.Take(room).ToList()
-                : [result.Track ?? result.Tracks[0]];
+            tracks = lookup.Tracks.Take(room).ToList();
 
             var startsNow = player.CurrentItem is null;
             if (startsNow && replyShowsNowPlaying)
@@ -170,9 +159,9 @@ public class MusicService
             queueLock.Release();
         }
 
-        var playlistNote = result.IsPlaylist
-            ? $"Added **{tracks.Count}** songs from **{Format.Sanitize(result.Playlist?.Name ?? "playlist")}**" +
-              (tracks.Count < result.Tracks.Length ? $" (the queue limit cut off {result.Tracks.Length - tracks.Count})." : ".")
+        var playlistNote = lookup.IsPlaylist
+            ? $"Added **{tracks.Count}** songs from **{Format.Sanitize(lookup.PlaylistName!)}**" +
+              (tracks.Count < lookup.Tracks.Count ? $" (the queue limit cut off {lookup.Tracks.Count - tracks.Count})." : ".")
             : null;
 
         if (position == 0)
@@ -190,15 +179,76 @@ public class MusicService
             SuppressEmbeds: true);
     }
 
+    /// <summary>Why <paramref name="query"/> can't be looked up at all (empty, or a link to a site the bot doesn't
+    /// play), or null if it can. Cheap, so callers check it before joining a voice channel.</summary>
+    public static string? CheckQuery(string query)
+    {
+        query = query.Trim();
+        if (query.Length == 0)
+        {
+            return "Tell me what to play.";
+        }
+
+        // Only hand Lavalink links to sites it's meant to play, rather than relying on its config alone to refuse
+        // the rest.
+        if (Uri.TryCreate(query, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" &&
+            !IsAllowedLinkHost(uri.Host))
+        {
+            // SoundCloud only serves audio in a format Lavalink can't play yet (lavalink/README.md).
+            return HostMatches(uri.Host, "soundcloud.com")
+                ? "SoundCloud links don't work right now (the music server can't play SoundCloud's audio format " +
+                  "yet). Try searching for the song by name instead - that uses YouTube."
+                : "I can only play YouTube links. To find a song from somewhere else, search for it by name instead.";
+        }
+
+        return null;
+    }
+
+    /// <summary>Looks up a search (top YouTube result) or a YouTube song or playlist link (all of it).</summary>
+    public async Task<TrackLookup> FindTracksAsync(string query, ulong guildId)
+    {
+        query = query.Trim();
+        if (CheckQuery(query) is { } problem)
+        {
+            return new([], null, problem);
+        }
+
+        var isLink = Uri.TryCreate(query, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+
+        TrackLoadResult result;
+        try
+        {
+            result = await _audioService.Tracks.LoadTracksAsync(query, isLink ? TrackSearchMode.None : TrackSearchMode.YouTube);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Track lookup failed for '{Query}' in guild {GuildId}.", query, guildId);
+            return new([], null, "Something went wrong looking that up - try again in a moment. (Is the music server " +
+                                 "running?)");
+        }
+
+        if (!result.HasMatches)
+        {
+            return new([], null, result.IsFailed
+                ? $"Couldn't load that{(result.Exception?.Message is { } reason ? $": {Format.Sanitize(reason)}" : ".")}"
+                : isLink ? "That link isn't a YouTube song or playlist I can play." : "No results found.");
+        }
+
+        // A search returns several matches - only the top one is wanted. A playlist link means all of them.
+        return result.IsPlaylist
+            ? new(result.Tracks.ToList(), result.Playlist?.Name ?? "playlist", null)
+            : new([result.Track ?? result.Tracks[0]], null, null);
+    }
+
     /// <summary>Why the bot can't join the user's voice channel to play, or null if it can.</summary>
-    private string? GetJoinProblem(SocketGuildUser user)
+    public string? GetJoinProblem(SocketGuildUser user)
     {
         if (user.VoiceChannel is not { } voiceChannel)
         {
             return "Join a voice channel first.";
         }
 
-        if (_audioService.Players.TryGetPlayer(user.Guild.Id, out var existing) && existing.VoiceChannelId != voiceChannel.Id)
+        if (GetPlayer(user.Guild.Id) is { } existing && existing.VoiceChannelId != voiceChannel.Id)
         {
             return $"I'm already playing in <#{existing.VoiceChannelId}> - join that channel to add songs.";
         }
@@ -219,13 +269,15 @@ public class MusicService
         return null;
     }
 
-    /// <summary>Gets (or creates and connects) the player for the user's voice channel.</summary>
-    private async Task<(MusicPlayer? Player, string Error)> JoinPlayerAsync(SocketGuildUser user,
+    /// <summary>Gets (or creates and connects) the player for the user's voice channel. Check
+    /// <see cref="GetJoinProblem"/> first for a friendlier reason when it can't.</summary>
+    public async Task<(MusicPlayer? Player, string Error)> JoinPlayerAsync(SocketGuildUser user,
         ITextChannel announcementChannel)
     {
         var playerOptions = new MusicPlayerOptions
         {
             TextChannel = announcementChannel,
+            Events = _events,
             SelfDeaf = true,
             ClearQueueOnStop = true,
         };

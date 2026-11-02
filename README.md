@@ -83,6 +83,23 @@ pointing to that channel. The bot leaves after `Music:IdleTimeoutSeconds`
 (default 2 minutes) with nobody listening or nothing playing, and the queue is capped at `Music:MaxQueueLength`
 (default 200). If Lavalink isn't running, the music commands say so and everything else keeps working.
 
+**Music sessions** — for listening together: everyone builds up a queue first, then the songs play in turns.
+- `/session open` posts a session menu with buttons: **Add song** (a pop-up), **Start**, **Vote skip**, **Leave**
+  and **End**. While a session is open, `/play` and "@bot play ..." add to it too.
+- Before it starts, anyone can add songs from anywhere. The host (whoever opened it) presses **Start** from a voice
+  channel (or uses `/session start`), and the bot joins it. After that, adding a song means being in that channel.
+- **Turns:** one song from each person, in the order they joined, round and round, so someone who adds ten songs
+  doesn't hold everyone else up. Each person can have `Music:SessionSongsPerPerson` songs waiting (default 10).
+- **Vote skip:** a song is skipped once more than half the people in the voice channel vote. Whoever picked it, and
+  moderators, can skip it outright. During a session `/skip` is a vote too.
+- **Keeping the turns fair:** in a session, `/move` and `/shuffle` are off, `/remove` only takes out your own songs,
+  and stopping, clearing the queue or changing looping is for the host or a moderator. `/session leave` takes you and
+  your waiting songs out; if the host leaves, the next person takes over.
+- `/session end` (host or moderator) stops the music. A session also ends when the music stops for any other reason
+  (`/stop`, the idle timeout), and one that never started closes after `Music:SessionLobbyIdleMinutes` (default 60)
+  untouched. `/session menu` posts the menu again at the bottom of the channel.
+- Sessions are kept in memory: like the music itself, they don't survive a restart.
+
 > YouTube's terms of service don't allow streaming its audio outside YouTube, and YouTube changes often enough that
 > playback breaks from time to time — see [lavalink/README.md](lavalink/README.md#when-youtube-stops-working).
 > SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
@@ -173,6 +190,14 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
     limits, delivered as a reply to that message. It's recognised without the model: a reminder phrase ("remind me",
     "set a reminder", "ping me") plus a time the reminder parser understands. Without a time ("remind me to eat") it's
     just chat, and the bot explains how to ask. Adding reminders to the model's check made it worse at the others.
+  - **Music controls:** "@bot skip this", "pause", "what's playing?", "show the queue", "loop this song", "remove
+    song 3", "start a music session", "start the music", "leave the session" and the rest of the music commands
+    work by asking too, through the same code as the slash commands (so a skip in a session is a vote, and only the
+    host ends it). Plainly worded controls are read with fixed rules, without the model: a clause of the message
+    has to be the command itself, so "this song sucks, skip it" skips but "I hate it when people skip songs" doesn't.
+    Looser wording goes to the model's check (as a fourth answer, "music control"), then a second call picks which
+    control. That pick was sometimes wrong in testing, so controls that can't be undone (stop, clear the queue, end
+    or leave a session) are never done on the model's say-so: the bot asks the person to say it plainly instead.
   - **Turning it off:** `Chat:Actions: false`. Each mention then skips the extra check and just chats.
 - Turn the feature off with `Chat:Enabled: false`.
 
@@ -191,7 +216,8 @@ Services/
   Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
 EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
-  Music/           Music commands plus the Lavalink player that announces songs (Lavalink4NET does the rest)
+  Music/           Music commands, music sessions (turns, vote skip, the menu) and the Lavalink player that
+                   announces songs (Lavalink4NET does the rest)
   Lfg/             /lfg command, its button handlers, and the LFG card's embed/buttons
 lavalink/          Config for the Lavalink music server (the server itself is downloaded, not committed)
 tests/            ModBot.Tests (xUnit): text readers, reminder rules, news write-up checks
@@ -350,6 +376,7 @@ somewhere else.
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/play` | — (must be in a voice channel) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (must be in the bot's voice channel unless you have Move Members or Manage Messages; `/queue` and `/nowplaying` work without being in voice; all music commands must be used in `#music`) | — |
+| `/session` | — (`start` and `end`: the session's host, or Move Members or Manage Messages; must be used in `#music`) | Send Messages, Embed Links (for the menu); Connect and Speak in the voice channel |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |
 | `/lfg-setup` | Manage Server, plus Send Messages and Pin Messages in that channel | Manage Roles (and a role above `@LFG`), Send Messages, Embed Links; Pin Messages to pin the panel |
 | `/help` | — | — |

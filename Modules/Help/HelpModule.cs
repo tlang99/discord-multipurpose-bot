@@ -96,7 +96,9 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "`/pause` · `/resume` · `/skip` · `/stop`\n" +
                 "`/nowplaying` · `/queue` - see what's playing and what's next\n" +
                 "`/remove` · `/move` · `/shuffle` · `/loop` · `/clearqueue` - manage the queue\n" +
-                "Controls only work from the voice channel the bot is in.")
+                "Controls only work from the voice channel the bot is in.\n" +
+                "`/session open` - a music session: everyone adds songs, then they play in turns, with vote skip. " +
+                "Use the buttons on its menu, or `/session start` · `/session end` · `/session leave` · `/session menu`.")
             .AddField("⏰ Reminders",
                 "`/remind` - e.g. `when: in 2h` `what: start the raid`, and I'll ping you in that channel\n" +
                 "`/reminders list` · `/reminders cancel` - see or cancel yours");
@@ -107,8 +109,9 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 $"Mention {Context.Guild.CurrentUser.Mention} in a message, or reply to one of mine, and I'll answer. " +
                 "I read the last few messages in the channel for context." +
                 (_chat.Actions
-                    ? "\nYou can also just ask: \"play never gonna give you up\", \"make an lfg for ranked, need 3 " +
-                      "more, mic required\" or \"remind me in 20 minutes to check the oven\"."
+                    ? "\nYou can also just ask: \"play never gonna give you up\", \"skip this\", \"show the queue\", " +
+                      "\"start a music session\", \"make an lfg for ranked, need 3 more, mic required\" or \"remind me " +
+                      "in 20 minutes to check the oven\"."
                     : ""));
         }
 
