@@ -75,7 +75,7 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
         }
 
         await SendAsync(MusicFormatting.NowPlayingEmbed(track.Track!, this,
-            track is QueueTrackItem item ? $"Now playing - {item.Song.PickerName}'s pick" : "Now playing"));
+            track is QueueTrackItem item ? $"Now playing - {Format.Sanitize(item.Song.PickerName)}'s pick" : "Now playing"));
     }
 
     protected override async ValueTask NotifyTrackEndedAsync(ITrackQueueItem queueItem, TrackEndReason endReason,

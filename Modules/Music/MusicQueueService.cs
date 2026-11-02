@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.Storage;
+using ModBot.Services.Moderation;
 
 namespace ModBot.Modules.Music;
 
@@ -207,15 +208,16 @@ public class MusicQueueService : IHostedService
             return MusicReply.Fail("Nothing's playing to skip.");
         }
 
-        var moderator = MusicPermissions.IsModerator(user);
+        var moderator = Moderators.IsModerator(user);
         if (user.VoiceChannel?.Id != player.VoiceChannelId && !moderator)
         {
             return MusicReply.Fail($"Join <#{player.VoiceChannelId}> to vote - only people listening get a say.");
         }
 
         var song = (current as QueueTrackItem)?.Song;
-        var listeners = user.Guild.GetVoiceChannel(player.VoiceChannelId)?.ConnectedUsers.Count(u => !u.IsBot) ?? 1;
-        var needed = VotesNeeded(listeners);
+        var listening = user.Guild.GetVoiceChannel(player.VoiceChannelId)?.ConnectedUsers
+            .Where(u => !u.IsBot).Select(u => u.Id).ToHashSet() ?? [];
+        var needed = VotesNeeded(listening.Count);
         var votes = _votes.GetOrAdd(user.Guild.Id, _ => new SkipVotes());
         int count;
         string reason;
@@ -226,6 +228,9 @@ public class MusicQueueService : IHostedService
                 votes.SongId = song?.Id;
                 votes.Voters.Clear();
             }
+
+            // Votes from people who've since left the channel don't count, since the bar is set by who's there now.
+            votes.Voters.IntersectWith(listening);
 
             if (song?.PickerId == user.Id)
             {
@@ -283,7 +288,7 @@ public class MusicQueueService : IHostedService
     /// <summary>Removes the song at <paramref name="position"/> in play order: your own, or anyone's for moderators.</summary>
     public async Task<MusicReply> RemoveAsync(SocketGuildUser user, int position)
     {
-        var moderator = MusicPermissions.IsModerator(user);
+        var moderator = Moderators.IsModerator(user);
         var (result, removed, total) = await _store.MutateAsync(user.Guild.Id, state =>
         {
             var count = state.Songs.Count;
@@ -319,7 +324,7 @@ public class MusicQueueService : IHostedService
     /// <summary>Empties the whole queue: moderators only, since it's everyone's songs.</summary>
     public async Task<MusicReply> ClearAsync(SocketGuildUser user)
     {
-        if (!MusicPermissions.IsModerator(user))
+        if (!Moderators.IsModerator(user))
         {
             return MusicReply.Fail("Only moderators can clear everyone's songs. To take out yours, use " +
                                    "`/remove-mine` (or say \"remove my songs\").");

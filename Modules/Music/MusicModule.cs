@@ -173,10 +173,12 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     {
         if (Context.User is not SocketGuildUser user || Context.Channel is not ITextChannel channel)
         {
+            await RespondAsync("The music menu only works in a server text channel.", ephemeral: true);
             return;
         }
 
-        // Acknowledged without a message of its own, so the follow-up can be private or public.
+        // Acknowledged without a message of its own, so the follow-up can be private or public. If the action throws,
+        // DiscordBotService.OnInteractionExecutedAsync logs it and sends the "something went wrong" follow-up.
         await DeferAsync();
         var reply = await action(user, channel);
         await FollowupAsync(text: reply.Text, embed: reply.Embed,

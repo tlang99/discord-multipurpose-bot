@@ -3,6 +3,7 @@ using Discord;
 using Discord.WebSocket;
 using Lavalink4NET.Players;
 using Lavalink4NET.Players.Queued;
+using ModBot.Services.Moderation;
 
 namespace ModBot.Modules.Music;
 
@@ -114,7 +115,7 @@ public class MusicControls
         var title = player.State == PlayerState.Paused ? "Paused" : "Now playing";
         if (item is QueueTrackItem queued)
         {
-            title += $" - {queued.Song.PickerName}'s pick";
+            title += $" - {Format.Sanitize(queued.Song.PickerName)}'s pick";
         }
 
         var embed = MusicFormatting.NowPlayingEmbed(track, player, title).ToEmbedBuilder();
@@ -212,7 +213,7 @@ public class MusicControls
                           "menu (or use `/start`).");
         }
 
-        if (user.VoiceChannel?.Id != player.VoiceChannelId && !MusicPermissions.IsModerator(user))
+        if (user.VoiceChannel?.Id != player.VoiceChannelId && !Moderators.IsModerator(user))
         {
             return (null, $"You need to be in <#{player.VoiceChannelId}> to control the music.");
         }
