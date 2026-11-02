@@ -3,8 +3,10 @@ using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using ModBot.Common;
+using ModBot.Models;
 using ModBot.Services.Moderation;
 using ModBot.Services.Reminders;
+using ModBot.Services.Settings;
 
 namespace ModBot.Modules.Reminders;
 
@@ -20,6 +22,7 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
         _reminders = reminders;
     }
 
+    [RequireFeature(ServerFeature.Reminders)]
     [SlashCommand("remind", "Sets a reminder - I'll ping you in this channel when it's time.")]
     public async Task RemindAsync(
         [Summary("when", "e.g. 10m, 2h30m, in 3 days, at 5pm, tomorrow 9am")] [MaxLength(100)] string when,

@@ -14,6 +14,7 @@ using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Services.Storage;
 using ModBot.Services.Moderation;
+using ModBot.Services.Settings;
 
 namespace ModBot.Modules.Music;
 
@@ -37,6 +38,7 @@ public class MusicQueueService : IHostedService
     private readonly IMusicQueueStore _store;
     private readonly IGuildSettingsStore _settings;
     private readonly MusicService _music;
+    private readonly ServerSettingsService _serverSettings;
     private readonly DiscordSocketClient _client;
     private readonly MusicOptions _options;
     private readonly ILogger<MusicQueueService> _logger;
@@ -64,12 +66,14 @@ public class MusicQueueService : IHostedService
     private int _menusRestored;
 
     public MusicQueueService(IMusicQueueStore store, IGuildSettingsStore settings, MusicService music,
+        ServerSettingsService serverSettings,
         MusicPlayerEvents events,
         DiscordSocketClient client, IOptions<MusicOptions> options, ILogger<MusicQueueService> logger)
     {
         _store = store;
         _settings = settings;
         _music = music;
+        _serverSettings = serverSettings;
         _client = client;
         _options = options.Value;
         _logger = logger;
@@ -434,7 +438,7 @@ public class MusicQueueService : IHostedService
     /// <summary>Where "Now playing" goes: the music channel, else the menu's channel, else where the request was made.</summary>
     private async Task<ITextChannel> AnnouncementChannelAsync(SocketGuild guild, ITextChannel fallback)
     {
-        if (_music.FindChannel(guild) is { } musicChannel)
+        if ((await _serverSettings.MusicChannelAsync(guild)).Channel is { } musicChannel)
         {
             return musicChannel;
         }

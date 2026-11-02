@@ -6,6 +6,7 @@ using ModBot.Common;
 using ModBot.Models;
 using ModBot.Services.Lfg;
 using ModBot.Services.Moderation;
+using ModBot.Services.Settings;
 
 namespace ModBot.Modules.Lfg;
 
@@ -21,12 +22,14 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
     private readonly ILfgService _lfg;
     private readonly LfgPoster _poster;
+    private readonly ServerSettingsService _serverSettings;
     private readonly ILogger<LfgModule> _logger;
 
-    public LfgModule(ILfgService lfg, LfgPoster poster, ILogger<LfgModule> logger)
+    public LfgModule(ILfgService lfg, LfgPoster poster, ServerSettingsService serverSettings, ILogger<LfgModule> logger)
     {
         _lfg = lfg;
         _poster = poster;
+        _serverSettings = serverSettings;
         _logger = logger;
     }
 
@@ -63,6 +66,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("Console only")] ConsoleOnly,
     }
 
+    [RequireFeature(ServerFeature.Lfg)]
     [SlashCommand("lfg", "Looking for a group? Post it here and let people join.")]
     public async Task LfgAsync(
         [Summary(description: "Total squad size, including you")] [MinValue(2)] [MaxValue(6)] int players = 4,
@@ -94,13 +98,10 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        var lfgChannelName = _poster.ChannelName;
-        if (lfgChannelName.Length > 0 && !ConfiguredChannels.IsNamed(channel, lfgChannelName))
+        var lfgChannel = await _serverSettings.LfgChannelAsync(Context.Guild);
+        if (!lfgChannel.Allows(channel))
         {
-            await FollowupAsync(_poster.FindChannel(Context.Guild) is { } lfgChannel
-                    ? $"LFG posts go in {lfgChannel.Mention} - run `/lfg` there."
-                    : ConfiguredChannels.Missing("LFG posts go", lfgChannelName),
-                ephemeral: true);
+            await FollowupAsync(lfgChannel.GoThere("LFG posts go", "`/lfg`"), ephemeral: true);
             return;
         }
 
@@ -114,6 +115,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         await FollowupAsync(result.Message, ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 
+    [RequireFeature(ServerFeature.Lfg)]
     [SlashCommand("lfg-setup", "Posts the button panel members use to opt in to LFG pings (creates the role if needed).")]
     [RequireUserPermission(GuildPermission.ManageGuild)]
     public async Task LfgSetupAsync()
@@ -121,12 +123,23 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         // Creating the role, posting and pinning the panel easily takes longer than Discord's 3-second window.
         await DeferAsync(ephemeral: true);
 
-        var roleName = _poster.PingRoleName;
-        if (roleName.Length == 0)
+        var ping = await _serverSettings.LfgPingRoleAsync(Context.Guild);
+        if (ping.Off)
         {
-            await FollowupAsync("LFG pings are turned off (`Lfg:PingRoleName` is empty).", ephemeral: true);
+            await FollowupAsync("LFG pings are turned off on this server. Turn them on with `/settings lfg-pings`.",
+                ephemeral: true);
             return;
         }
+
+        if (ping.Role is null && ping.Name.Length == 0)
+        {
+            await FollowupAsync("The LFG ping role this server picked has been deleted. Pick another with " +
+                               "`/settings lfg-pings`, or leave the role out there to go back to the default.",
+                ephemeral: true);
+            return;
+        }
+
+        var roleName = ping.Name;
 
         var bot = Context.Guild.CurrentUser;
         if (!bot.GuildPermissions.ManageRoles)
@@ -146,7 +159,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
         var channel = (ITextChannel)Context.Channel;
 
-        var role = FindPingRole();
+        var role = ping.Role;
         var createdRole = role is null;
         if (createdRole)
         {
@@ -155,7 +168,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             role = await Context.Guild.CreateRoleAsync(roleName, GuildPermissions.None, color: null, isHoisted: false,
                 isMentionable: true);
         }
-        else if (WhyUnsafeToSelfAssign(role!) is { } reason)
+        else if (LfgPoster.WhyUnsafeToSelfAssign(Context.Guild, role!) is { } reason)
         {
             await FollowupAsync($"There's already a **@{Format.Sanitize(role!.Name)}** role, but it {reason}. Members " +
                                "can give the ping role to themselves, so it must be a plain role with no permissions. " +
@@ -194,6 +207,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             ephemeral: true);
     }
 
+    [RequireFeature(ServerFeature.Lfg)]
     [ComponentInteraction(LfgMessages.RoleOnId)]
     public Task RoleOnAsync() => SetPingRoleAsync(wanted: true);
 
@@ -205,7 +219,8 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         // Changing roles is an API call that can take a while; acknowledge (privately) before doing it.
         await DeferAsync(ephemeral: true);
 
-        if (FindPingRole() is not { } role || Context.User is not IGuildUser user)
+        if ((await _serverSettings.LfgPingRoleAsync(Context.Guild)).Role is not { } role ||
+            Context.User is not IGuildUser user)
         {
             await FollowupAsync("LFG pings aren't set up right now - ask a server admin to run `/lfg-setup`.",
                 ephemeral: true);
@@ -221,7 +236,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
         // Checked on every click, not just at setup: the role is found by name, and it could have gained permissions
         // (or been swapped for a renamed role) since. Removing it is always allowed.
-        if (wanted && WhyUnsafeToSelfAssign(role) is { } reason)
+        if (wanted && LfgPoster.WhyUnsafeToSelfAssign(Context.Guild, role) is { } reason)
         {
             _logger.LogWarning("Refused to self-assign LFG role {RoleId} in guild {GuildId}: it {Reason}.",
                 role.Id, Context.Guild.Id, reason);
@@ -255,12 +270,14 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             : "🔕 You won't be pinged for LFG posts anymore.", ephemeral: true);
     }
 
+    [RequireFeature(ServerFeature.Lfg)]
     [ComponentInteraction(LfgMessages.JoinPrefix + ":*")]
     public Task JoinAsync(string postId) => HandleButtonAsync(postId, id => _lfg.Join(id, Context.User.Id));
 
     [ComponentInteraction(LfgMessages.LeavePrefix + ":*")]
     public Task LeaveAsync(string postId) => HandleButtonAsync(postId, id => _lfg.Leave(id, Context.User.Id));
 
+    [RequireFeature(ServerFeature.Lfg)]
     [ComponentInteraction(LfgMessages.StartPrefix + ":*")]
     public Task StartAsync(string postId) => HandleButtonAsync(postId, id => _lfg.Start(id, Context.User.Id));
 
@@ -336,35 +353,6 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
                 break;
         }
     }
-
-    /// <summary>
-    /// Why members must not be able to give themselves this role, or null if it's safe. The panel lets anyone take the
-    /// ping role, so it must be harmless: any server permission, or a channel override that grants something (e.g.
-    /// access to a hidden channel), would let members escalate their own access just by clicking a button.
-    /// </summary>
-    private string? WhyUnsafeToSelfAssign(IRole role)
-    {
-        if (role.IsManaged)
-        {
-            return "belongs to an integration";
-        }
-
-        // Only permissions beyond what @everyone already has count: a manually created role comes with defaults like
-        // View Channels, which grant nothing new.
-        var extra = new GuildPermissions(role.Permissions.RawValue & ~Context.Guild.EveryoneRole.Permissions.RawValue);
-        if (extra.RawValue != 0)
-        {
-            var names = extra.ToList();
-            return $"has server permissions beyond @everyone's ({string.Join(", ", names.Take(3))}" +
-                   $"{(names.Count > 3 ? ", ..." : "")})";
-        }
-
-        var grantingChannel = Context.Guild.Channels.FirstOrDefault(c =>
-            c.GetPermissionOverwrite(role) is { AllowValue: not 0 });
-        return grantingChannel is null ? null : $"grants permissions in #{grantingChannel.Name}";
-    }
-
-    private IRole? FindPingRole() => _poster.FindPingRole(Context.Guild);
 
     private static LfgDetails ToDetails(PlaylistChoice playlist, RankChoice? rank, bool? mic, PlatformChoice platform)
         => new(

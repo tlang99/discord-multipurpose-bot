@@ -8,11 +8,14 @@ using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Modules.Lfg;
 using ModBot.Modules.Music;
+using ModBot.Models;
 using ModBot.Modules.Polls;
+using ModBot.Modules.Settings;
 using ModBot.Services.Chat;
 using ModBot.Services.Moderation;
 using ModBot.Services.Polls;
 using ModBot.Services.Reminders;
+using ModBot.Services.Settings;
 using ModBot.Services.Storage;
 
 namespace ModBot.EventHandlers;
@@ -45,33 +48,35 @@ public partial class ChatHandler
 
     private readonly IChatService _chat;
     private readonly ChatActionParser _actionParser;
-    private readonly MusicService _music;
     private readonly MusicControls _musicControls;
     private readonly MusicQueueService _musicQueue;
     private readonly LfgPoster _lfgPoster;
     private readonly ReminderService _reminders;
     private readonly PollPoster _polls;
     private readonly IGuildSettingsStore _settingsStore;
+    private readonly ServerSettingsService _serverSettings;
+    private readonly ServerFeatureSwitch _featureSwitch;
     private readonly ChatPersonality _personality;
     private readonly ChatOptions _options;
     private readonly ILogger<ChatHandler> _logger;
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
 
-    public ChatHandler(IChatService chat, ChatActionParser actionParser, MusicService music,
+    public ChatHandler(IChatService chat, ChatActionParser actionParser,
         MusicControls musicControls, MusicQueueService musicQueue, LfgPoster lfgPoster,
         ReminderService reminders, PollPoster polls,
-        IGuildSettingsStore settingsStore, ChatPersonality personality, IOptions<ChatOptions> options,
-        ILogger<ChatHandler> logger)
+        IGuildSettingsStore settingsStore, ServerSettingsService serverSettings, ServerFeatureSwitch featureSwitch,
+        ChatPersonality personality, IOptions<ChatOptions> options, ILogger<ChatHandler> logger)
     {
         _chat = chat;
         _actionParser = actionParser;
-        _music = music;
         _musicControls = musicControls;
         _musicQueue = musicQueue;
         _lfgPoster = lfgPoster;
         _reminders = reminders;
         _polls = polls;
         _settingsStore = settingsStore;
+        _serverSettings = serverSettings;
+        _featureSwitch = featureSwitch;
         _personality = personality;
         _options = options.Value;
         _logger = logger;
@@ -108,6 +113,27 @@ public partial class ChatHandler
             return;
         }
 
+        // "@bot disable polls" from an admin. Read before the chatbot's own switch, so an admin can turn the chatbot
+        // back on by asking it; nobody else gets an answer from a chatbot that's off.
+        var words = Describe(message, guild, bot.Id, noteAttachments: false);
+        if (message.Author is SocketGuildUser member && SettingsRequestReader.Read(words) is { } change)
+        {
+            if (!IsOnCooldown(guild.Id, member.Id))
+            {
+                await ReplyAsync(message, ServerFeatureSwitch.CanChange(member)
+                    ? await _featureSwitch.SetAsync(guild, change.Feature, change.On, member)
+                    : "Only server admins (**Manage Server**) can turn features on or off. See `/settings`.");
+            }
+
+            return;
+        }
+
+        var server = await _serverSettings.GetAsync(guild.Id);
+        if (!server.IsEnabled(ServerFeature.Chat))
+        {
+            return;
+        }
+
         var question = Describe(message, guild, bot.Id);
         if (question.Length == 0)
         {
@@ -130,10 +156,10 @@ public partial class ChatHandler
             try
             {
                 // "Play X" / "make an LFG" are done, not chatted about. Only the asker's own message is looked at.
-                if (_options.Actions && message.Author is SocketGuildUser &&
-                    Describe(message, guild, bot.Id, noteAttachments: false) is { Length: > 0 } request)
+                if (_options.Actions && server.IsEnabled(ServerFeature.ChatActions) &&
+                    message.Author is SocketGuildUser && words.Length > 0)
                 {
-                    action = await _actionParser.ParseAsync(request);
+                    action = await _actionParser.ParseAsync(words);
                 }
 
                 if (action is null)
@@ -163,7 +189,12 @@ public partial class ChatHandler
                 Embed? embed = null;
                 try
                 {
-                    if (action is MusicControlAction or UnclearMusicAction)
+                    // Same switches as the slash commands: a feature the server turned off isn't done from chat either.
+                    if (FeatureFor(action) is { } needed && !server.IsEnabled(needed))
+                    {
+                        text = ServerSettingsService.TurnedOff(needed);
+                    }
+                    else if (action is MusicControlAction or UnclearMusicAction)
                     {
                         var music = await RunMusicControlAsync(action, (SocketGuildUser)message.Author, channel);
                         (text, suppressEmbeds, embed) = (music.Text ?? "", music.SuppressEmbeds, music.Embed);
@@ -234,9 +265,10 @@ public partial class ChatHandler
         {
             case PlayMusicAction play:
             {
-                if (MusicChannel(channel) is not { } musicChannel)
+                var music = await _serverSettings.MusicChannelAsync(guild);
+                if (music.Or(channel) is not { } musicChannel)
                 {
-                    return (ConfiguredChannels.Missing("Music goes", _music.ChannelName), false);
+                    return (music.Missing("Music goes"), false);
                 }
 
                 // Into the standing queue, in the person's turns. "Play" also starts the music if it isn't playing.
@@ -249,9 +281,10 @@ public partial class ChatHandler
 
             case CreateLfgAction lfg:
             {
-                if (ConfiguredChannels.FindOr(guild, _lfgPoster.ChannelName, channel) is not { } lfgChannel)
+                var lfgWhere = await _serverSettings.LfgChannelAsync(guild);
+                if (lfgWhere.Or(channel) is not { } lfgChannel)
                 {
-                    return (ConfiguredChannels.Missing("LFG posts go", _lfgPoster.ChannelName), false);
+                    return (lfgWhere.Missing("LFG posts go"), false);
                 }
 
                 // Posting for someone is only allowed where they could post themselves.
@@ -311,6 +344,17 @@ public partial class ChatHandler
                 return ("I'm not sure how to do that yet.", false);
         }
     }
+
+    /// <summary>The server feature an action belongs to, or null for ones that always work (ending your own poll,
+    /// like cancelling a post, is allowed even after polls are switched off).</summary>
+    private static ServerFeature? FeatureFor(ChatAction action) => action switch
+    {
+        PlayMusicAction or MusicControlAction or UnclearMusicAction or UnclearSongAction => ServerFeature.Music,
+        CreateLfgAction => ServerFeature.Lfg,
+        SetReminderAction => ServerFeature.Reminders,
+        CreatePollAction or UnclearPollAction => ServerFeature.Polls,
+        _ => null,
+    };
 
     /// <summary>Controls the model can't trigger on its own: they can't be undone, and its guesses at which control
     /// was meant are sometimes wrong. The person is asked to say it plainly instead.</summary>
@@ -376,9 +420,10 @@ public partial class ChatHandler
             case MusicCommand.Start:
             {
                 // "Now playing" goes where music does, wherever the request was made.
-                return MusicChannel(channel) is { } musicChannel
+                var music = await _serverSettings.MusicChannelAsync(guild);
+                return music.Or(channel) is { } musicChannel
                     ? await _musicControls.StartAsync(asker, musicChannel)
-                    : MusicReply.Fail(ConfiguredChannels.Missing("Music goes", _music.ChannelName));
+                    : MusicReply.Fail(music.Missing("Music goes"));
             }
 
             case MusicCommand.ShowMenu:
@@ -391,11 +436,6 @@ public partial class ChatHandler
                 return MusicReply.Fail("I'm not sure how to do that yet.");
         }
     }
-
-    /// <summary>Where music goes for a request made in <paramref name="asked"/>: the music channel, or right there if
-    /// music isn't limited to one. Null if the server doesn't have the music channel.</summary>
-    private ITextChannel? MusicChannel(SocketTextChannel asked)
-        => ConfiguredChannels.FindOr(asked.Guild, _music.ChannelName, asked);
 
     /// <summary>All the text in an embed, for the word filter.</summary>
     private static string EmbedText(Embed? embed)

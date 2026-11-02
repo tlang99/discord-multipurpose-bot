@@ -50,12 +50,6 @@ public class MusicService
         _logger = logger;
     }
 
-    /// <summary>The configured music channel's name, or empty when music commands work anywhere.</summary>
-    public string ChannelName => ConfiguredChannels.ChannelName(_options.ChannelName);
-
-    /// <summary>The configured music channel, or null if the server doesn't have it.</summary>
-    public ITextChannel? FindChannel(SocketGuild guild) => ConfiguredChannels.Find(guild, ChannelName);
-
     /// <summary>The server's live player, or null if the bot isn't in voice there.</summary>
     public MusicPlayer? GetPlayer(ulong guildId)
         => _audioService.Players.TryGetPlayer<MusicPlayer>(guildId, out var player) &&

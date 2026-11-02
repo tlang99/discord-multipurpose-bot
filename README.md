@@ -98,7 +98,8 @@ Commands:
 
 Adding works from anywhere. Controlling playback (pause, stop, loop, voting) only works from the bot's voice
 channel, except for moderators (Move Members or Manage Messages), who can control it from anywhere. Only YouTube
-links are accepted. All music commands only work in the text channel named by `Music:ChannelName` (default `music`;
+links are accepted. All music commands only work in the server's music channel: the one it picked with `/settings channel`,
+or else the text channel named by `Music:ChannelName` (default `music`;
 empty allows any channel), so replies (and "Now playing" posts, in servers without a menu) stay out of the main chat.
 Elsewhere the bot replies privately pointing to that channel. The bot leaves voice after `Music:IdleTimeoutSeconds`
 (default 2 minutes) with nobody listening or nothing playing; the queue stays. If Lavalink isn't running, the music
@@ -119,7 +120,8 @@ mic:True`. Every option is optional:
 - `note` — free text, up to 100 characters.
 
 The chosen details show as tags on the card (e.g. "🏆 Gold+ · 🎧 Mic required · 🖥️ PC only"). `/lfg` only works
-in the channel named by `Lfg:ChannelName` (default `lfg-mw4`; empty allows any channel). Elsewhere it replies
+in the server's LFG channel: its own pick from `/settings channel`, or else the channel named by `Lfg:ChannelName`
+(default `lfg-mw4`; empty allows any channel). Elsewhere it replies
 privately with a link to that channel. The card has buttons:
 - **Join** / **Leave** — anyone. The squad list on the card updates as people come and go.
 - **Start now** — host only: close early with whoever has joined (needs at least one other player).
@@ -169,11 +171,12 @@ it out (in `/lfg-setup` and the panel) until that's fixed. Removing the role alw
   through the word filter (auto-mod on, moderators exempt), and each person can post one poll every
   `Polls:CooldownSeconds` (60).
 
-**Command list** — `/help` shows members the commands they can use (LFG and music, with links to the channels
+**Command list** — `/help` shows members the commands they can use (only the features the server has on, with links to the channels
 they work in), visible only to them. `/help-post` (Manage Server) posts the same list in the current channel and
 pins it, e.g. in `#rules` or `#bot-commands`. Moderator and admin commands are left out on purpose. If the commands
 change, delete the old post and run `/help-post` again.
 
+**Per-server settings** — every server that adds the bot can set things up for itself with `/settings` (Manage Server).appsettings.json only holds the defaults for servers that haven't changed anything, saved per server in`data/server-settings.json`:- `/settings show` — everything at a glance: which features are on, the music and LFG channels, the LFG ping role and  whether auto-mod is on.- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls or reminders on or off. Turning music off  stops what's playing. Things already underway still finish: LFG posts can be cancelled, polls ended, and reminders  are delivered.- `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.  Channels are saved by ID, so renaming one doesn't break it.- `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn  pings off, or leave both out for the default.- Moderation is per server too: `/automod` (auto-mod is **on** by default in a new server) and `/modlog`. So is the  chatbot's personality (`/chat personality`).- Admins can also switch features from chat: "@bot disable polls", "@bot turn music off for this server". Plain "turn  off the music" still just stops the song.**Logs** — when a server adds or removes the bot, it's logged with the server's name and ID. Startup logs every serverthe bot is in. Every line logged while handling something from a server ends with `=> Server name (ID)`, and settingschanges log who made them.
 **AI chat** — mention the bot in a message (or reply to one of its messages) and it answers, using a model served
 by [Ollama](https://ollama.com): on the same machine by default, or Ollama's cloud (see Setup step 6).
 - It sends the last `Chat:HistoryMessages` (default 10) messages in the channel along for context, so it can follow
@@ -244,6 +247,7 @@ Services/
   Lfg/             ILfgService - LFG post rules (join/leave/start/cancel/expiry), in memory, no Discord types
   Reminders/       ReminderService (set/list/cancel rules) and ReminderTimeParser ("in 2h", "tomorrow 9am")
   Polls/           PollRules (Discord's poll limits) and PollRequestReader (poll requests in chat)
+  Settings/        ServerSettingsService (each server's /settings, with the defaults) and SettingsRequestReader
   Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
 EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
@@ -417,6 +421,7 @@ somewhere else.
 | `/help-post` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the list |
 | AI chat (mention the bot) | — | Send Messages; Read Message History for context; Add Reactions for the ⏳ cooldown hint |
 | `/remind`, `/reminders list`, `/reminders cancel` | — (you can only see and cancel your own) | Send Messages in the channel it's set in |
+| `/settings` | Manage Server | Embed Links in a channel picked with `/settings channel` |
 | `/poll`, **End poll** | Send Messages and Create Polls in the channel (ending someone else's poll: Move Members or Manage Messages) | Send Messages, Create Polls; Read Message History for "end my poll" in chat |
 
 `/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose
