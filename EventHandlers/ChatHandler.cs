@@ -310,7 +310,12 @@ public partial class ChatHandler
                                    "\"show the queue\" or \"start the music\" - or see `/help`.");
         }
 
-        if (control.FromModel && PlainWordsNeeded.TryGetValue(request.Command, out var phrase))
+        // A skip from a member is just one vote, but a moderator's skips go through outright, so the model's guess
+        // shouldn't make one for them either.
+        var phrase = request.Command == MusicCommand.Skip && Moderators.IsModerator(asker)
+            ? "skip this song"
+            : PlainWordsNeeded.GetValueOrDefault(request.Command);
+        if (control.FromModel && phrase is not null)
         {
             return MusicReply.Fail($"Just to be sure - did you want me to **{phrase}**? Say \"@{channel.Guild.CurrentUser.DisplayName} " +
                                    $"{phrase}\" and I'll do it.");
