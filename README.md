@@ -12,7 +12,7 @@ modular so new feature areas can be added later without touching moderation code
 **Server configuration**: `/modlog set|disable|show` (where moderation actions get logged) and `/automod`, which
 controls every aspect of passive content filtering — see the table below.
 
-**Auto-moderation** runs on every incoming message (members with `Manage Messages` are exempt) and checks, in
+**Auto-moderation** is off in a new server until it runs `/automod enable`. Once on, it runs on every incoming message (members with `Manage Messages` are exempt) and checks, in
 order:
 1. **Invite links** — optional, off by default (`/automod block-invites`).
 2. **Custom banned words** — your own list, managed with `/automod word-add|word-remove|word-list`.
@@ -98,9 +98,8 @@ Commands:
 
 Adding works from anywhere. Controlling playback (pause, stop, loop, voting) only works from the bot's voice
 channel, except for moderators (Move Members or Manage Messages), who can control it from anywhere. Only YouTube
-links are accepted. All music commands only work in the server's music channel: the one it picked with `/settings channel`,
-or else the text channel named by `Music:ChannelName` (default `music`;
-empty allows any channel), so replies (and "Now playing" posts, in servers without a menu) stay out of the main chat.
+links are accepted. Once a server picks a music channel with `/settings channel`, music commands only work there, so replies
+(and "Now playing" posts, in servers without a menu) stay out of the main chat. Until then they work in any channel.
 Elsewhere the bot replies privately pointing to that channel. The bot leaves voice after `Music:IdleTimeoutSeconds`
 (default 2 minutes) with nobody listening or nothing playing; the queue stays. If Lavalink isn't running, the music
 commands say so and everything else keeps working. A saved song that YouTube won't play any more is skipped with a
@@ -119,9 +118,8 @@ mic:True`. Every option is optional:
 - `mic` — whether a mic is required. `platform` — crossplay (default), PC only, or console only.
 - `note` — free text, up to 100 characters.
 
-The chosen details show as tags on the card (e.g. "🏆 Gold+ · 🎧 Mic required · 🖥️ PC only"). `/lfg` only works
-in the server's LFG channel: its own pick from `/settings channel`, or else the channel named by `Lfg:ChannelName`
-(default `lfg-mw4`; empty allows any channel). Elsewhere it replies
+The chosen details show as tags on the card (e.g. "🏆 Gold+ · 🎧 Mic required · 🖥️ PC only").
+Once a server picks an LFG channel with `/settings channel`, `/lfg` only works there (until then, anywhere). Elsewhere it replies
 privately with a link to that channel. The card has buttons:
 - **Join** / **Leave** — anyone. The squad list on the card updates as people come and go.
 - **Start now** — host only: close early with whoever has joined (needs at least one other player).
@@ -188,7 +186,7 @@ saved in `data/server-settings.json`:
   Channels are saved by ID, so renaming one doesn't break it.
 - `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
   pings off, or leave both out for the default.
-- Moderation is per server too: `/automod` (auto-mod is **on** by default in a new server) and `/modlog`. So is the
+- Moderation is per server too: `/automod` (auto-mod is **off** in a new server until it runs `/automod enable`) and `/modlog`. So is the
   chatbot's personality (`/chat personality`).
 - Admins can also switch features from chat: "@bot disable polls", "@bot turn music off for this server". Plain "turn
   off the music" still just stops the song.
@@ -432,7 +430,7 @@ somewhere else.
 | `/modlog`, `/automod`, `/chat personality` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
 | `/add`, `/play`, `/start` | — (`/play` starts the music, and `/start` plays the queue, in your voice channel; adding works from anywhere) | View Channel, Connect, Speak (in the voice channel) |
-| Other music commands | — (controlling playback needs you in the bot's voice channel unless you have Move Members or Manage Messages; `/queue`, `/nowplaying`, `/remove` and `/remove-mine` work from anywhere; all music commands must be used in `#music`) | — |
+| Other music commands | — (controlling playback needs you in the bot's voice channel unless you have Move Members or Manage Messages; `/queue`, `/nowplaying`, `/remove` and `/remove-mine` work from anywhere; all music commands must be used in the music channel, once the server picks one with `/settings channel`) | — |
 | `/music-menu` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the menu; Manage Messages to delete the pin notices (optional) |
 | `/clearqueue`, removing others' songs | Move Members or Manage Messages | — |
 | `/lfg` | — (cancelling someone else's post: Manage Messages or Move Members) | View Channel, Send Messages, Embed Links (in that channel) |

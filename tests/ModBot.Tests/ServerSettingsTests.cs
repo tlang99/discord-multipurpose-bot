@@ -17,9 +17,7 @@ public sealed class ServerSettingsServiceTests : IDisposable
     public ServerSettingsServiceTests()
     {
         var store = new JsonServerSettingsStore(Path.Combine(_directory, "server-settings.json"));
-        _settings = new ServerSettingsService(store,
-            Options.Create(new MusicOptions { ChannelName = "music" }),
-            Options.Create(new LfgOptions { ChannelName = "", PingRoleName = "LFG" }));
+        _settings = new ServerSettingsService(store, Options.Create(new LfgOptions { PingRoleName = "LFG" }));
     }
 
     public void Dispose()
@@ -49,35 +47,31 @@ public sealed class ServerSettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Uses_the_default_channel_name_until_the_server_picks_one()
+    public async Task Works_in_any_channel_until_the_server_picks_one()
     {
-        var music = Channel(10, "Music");
-
-        var where = await _settings.MusicChannelAsync(Guild(channels: [Channel(11, "general"), music]));
-
-        Assert.False(where.Anywhere);
-        Assert.Same(music, where.Channel);
-        Assert.True(where.Allows(music));
-    }
-
-    [Fact]
-    public async Task An_empty_default_means_anywhere()
-    {
-        var where = await _settings.LfgChannelAsync(Guild());
-
-        Assert.True(where.Anywhere);
+        // No default channel name: even a server with a #music channel isn't limited until it picks one.
         var asked = Channel(5, "general");
-        Assert.Same(asked, where.Or(asked));
+
+        var music = await _settings.MusicChannelAsync(Guild(channels: [Channel(10, "music"), asked]));
+        var lfg = await _settings.LfgChannelAsync(Guild());
+
+        Assert.True(music.Anywhere);
+        Assert.True(lfg.Anywhere);
+        Assert.True(music.Allows(asked));
+        Assert.Same(asked, music.Or(asked));
     }
 
     [Fact]
-    public async Task A_missing_default_channel_says_which_one_to_make()
+    public async Task A_picked_channel_limits_it_to_that_channel()
     {
-        var where = await _settings.MusicChannelAsync(Guild(channels: [Channel(11, "general")]));
+        var chosen = Channel(20, "tunes");
+        await _settings.UpdateAsync(GuildId, s => s.Lfg.ChannelId = chosen.Id);
 
-        Assert.Null(where.Channel);
-        Assert.Null(where.Or(Channel(11, "general")));
-        Assert.Contains("**#music**", where.Missing("Music goes"));
+        var where = await _settings.LfgChannelAsync(Guild(byId: chosen));
+
+        Assert.True(where.Allows(chosen));
+        Assert.False(where.Allows(Channel(5, "general")));
+        Assert.Same(chosen, where.Or(Channel(5, "general")));
     }
 
     [Fact]
@@ -103,12 +97,16 @@ public sealed class ServerSettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Anywhere_overrides_the_default_channel()
+    public async Task Clearing_the_pick_allows_any_channel_again()
     {
-        await _settings.UpdateAsync(GuildId, s => s.Music.Anywhere = true);
+        await _settings.UpdateAsync(GuildId, s => s.Music.ChannelId = 20);
+        await _settings.UpdateAsync(GuildId, s => s.Music.ChannelId = null);
 
         Assert.True((await _settings.MusicChannelAsync(Guild())).Anywhere);
     }
+
+    [Fact]
+    public void Auto_mod_starts_off_for_a_new_server() => Assert.False(new GuildSettings().AutoModEnabled);
 
     [Fact]
     public async Task Ping_role_defaults_to_the_configured_name()

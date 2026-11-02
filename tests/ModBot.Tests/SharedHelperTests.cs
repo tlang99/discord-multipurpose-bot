@@ -150,12 +150,12 @@ public sealed class SharedHelperTests : IDisposable
     }
 
     [Theory]
-    [InlineData(" #music ", "music")]
-    [InlineData("music", "music")]
+    [InlineData(" @LFG ", "LFG")]
+    [InlineData("LFG", "LFG")]
     [InlineData("", "")]
     [InlineData(null, "")]
-    public void Channel_names_are_cleaned_the_same_way_everywhere(string? configured, string expected)
-        => Assert.Equal(expected, ConfiguredChannels.ChannelName(configured));
+    public void Role_names_are_cleaned_the_same_way_everywhere(string? configured, string expected)
+        => Assert.Equal(expected, ConfiguredChannels.RoleName(configured));
 
     [Fact]
     public void Song_links_escape_both_brackets_and_skip_the_preview()

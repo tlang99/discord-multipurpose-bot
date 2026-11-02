@@ -85,8 +85,8 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             .WithTitle($"Settings for {Context.Guild.Name}")
             .AddField("Features", features.ToString())
             .AddField("Channels",
-                $"Music: {await DescribeAsync(ChannelFeature.Music, server.Music)}\n" +
-                $"LFG: {await DescribeAsync(ChannelFeature.Lfg, server.Lfg)}")
+                $"Music: {await DescribeAsync(ChannelFeature.Music)}\n" +
+                $"LFG: {await DescribeAsync(ChannelFeature.Lfg)}")
             .AddField("LFG pings", $"{pingText}{(server.LfgPingRoleId is null && !server.LfgPingsOff ? " (default)" : "")}")
             .AddField("Auto-mod",
                 $"{(moderation.AutoModEnabled ? "✅ On" : "🚫 Off")} - change it and the filters with `/automod`, and " +
@@ -104,18 +104,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         => await RespondAsync(await _switch.SetAsync(Context.Guild, (ServerFeature)feature, enabled, Context.User),
             ephemeral: true);
 
-    [SlashCommand("channel", "Sets the channel music or LFG works in. Leave both options out to go back to the default.")]
+    [SlashCommand("channel", "Limits music or LFG to one channel. Leave the channel out to allow any channel.")]
     public async Task ChannelAsync(
         [Summary("feature", "Music or LFG")] ChannelFeature feature,
-        [Summary("channel", "Only this channel")] [ChannelTypes(ChannelType.Text)] ITextChannel? channel = null,
-        [Summary("anywhere", "True: any channel")] bool? anywhere = null)
+        [Summary("channel", "Only this channel (leave out: any channel)")] [ChannelTypes(ChannelType.Text)]
+        ITextChannel? channel = null)
     {
-        if (channel is not null && anywhere == true)
-        {
-            await RespondAsync("Pick a channel *or* anywhere, not both.", ephemeral: true);
-            return;
-        }
-
         // Music announcements and LFG cards are posted there, so the bot has to be able to post there.
         if (channel is not null &&
             ChannelAccess.WhyBotCantPostEmbeds(Context.Guild.CurrentUser, channel, NameOf(feature)) is { } problem)
@@ -126,16 +120,13 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
 
         await _settings.UpdateAsync(Context.Guild.Id, s =>
         {
-            var choice = feature == ChannelFeature.Music ? s.Music : s.Lfg;
-            choice.ChannelId = channel?.Id;
-            choice.Anywhere = anywhere == true;
+            (feature == ChannelFeature.Music ? s.Music : s.Lfg).ChannelId = channel?.Id;
         });
 
-        var server = await _settings.GetAsync(Context.Guild.Id);
-        var now = await DescribeAsync(feature, feature == ChannelFeature.Music ? server.Music : server.Lfg);
+        var now = await DescribeAsync(feature);
         _logger.LogInformation("{Feature} channel set to {Channel} by {User} ({UserId}).", NameOf(feature),
-            channel is not null ? $"#{channel.Name} ({channel.Id})" : anywhere == true ? "anywhere" : "the default",
-            Context.User.Username, Context.User.Id);
+            channel is not null ? $"#{channel.Name} ({channel.Id})" : "any channel", Context.User.Username,
+            Context.User.Id);
         await RespondAsync($"{NameOf(feature)}: {now}.", ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 
@@ -176,15 +167,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
 
     private static string NameOf(ChannelFeature feature) => feature == ChannelFeature.Music ? "Music" : "LFG";
 
-    private async Task<string> DescribeAsync(ChannelFeature feature, ChannelChoice choice)
+    private async Task<string> DescribeAsync(ChannelFeature feature)
     {
         var where = feature == ChannelFeature.Music
             ? await _settings.MusicChannelAsync(Context.Guild)
             : await _settings.LfgChannelAsync(Context.Guild);
-        var text = where.Anywhere ? "any channel"
-            : where.Channel is { } channel ? channel.Mention
-            : where.Name.Length > 0 ? $"#{where.Name} (this server doesn't have it yet)"
-            : "(the chosen channel was deleted)";
-        return choice.IsDefault ? $"{text} (default)" : text;
+        return where.Anywhere ? "any channel (pick one with `/settings channel`)"
+            : where.Channel?.Mention ?? "(the chosen channel was deleted - pick another with `/settings channel`)";
     }
 }

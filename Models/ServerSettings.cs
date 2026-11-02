@@ -40,14 +40,9 @@ public class ServerSettings
     public bool IsEnabled(ServerFeature feature) => !DisabledFeatures.Contains(feature.ToString());
 }
 
-/// <summary>Where a feature works in one server: a channel, anywhere, or (neither set) the bot's default.</summary>
+/// <summary>Where a feature works in one server: the channel it picked, or any channel until it picks one.</summary>
 public class ChannelChoice
 {
-    /// <summary>Only this channel. Saved by ID, so renaming the channel doesn't break it.</summary>
+    /// <summary>Only this channel; null means any channel. Saved by ID, so renaming the channel doesn't break it.</summary>
     public ulong? ChannelId { get; set; }
-
-    /// <summary>Any channel.</summary>
-    public bool Anywhere { get; set; }
-
-    public bool IsDefault => ChannelId is null && !Anywhere;
 }
