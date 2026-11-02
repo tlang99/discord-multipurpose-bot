@@ -80,7 +80,11 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "Or use the buttons on the pinned music menu. Controlling playback works from the bot's voice channel.")
             .AddField("⏰ Reminders",
                 "`/remind` - e.g. `when: in 2h` `what: start the raid`, and I'll ping you in that channel\n" +
-                "`/reminders list` · `/reminders cancel` - see or cancel yours");
+                "`/reminders list` · `/reminders cancel` - see or cancel yours")
+            .AddField("📊 Polls",
+                "`/poll` - e.g. `question: what should we play?` `answers: ranked, casual, zombies` (leave out " +
+                "`answers` for Yes/No). Optional: `hours` (default 24), `multiple`.\n" +
+                "End one early: right-click it → **Apps** → **End poll** (yours, or any if you're a moderator)");
 
         if (_chat.IsEnabled)
         {
@@ -89,8 +93,8 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "I read the last few messages in the channel for context." +
                 (_chat.Actions
                     ? "\nYou can also just ask: \"play never gonna give you up\", \"skip this\", \"show the queue\", " +
-                      "\"start the music\", \"make an lfg for ranked, need 3 more, mic required\" or \"remind me " +
-                      "in 20 minutes to check the oven\"."
+                      "\"start the music\", \"make an lfg for ranked, need 3 more, mic required\", \"remind me " +
+                      "in 20 minutes to check the oven\", \"make a poll: pizza or tacos?\" or \"end my poll\"."
                     : ""));
         }
 

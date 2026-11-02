@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using ModBot.Models;
+using ModBot.Services.Polls;
 using ModBot.Services.Reminders;
 
 namespace ModBot.Services.Chat;
@@ -28,9 +29,19 @@ public record MusicControlAction(MusicCommandRequest Request, bool FromModel = f
 /// <summary>The message asked to control the music, but not in a way that matched any control.</summary>
 public record UnclearMusicAction : ChatAction;
 
+/// <param name="Hours">How long it runs, if the message said; null for the default.</param>
+public record CreatePollAction(string Question, IReadOnlyList<string> Answers, int? Hours, bool AllowMultiple)
+    : ChatAction;
+
+/// <summary>The message asked for a poll, but what it should ask couldn't be worked out.</summary>
+public record UnclearPollAction : ChatAction;
+
+/// <summary>"End my poll": end the asker's open poll early (or the one they replied to).</summary>
+public record EndPollAction : ChatAction;
+
 /// <summary>
-/// Works out whether a chat message is asking the bot to play music, post an LFG or set a reminder, and with what
-/// details.
+/// Works out whether a chat message is asking the bot to play music, post an LFG, set a reminder or post a poll, and
+/// with what details.
 /// </summary>
 /// <remarks>
 /// Decided by testing against llama3.2:
@@ -44,6 +55,9 @@ public record UnclearMusicAction : ChatAction;
 /// nobody asked for.</item>
 /// <item>Reminders: <see cref="ReminderRequestReader"/>, checked before the model is asked anything. Adding them as a
 /// fourth answer to the request check made the model worse at the other three.</item>
+/// <item>Polls: <see cref="PollRequestReader"/>, also before the model, for the same reason. A poll laid out plainly
+/// ("question? a, b or c") is read by rules; otherwise the model pulls out the question and answers, and only answers
+/// the person actually wrote are kept, with Yes/No when there are none.</item>
 /// <item>Music controls (skip, pause, the queue, the menu...): <see cref="MusicCommandReader"/> first, for plainly
 /// worded ones. Looser wording goes to the model: "music_control" as an answer to the request check (tested: it
 /// caught 14 of 16 controls, the two misses being ones the reader handles, and flagged none of 11 chat messages, with
@@ -86,6 +100,14 @@ public partial class ChatActionParser
         "song and artist if they named them, or their own words for a genre or mood. Don't pick a specific song they " +
         "didn't ask for.";
 
+    private const string PollSchema =
+        """{"type":"object","properties":{"question":{"type":"string"},"answers":{"type":"array","items":{"type":"string"}}},"required":["question","answers"]}""";
+
+    private const string PollPrompt =
+        "The message asks a Discord bot to post a poll. In \"question\", give what the poll asks, in the person's own " +
+        "words, written as a question. In \"answers\", copy the choices they listed, word for word, in their order. " +
+        "If they didn't list any choices, give an empty list: never make choices up.";
+
     private readonly IChatService _chat;
     private readonly ReminderService _reminders;
     private readonly ILogger<ChatActionParser> _logger;
@@ -105,6 +127,17 @@ public partial class ChatActionParser
         if (ReminderRequestReader.Read(message, DateTimeOffset.UtcNow, _reminders.TimeZone) is { } reminder)
         {
             return new SetReminderAction(reminder.Time.DueAt, reminder.Text);
+        }
+
+        // And a poll phrase ("make a poll", "end my poll").
+        if (PollRequestReader.Read(message) is { } poll)
+        {
+            return await ReadPollAsync(poll, cancellationToken);
+        }
+
+        if (PollRequestReader.IsEndRequest(message))
+        {
+            return new EndPollAction();
         }
 
         // So is a plainly worded music control ("skip this", "show the queue").
@@ -178,6 +211,41 @@ public partial class ChatActionParser
         }
 
         return new UnclearMusicAction();
+    }
+
+    private async Task<ChatAction> ReadPollAsync(PollRequest request, CancellationToken cancellationToken)
+    {
+        if (request.Question is { } laidOutQuestion && request.Answers is { } laidOutAnswers)
+        {
+            return new CreatePollAction(laidOutQuestion, laidOutAnswers, request.Hours, request.AllowMultiple);
+        }
+
+        if (request.Text.Length == 0)
+        {
+            return new UnclearPollAction();
+        }
+
+        try
+        {
+            using var json = JsonDocument.Parse(await _chat.CompleteJsonAsync(PollPrompt, $"Message: {request.Text}",
+                PollSchema, cancellationToken));
+            var question = json.RootElement.GetProperty("question").GetString()?.Trim();
+            if (string.IsNullOrEmpty(question))
+            {
+                return new UnclearPollAction();
+            }
+
+            var offered = json.RootElement.GetProperty("answers").EnumerateArray()
+                .Select(a => a.GetString() ?? "");
+            var answers = PollRequestReader.KeepAnswersFrom(request.Text, offered);
+            return new CreatePollAction(question, answers.Count >= PollRules.MinAnswers ? answers : PollRules.YesNo,
+                request.Hours, request.AllowMultiple);
+        }
+        catch (Exception ex) when (ex is ChatServiceException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            _logger.LogDebug(ex, "Couldn't work out the poll from a chat message.");
+            return new UnclearPollAction();
+        }
     }
 
     private async Task<ChatAction> ReadSongAsync(string message, CancellationToken cancellationToken)
