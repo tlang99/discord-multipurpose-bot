@@ -44,9 +44,17 @@ public static class MusicFormatting
 
     /// <summary>A link when there's a web address to go to, else the title in bold.</summary>
     private static string Link(string safeTitle, string? uri, bool noPreview)
-        => Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.Scheme is "http" or "https"
-            ? noPreview ? $"[{safeTitle}](<{parsed.AbsoluteUri}>)" : $"[{safeTitle}]({parsed})"
-            : $"**{safeTitle}**";
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("http" or "https"))
+        {
+            return $"**{safeTitle}**";
+        }
+
+        // AbsoluteUri escapes spaces and the like, but leaves brackets: a ")" or ">" in the address would end the
+        // markdown link early and let the rest of it show (or link) as something else.
+        var address = parsed.AbsoluteUri.Replace("(", "%28").Replace(")", "%29").Replace("<", "%3C").Replace(">", "%3E");
+        return noPreview ? $"[{safeTitle}](<{address}>)" : $"[{safeTitle}]({address})";
+    }
 
     private static string Length(bool isLiveStream, TimeSpan duration) => isLiveStream ? "live" : Duration(duration);
 

@@ -171,6 +171,14 @@ public sealed class SharedHelperTests : IDisposable
     }
 
     [Fact]
+    public void Brackets_in_a_song_address_cannot_end_the_link_early()
+    {
+        var link = MusicFormatting.SongLink(new QueuedSong { Title = "t", Uri = "https://youtu.be/a)b>c" });
+
+        Assert.Equal("[t](<https://youtu.be/a%29b%3Ec>)", link);
+    }
+
+    [Fact]
     public void Songs_without_a_web_link_are_shown_in_bold()
         => Assert.Equal("**Local file**", MusicFormatting.SongLink(new QueuedSong { Title = "Local file" }));
 }

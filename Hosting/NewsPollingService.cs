@@ -53,7 +53,7 @@ public class NewsPollingService : BackgroundService
             // Give the gateway connection a head start so the first check isn't wasted.
             await Task.Delay(StartupDelay, stoppingToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             return; // shut down before the first check
         }

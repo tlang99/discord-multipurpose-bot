@@ -1,4 +1,3 @@
-using System.Reflection;
 using Discord;
 using ModBot.Common;
 
@@ -44,32 +43,47 @@ public sealed class ChannelAccessTests
         => Assert.True(ChannelAccess.CanPost(Member(SeeAndSend, DateTimeOffset.UtcNow.AddMinutes(-10)),
             Channel<ITextChannel>()));
 
+    // WhyCantPostPanel: /help-post, /music-menu and /lfg-setup. Manage Server alone mustn't let someone have the bot
+    // post and pin where they couldn't themselves.
+
+    private static readonly ChannelPermissions BotCanPostEmbeds =
+        new(viewChannel: true, sendMessages: true, embedLinks: true);
+
+    private static readonly ChannelPermissions UserCanPostAndPin =
+        new(viewChannel: true, sendMessages: true, pinMessages: true);
+
+    [Fact]
+    public void Panel_can_be_posted_when_both_have_the_permissions()
+        => Assert.Null(ChannelAccess.WhyCantPostPanel(Member(BotCanPostEmbeds), Member(UserCanPostAndPin),
+            Channel<ITextChannel>(), "the panel"));
+
+    [Fact]
+    public void Panel_needs_the_bot_to_send_embeds()
+        => Assert.StartsWith("I need **Send Messages** and **Embed Links**", ChannelAccess.WhyCantPostPanel(
+            Member(SeeAndSend), Member(UserCanPostAndPin), Channel<ITextChannel>(), "the panel"));
+
+    [Fact]
+    public void Panel_needs_the_person_to_be_able_to_pin_there()
+        => Assert.StartsWith("You need **Send Messages** and **Pin Messages**", ChannelAccess.WhyCantPostPanel(
+            Member(BotCanPostEmbeds), Member(SeeAndSend), Channel<ITextChannel>(), "the panel"));
+
+    [Fact]
+    public void Panel_is_refused_for_someone_who_is_not_a_member()
+        => Assert.StartsWith("You need", ChannelAccess.WhyCantPostPanel(
+            Member(BotCanPostEmbeds), user: null, Channel<ITextChannel>(), "the panel"));
+
+    [Fact]
+    public void Panel_only_goes_in_text_channels()
+        => Assert.NotNull(ChannelAccess.WhyCantPostPanel(Member(BotCanPostEmbeds), Member(UserCanPostAndPin),
+            DiscordFake.Create<ICategoryChannel>(new()), "the panel"));
+
     private static IGuildUser Member(ChannelPermissions permissions, DateTimeOffset? timedOutUntil = null)
-    {
-        var member = DispatchProxy.Create<IGuildUser, Fake>();
-        ((Fake)(object)member).Answers = new()
+        => DiscordFake.Create<IGuildUser>(new()
         {
             ["GetPermissions"] = permissions,
             ["get_TimedOutUntil"] = timedOutUntil,
-        };
-        return member;
-    }
+        });
 
     private static T Channel<T>() where T : class, IGuildChannel
-    {
-        var channel = DispatchProxy.Create<T, Fake>();
-        ((Fake)(object)channel).Answers = new() { ["get_Name"] = "test" };
-        return channel;
-    }
-
-    /// <summary>Answers the members a test sets up, by name, and refuses anything else.</summary>
-    public class Fake : DispatchProxy
-    {
-        public Dictionary<string, object?> Answers { get; set; } = [];
-
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
-            => targetMethod is not null && Answers.TryGetValue(targetMethod.Name, out var answer)
-                ? answer
-                : throw new NotSupportedException($"The fake doesn't support {targetMethod?.Name}.");
-    }
+        => DiscordFake.Create<T>(new() { ["get_Name"] = "test" });
 }

@@ -1,4 +1,3 @@
-using System.Reflection;
 using Discord;
 using ModBot.Models;
 using ModBot.Services.Moderation;
@@ -45,20 +44,8 @@ public sealed class TextFilterTests
 
     /// <summary>A member with exactly these server permissions; nothing else about them is used.</summary>
     private static IGuildUser Member(params GuildPermission[] permissions)
-    {
-        var member = DispatchProxy.Create<IGuildUser, FakeMember>();
-        ((FakeMember)(object)member).Permissions =
-            new GuildPermissions(permissions.Aggregate(0UL, (all, p) => all | (ulong)p));
-        return member;
-    }
-
-    public class FakeMember : DispatchProxy
-    {
-        public GuildPermissions Permissions { get; set; }
-
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
-            => targetMethod?.Name == "get_GuildPermissions"
-                ? Permissions
-                : throw new NotSupportedException($"The fake member doesn't support {targetMethod?.Name}.");
-    }
+        => DiscordFake.Create<IGuildUser>(new()
+        {
+            ["get_GuildPermissions"] = new GuildPermissions(permissions.Aggregate(0UL, (all, p) => all | (ulong)p)),
+        });
 }
