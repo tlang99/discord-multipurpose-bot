@@ -166,6 +166,34 @@ public partial class PollPoster
         return $"Ended the poll. [Results]({MessageTools.Link(user.GuildId, message.Channel.Id, message.Id)})";
     }
 
+    /// <summary>
+    /// "End my poll" from chat. Sent as a reply, it means the replied-to message and nothing else: it's fetched fresh
+    /// (a reply's copy of it can lack the poll), and if it isn't an open poll they may end, they're told so rather
+    /// than having some other poll ended, since ending can't be undone. Without a reply, it's their newest open poll
+    /// in the channel.
+    /// </summary>
+    public async Task<string> EndRequestedAsync(IGuildUser asker, ITextChannel channel, ulong? repliedToId)
+    {
+        var bot = await asker.Guild.GetCurrentUserAsync();
+        var canReadHistory = bot.GetPermissions(channel).ReadMessageHistory;
+        if (!canReadHistory)
+        {
+            return "I need **Read Message History** here to find your poll. Right-click it → Apps → End poll instead.";
+        }
+
+        if (repliedToId is { } id)
+        {
+            return await channel.GetMessageAsync(id) is IUserMessage replied && replied.Author.Id == bot.Id
+                ? await EndAsync(asker, replied)
+                : "The message you replied to isn't one of my polls.";
+        }
+
+        return await FindOpenPollAsync(channel, asker.Id, bot.Id) is { } poll
+            ? await EndAsync(asker, poll)
+            : "I can't find an open poll of yours in the last 50 messages here. Reply to the poll with \"end the " +
+              "poll\", or right-click it → Apps → End poll.";
+    }
+
     /// <summary>The person's newest poll that's still open, among the last 50 messages in the channel.</summary>
     public static async Task<IUserMessage?> FindOpenPollAsync(ITextChannel channel, ulong ownerId, ulong botId)
     {

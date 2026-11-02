@@ -96,6 +96,10 @@ public class PollRequestReaderTests
     }
 
     [Fact]
+    public void Asking_the_bot_to_make_one_is_still_a_request()
+        => Assert.NotNull(PollRequestReader.Read("i want you to make a poll: pizza or tacos?"));
+
+    [Fact]
     public void Uses_what_came_before_the_phrase_when_nothing_follows()
         => Assert.Equal("is game night friday?", PollRequestReader.Read("is game night friday? make a poll")?.Text);
 
@@ -110,15 +114,23 @@ public class PollRequestReaderTests
         Assert.True(request.AllowMultiple);
     }
 
-    [Fact]
-    public void Joins_a_question_before_the_phrase_to_answers_after_it()
+    [Theory]
+    [InlineData("what should we play tonight? make a poll: ranked or casual", "what should we play tonight? ranked or casual")]
+    [InlineData("are you awake? make a poll: pizza or tacos", "are you awake? pizza or tacos")]
+    public void A_question_before_the_phrase_with_answers_after_goes_to_the_model(string message, string text)
     {
-        var request = PollRequestReader.Read("what should we play tonight? make a poll: ranked or casual");
+        // Rules can't tell whether that question is the poll's, so both go to the model and nothing is read here.
+        var request = PollRequestReader.Read(message);
 
         Assert.NotNull(request);
-        Assert.Equal("what should we play tonight?", request.Question);
-        Assert.Equal(["ranked", "casual"], request.Answers);
+        Assert.Equal(text, request.Text);
+        Assert.Null(request.Question);
     }
+
+    [Fact]
+    public void Strips_decoration_the_model_added_to_an_answer()
+        => Assert.Equal(["ranked", "casual"],
+            PollRequestReader.KeepAnswersFrom("should we play ranked or casual", ["ranked 🖕🖕", "casual >>>"]));
 
     [Theory]
     [InlineData("hey what's up, make a poll: pizza or tacos?")]
@@ -195,6 +207,11 @@ public class PollRequestReaderTests
     [InlineData("did you make a poll?")]
     [InlineData("should we make a poll?")]
     [InlineData("lol we should do a vote on that")]
+    [InlineData("I'll make a poll later")]
+    [InlineData("i want to make a poll but idk how")]
+    [InlineData("let me make a poll")]
+    [InlineData("im gonna make a poll")]
+    [InlineData("make a poll? no wait, nvm")]
     [InlineData("start a vote to skip this song")] // the music's vote skip
     [InlineData("make a vote skip happen")]
     public void Ignores_non_requests(string message) => Assert.Null(PollRequestReader.Read(message));
@@ -202,7 +219,8 @@ public class PollRequestReaderTests
     [Theory]
     [InlineData("end my poll", true)]
     [InlineData("close the poll please", true)]
-    [InlineData("can you stop this vote", true)]
+    [InlineData("can you stop this poll", true)]
+    [InlineData("stop the vote", false)] // the music's vote skip
     [InlineData("hey, can you end the poll now please", true)]
     [InlineData("how do i end my poll?", false)]
     [InlineData("the poll ends tomorrow", false)]

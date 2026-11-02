@@ -300,32 +300,7 @@ public partial class ChatHandler
                         "should we play? ranked, casual or zombies\", or use `/poll`.", false);
 
             case EndPollAction:
-            {
-                // The open poll they replied to, or else their newest open one here. A reply to one that's already
-                // ended still looks for an open one, and only says it's ended if there isn't one.
-                var replied = request.ReferencedMessage is { } message &&
-                              PollPoster.OwnerOf(message, guild.CurrentUser.Id) is not null
-                    ? message
-                    : null;
-                IUserMessage? target = replied is not null && PollPoster.IsOpen(replied) ? replied : null;
-                if (target is null)
-                {
-                    if (!guild.CurrentUser.GetPermissions(channel).ReadMessageHistory)
-                    {
-                        return replied is not null
-                            ? (await _polls.EndAsync(asker, replied), true)
-                            : ("I need **Read Message History** here to find your poll. Reply to the poll with " +
-                               "\"end the poll\" instead, or right-click it → Apps → End poll.", false);
-                    }
-
-                    target = await PollPoster.FindOpenPollAsync(channel, asker.Id, guild.CurrentUser.Id) ?? replied;
-                }
-
-                return target is null
-                    ? ("I can't find an open poll of yours in the last 50 messages here. Reply to the poll with " +
-                       "\"end the poll\", or right-click it → Apps → End poll.", false)
-                    : (await _polls.EndAsync(asker, target), true);
-            }
+                return (await _polls.EndRequestedAsync(asker, channel, request.ReferencedMessage?.Id), true);
 
             case UnclearSongAction:
                 return ("I couldn't tell which song you want - try \"play <song name>\", or use `/play`.", false);
