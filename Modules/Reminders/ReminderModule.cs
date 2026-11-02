@@ -20,7 +20,7 @@ public class ReminderModule : InteractionModuleBase<SocketInteractionContext>
 
     [SlashCommand("remind", "Sets a reminder - I'll ping you in this channel when it's time.")]
     public async Task RemindAsync(
-        [Summary("when", "e.g. 10m, 2h30m, in 3 days, at 5pm, tomorrow 9am")] string when,
+        [Summary("when", "e.g. 10m, 2h30m, in 3 days, at 5pm, tomorrow 9am")] [MaxLength(100)] string when,
         [Summary("what", "What to remind you about")] [MaxLength(ReminderService.MaxTextLength)] string what)
     {
         if (Context.Channel is not ITextChannel channel)

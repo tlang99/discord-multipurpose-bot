@@ -110,14 +110,20 @@ public class ReminderService
         };
 
         // The cap and the ID are checked in the same step as the add, so two requests at once can't both get in over
-        // the limit, or share an ID and overwrite each other. A taken ID just means trying another.
-        ReminderAddResult added;
-        do
+        // the limit, or share an ID and overwrite each other. A taken ID just means trying another; with ~920k codes
+        // a few tries is plenty, and the cap stops it looping forever if the store ever filled up.
+        var added = ReminderAddResult.IdTaken;
+        for (var tries = 0; tries < 10 && added == ReminderAddResult.IdTaken; tries++)
         {
             reminder.Id = NewId();
             added = await _store.TryAddAsync(reminder, MaxPerUser);
         }
-        while (added == ReminderAddResult.IdTaken);
+
+        if (added == ReminderAddResult.IdTaken)
+        {
+            _logger.LogWarning("Couldn't find a free reminder code after 10 tries.");
+            return new(false, "Something went wrong setting that reminder - try again.");
+        }
 
         if (added == ReminderAddResult.LimitReached)
         {
