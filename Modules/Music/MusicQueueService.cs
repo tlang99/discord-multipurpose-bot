@@ -34,6 +34,7 @@ public class MusicQueueService : IHostedService
     public const string MineButton = ButtonPrefix + ":mine";
 
     private readonly IMusicQueueStore _store;
+    private readonly IGuildSettingsStore _settings;
     private readonly MusicService _music;
     private readonly DiscordSocketClient _client;
     private readonly MusicOptions _options;
@@ -61,10 +62,12 @@ public class MusicQueueService : IHostedService
     private readonly ConcurrentDictionary<ulong, RepostTimer> _reposts = new();
     private int _menusRestored;
 
-    public MusicQueueService(IMusicQueueStore store, MusicService music, MusicPlayerEvents events,
+    public MusicQueueService(IMusicQueueStore store, IGuildSettingsStore settings, MusicService music,
+        MusicPlayerEvents events,
         DiscordSocketClient client, IOptions<MusicOptions> options, ILogger<MusicQueueService> logger)
     {
         _store = store;
+        _settings = settings;
         _music = music;
         _client = client;
         _options = options.Value;
@@ -103,7 +106,30 @@ public class MusicQueueService : IHostedService
             return MusicReply.Fail(lookup.Error);
         }
 
-        var songs = lookup.Tracks.Select(t => new QueuedSong
+        // Titles end up on the pinned menu for everyone to see, so they follow the server's word filter, with the same
+        // moderator exemption as auto-mod. Checked now, while the person can pick something else.
+        var tracks = lookup.Tracks;
+        var playlistName = lookup.PlaylistName;
+        var filtered = 0;
+        var settings = await _settings.GetAsync(user.Guild.Id);
+        if (settings.AutoModEnabled && !user.GuildPermissions.ManageMessages)
+        {
+            tracks = tracks.Where(t => TextFilter.FindViolation(t.Title, settings) is null).ToList();
+            filtered = lookup.Tracks.Count - tracks.Count;
+            if (tracks.Count == 0)
+            {
+                return MusicReply.Fail(lookup.IsPlaylist
+                    ? "Every song in that playlist has a title that breaks this server's word filter."
+                    : "That song's title breaks this server's word filter, so it can't go in the queue.");
+            }
+
+            if (playlistName is not null && TextFilter.FindViolation(playlistName, settings) is not null)
+            {
+                playlistName = "a playlist";
+            }
+        }
+
+        var songs = tracks.Select(t => new QueuedSong
         {
             Track = t.ToString(),
             Title = t.Title,
@@ -130,8 +156,9 @@ public class MusicQueueService : IHostedService
         }
 
         var what = lookup.IsPlaylist
-            ? $"**{added.Count}** songs from **{Format.Sanitize(lookup.PlaylistName!)}**" +
-              (added.Count < songs.Count ? $" (the most you can have waiting is {SongsPerPerson})" : "")
+            ? $"**{added.Count}** songs from **{Format.Sanitize(playlistName!)}**" +
+              (added.Count < songs.Count ? $" (the most you can have waiting is {SongsPerPerson})" : "") +
+              (filtered > 0 ? $" (skipped {filtered} whose titles break the word filter)" : "")
             : $"{SongLink(added[0])} ({SongLength(added[0])})";
         var text = new StringBuilder($"➕ {user.Mention} added {what}");
 
