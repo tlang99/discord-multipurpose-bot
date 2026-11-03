@@ -8,8 +8,17 @@ public class JsonNewsSubscriptionStore : INewsSubscriptionStore
     /// reappear in a feed aren't re-posted.</summary>
     private const int MaxSeenItemsPerSubscription = 500;
 
-    private readonly JsonFileRepository<NewsSubscription> _repository =
-        JsonFileRepository<NewsSubscription>.InDataFolder("news-subscriptions.json");
+    private readonly JsonFileRepository<NewsSubscription> _repository;
+
+    public JsonNewsSubscriptionStore() : this(Path.Combine("data", "news-subscriptions.json"))
+    {
+    }
+
+    /// <summary>For tests: a store backed by a file of your choosing.</summary>
+    public JsonNewsSubscriptionStore(string filePath)
+    {
+        _repository = new JsonFileRepository<NewsSubscription>(filePath);
+    }
 
     public async Task<IReadOnlyList<NewsSubscription>> GetAllAsync()
         => (await _repository.GetAllAsync()).ToList();

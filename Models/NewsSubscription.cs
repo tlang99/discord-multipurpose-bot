@@ -39,5 +39,9 @@ public class NewsSubscription
         }
     }
 
+    /// <summary>Post as silent messages (no push or desktop notification; they still show up and count as unread).
+    /// On by default, and for feeds saved before this existed: a missing value keeps this default when loaded.</summary>
+    public bool Silent { get; set; } = true;
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
