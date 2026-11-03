@@ -197,12 +197,14 @@ public partial class ChatHandler
                 string text;
                 var suppressEmbeds = false;
                 Embed? embed = null;
+                var outcome = "done";
                 try
                 {
                     // Same switches as the slash commands: a feature the server turned off isn't done from chat either.
                     if (FeatureFor(action) is { } needed && !server.IsEnabled(needed))
                     {
                         text = ServerSettingsService.TurnedOff(needed);
+                        outcome = "feature turned off";
                     }
                     else if (action is MusicControlAction or UnclearMusicAction)
                     {
@@ -220,11 +222,14 @@ public partial class ChatHandler
                     // Lavalink or Discord failing mid-action: say so instead of leaving the request unanswered.
                     _logger.LogWarning(ex, "Chat action {Action} failed in guild {GuildId}.", action.GetType().Name, guild.Id);
                     text = "Something went wrong doing that - try again in a bit, or use the slash command.";
+                    outcome = "failed";
                 }
 
-                _logger.LogInformation("Chat action {Action} for {User} ({UserId}) in #{Channel}: {Result}",
+                // The action and how it went, never the reply text: replies repeat what people asked ("I'll remind you
+                // to..."), and what people say to the bot stays out of the log files.
+                _logger.LogInformation("Chat action {Action} for {User} ({UserId}) in #{Channel}: {Outcome}.",
                     action.GetType().Name.Replace("Action", ""), message.Author.Username, message.Author.Id,
-                    channel.Name, text.Length == 0 ? "done" : TextTools.Truncate(text.ReplaceLineEndings(" "), 150));
+                    channel.Name, outcome);
 
                 // A posted poll is its own answer (it's a reply to the request); every other action replies.
                 if (action is CreatePollAction && text.Length == 0)
@@ -233,8 +238,7 @@ public partial class ChatHandler
                 }
 
                 // Song and playlist titles are third-party text, so action replies follow the word rules too.
-                if (settings.AutoModEnabled &&
-                    TextFilter.FindViolation(text + "\n" + EmbedText(embed), settings) is not null)
+                if (TextFilter.FindViolation(text + "\n" + EmbedText(embed), settings) is not null)
                 {
                     text = action is PlayMusicAction or MusicControlAction
                         ? "My reply named a song whose title breaks this server's word filter, so I won't repeat it " +
@@ -253,8 +257,9 @@ public partial class ChatHandler
 
         reply = TextTools.Truncate(reply, DiscordMessageLimit);
 
-        // The model can be talked into saying anything, so its answers follow the same word rules as members.
-        if (settings.AutoModEnabled && TextFilter.FindViolation(reply, settings) is not null)
+        // The model can be talked into saying anything, so its answers always follow the server's word list (auto-mod
+        // on or off: that switch is only about scanning members' messages).
+        if (TextFilter.FindViolation(reply, settings) is not null)
         {
             reply = "I came up with an answer, but it broke this server's word filter, so I'm keeping it to myself. " +
                     "Try asking another way.";

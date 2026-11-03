@@ -64,7 +64,7 @@ public partial class PollPoster
 
         // Same exemption as auto-mod: moderators aren't held to the word filter, for their own words.
         var settings = await _settingsStore.GetAsync(asker.GuildId);
-        if (TextFilter.AppliesTo(settings, writtenByModel ? null : asker) &&
+        if (TextFilter.AppliesToBotPost(writtenByModel ? null : asker) &&
             TextFilter.FindViolation(draft.Question + "\n" + string.Join("\n", draft.Answers), settings) is not null)
         {
             return "That poll breaks this server's word filter, so I can't post it.";

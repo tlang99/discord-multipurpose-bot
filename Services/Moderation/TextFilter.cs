@@ -18,10 +18,19 @@ public static class TextFilter
     /// reminders, song titles).</summary>
     public static bool IsExempt(IGuildUser? user) => user?.GuildPermissions.ManageMessages == true;
 
-    /// <summary>Whether text from <paramref name="author"/> is checked: auto-mod is on and they aren't exempt. Pass
-    /// null for the bot's own text, which is always checked while auto-mod is on.</summary>
+    /// <summary>Whether a member's own message is checked by auto-mod: auto-mod is on and they aren't exempt. This is
+    /// what /automod enable switches.</summary>
     public static bool AppliesTo(GuildSettings settings, IGuildUser? author)
         => settings.AutoModEnabled && !IsExempt(author);
+
+    /// <summary>
+    /// Whether text the bot is about to post is checked: always, auto-mod on or off, unless it's an exempt member's
+    /// own words (a moderator's poll or reminder). The auto-mod switch only decides whether members' messages are
+    /// scanned and removed; it was never meant to let the bot say what the server's word list forbids. Pass null as
+    /// <paramref name="author"/> for the bot's own or the model's words, which are always checked. A server with no
+    /// banned words and the profanity filter off has nothing to check, so this changes nothing there.
+    /// </summary>
+    public static bool AppliesToBotPost(IGuildUser? author) => !IsExempt(author);
 
     /// <summary>Why <paramref name="content"/> breaks the guild's text rules (e.g. "contained profanity"), or null if
     /// it doesn't. Ignores <see cref="GuildSettings.AutoModEnabled"/>; callers decide whether that applies.</summary>

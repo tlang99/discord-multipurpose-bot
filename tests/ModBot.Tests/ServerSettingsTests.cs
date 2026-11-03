@@ -151,31 +151,53 @@ public sealed class ServerSettingsServiceTests : IDisposable
 public class LfgPingRoleSafetyTests
 {
     [Fact]
-    public void Refuses_everyone()
+    public async Task Refuses_everyone()
     {
         var everyone = Role(1, GuildPermissions.None);
-        Assert.Equal("is @everyone", LfgPoster.WhyUnsafeToSelfAssign(Guild(everyone), everyone));
+        Assert.Equal("is @everyone", await LfgPoster.WhyUnsafeToSelfAssignAsync(Guild(everyone), everyone));
     }
 
     [Fact]
-    public void Refuses_a_role_with_extra_permissions()
+    public async Task Refuses_a_role_with_extra_permissions()
     {
         var everyone = Role(1, GuildPermissions.None);
         var mods = Role(2, new GuildPermissions(kickMembers: true));
 
-        Assert.Contains("beyond @everyone's", LfgPoster.WhyUnsafeToSelfAssign(Guild(everyone), mods));
+        Assert.Contains("beyond @everyone's", await LfgPoster.WhyUnsafeToSelfAssignAsync(Guild(everyone), mods));
     }
 
     [Fact]
-    public void Allows_a_plain_role()
+    public async Task Allows_a_plain_role()
     {
         var everyone = Role(1, new GuildPermissions(viewChannel: true));
         var plain = Role(2, new GuildPermissions(viewChannel: true));
 
-        Assert.Null(LfgPoster.WhyUnsafeToSelfAssign(Guild(everyone), plain));
+        Assert.Null(await LfgPoster.WhyUnsafeToSelfAssignAsync(Guild(everyone), plain));
     }
 
-    private static IGuild Guild(IRole everyone) => DiscordFake.Create<IGuild>(new() { ["get_EveryoneRole"] = everyone });
+    [Fact]
+    public async Task Refuses_a_role_a_channel_grants_permissions_to()
+    {
+        // Checked through the server's channel list, so any server object works (the check used to be skipped for
+        // anything but a live gateway server).
+        var everyone = Role(1, GuildPermissions.None);
+        var plain = Role(2, GuildPermissions.None);
+        var secret = DiscordFake.Create<IGuildChannel>(new()
+        {
+            ["get_Name"] = "secret",
+            ["GetPermissionOverwrite"] = (OverwritePermissions?)new OverwritePermissions(viewChannel: PermValue.Allow),
+        });
+
+        Assert.Equal("grants permissions in #secret",
+            await LfgPoster.WhyUnsafeToSelfAssignAsync(Guild(everyone, secret), plain));
+    }
+
+    private static IGuild Guild(IRole everyone, params IGuildChannel[] channels)
+        => DiscordFake.Create<IGuild>(new()
+        {
+            ["get_EveryoneRole"] = everyone,
+            ["GetChannelsAsync"] = Task.FromResult<IReadOnlyCollection<IGuildChannel>>(channels),
+        });
 
     private static IRole Role(ulong id, GuildPermissions permissions)
         => DiscordFake.Create<IRole>(new()
@@ -189,7 +211,9 @@ public class SettingsRequestReaderTests
     [Theory]
     [InlineData("disable polls", ServerFeature.Polls, false)]
     [InlineData("enable the chatbot", ServerFeature.Chat, true)]
-    [InlineData("can you disable music please", ServerFeature.Music, false)]
+    [InlineData("can you disable music for this server please", ServerFeature.Music, false)]
+    [InlineData("enable music", ServerFeature.Music, true)]
+    [InlineData("disable the  chat bot", ServerFeature.Chat, false)]
     [InlineData("turn off lfg for this server", ServerFeature.Lfg, false)]
     [InlineData("turn reminders on here", ServerFeature.Reminders, true)]
     [InlineData("disable chat actions", ServerFeature.ChatActions, false)]
@@ -204,5 +228,21 @@ public class SettingsRequestReaderTests
     [InlineData("don't disable polls")]
     [InlineData("disable polls and then make one")]
     [InlineData("disable the profanity filter")] // that's /automod
+    [InlineData("disable music")] // could mean "stop the song"; switching it off for everyone needs "for this server"
+    [InlineData("can you disable music please")]
     public void Ignores_everything_else(string message) => Assert.Null(SettingsRequestReader.Read(message));
+}
+
+public class BotPostFilterTests
+{
+    [Fact]
+    public void The_bots_own_words_are_always_checked_auto_mod_on_or_off()
+        => Assert.True(Services.Moderation.TextFilter.AppliesToBotPost(null));
+
+    [Fact]
+    public void A_moderators_own_words_are_not()
+    {
+        var mod = DiscordFake.Create<IGuildUser>(new() { ["get_GuildPermissions"] = new GuildPermissions(manageMessages: true) });
+        Assert.False(Services.Moderation.TextFilter.AppliesToBotPost(mod));
+    }
 }

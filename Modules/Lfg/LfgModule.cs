@@ -168,7 +168,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             role = await Context.Guild.CreateRoleAsync(roleName, GuildPermissions.None, color: null, isHoisted: false,
                 isMentionable: true);
         }
-        else if (LfgPoster.WhyUnsafeToSelfAssign(Context.Guild, role!) is { } reason)
+        else if (await LfgPoster.WhyUnsafeToSelfAssignAsync(Context.Guild, role!) is { } reason)
         {
             await FollowupAsync($"There's already a **@{Format.Sanitize(role!.Name)}** role, but it {reason}. Members " +
                                "can give the ping role to themselves, so it must be a plain role with no permissions. " +
@@ -236,7 +236,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
         // Checked on every click, not just at setup: the role is found by name, and it could have gained permissions
         // (or been swapped for a renamed role) since. Removing it is always allowed.
-        if (wanted && LfgPoster.WhyUnsafeToSelfAssign(Context.Guild, role) is { } reason)
+        if (wanted && await LfgPoster.WhyUnsafeToSelfAssignAsync(Context.Guild, role) is { } reason)
         {
             _logger.LogWarning("Refused to self-assign LFG role {RoleId} in guild {GuildId}: it {Reason}.",
                 role.Id, Context.Guild.Id, reason);

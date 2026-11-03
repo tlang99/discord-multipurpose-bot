@@ -46,7 +46,7 @@ public class LfgPoster
     /// access to a hidden channel), would let members escalate their own access just by clicking a button. Checked
     /// when the role is picked (/settings lfg-pings), at /lfg-setup, and on every click.
     /// </summary>
-    public static string? WhyUnsafeToSelfAssign(IGuild guild, IRole role)
+    public static async Task<string?> WhyUnsafeToSelfAssignAsync(IGuild guild, IRole role)
     {
         if (role.Id == guild.EveryoneRole.Id)
         {
@@ -68,7 +68,8 @@ public class LfgPoster
                    $"{(names.Count > 3 ? ", ..." : "")})";
         }
 
-        var grantingChannel = (guild as SocketGuild)?.Channels.FirstOrDefault(c =>
+        // Every channel, from the cache: any server object works, so the check is never skipped.
+        var grantingChannel = (await guild.GetChannelsAsync(CacheMode.CacheOnly)).FirstOrDefault(c =>
             c.GetPermissionOverwrite(role) is { AllowValue: not 0 });
         return grantingChannel is null ? null : $"grants permissions in #{grantingChannel.Name}";
     }
@@ -115,6 +116,15 @@ public class LfgPoster
                     ? "No ping: the LFG ping role this server picked has been deleted - a server admin can pick " +
                       "another with `/settings lfg-pings`."
                     : $"No @{ping.Name} ping: pings aren't set up yet - a server admin can run `/lfg-setup`.";
+        }
+        else if (await WhyUnsafeToSelfAssignAsync(guild, pingRole) is { } unsafeReason)
+        {
+            // Checked when it was picked and on each panel click, but it could have gained permissions since; pinging
+            // it would also advertise a role members shouldn't be handing themselves.
+            _logger.LogWarning("Not pinging LFG role {RoleId} in guild {GuildId}: it {Reason}.", pingRole.Id, guild.Id,
+                unsafeReason);
+            pingStatus = $"No @{pingRole.Name} ping: that role {unsafeReason}, so it's not safe as a ping role. A " +
+                         "server admin can fix the role or pick another with `/settings lfg-pings`.";
         }
         else if (!pingRole.IsMentionable && !guild.CurrentUser.GuildPermissions.MentionEveryone)
         {

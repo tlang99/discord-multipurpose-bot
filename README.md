@@ -187,8 +187,11 @@ saved in `data/server-settings.json`:
 - `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
   pings off, or leave both out for the default.
 - Moderation is per server too: `/automod` (auto-mod is **off** in a new server until it runs `/automod enable`) and `/modlog`. So is the
-  chatbot's personality (`/chat personality`).
-- Admins can also switch features from chat: "@bot disable polls", "@bot turn music off for this server". Plain "turn
+  chatbot's personality (`/chat personality`). Auto-mod on or off only decides whether members' messages are
+  scanned and removed: what the bot itself posts (chatbot replies, news write-ups, polls, reminders, song titles) always
+  follows the server's banned words and profanity setting.
+- Admins can also switch features from chat: "@bot disable polls", "@bot disable music for this server" (music needs
+  "for this server", since "disable music" might just mean stop the song). Plain "turn
   off the music" still just stops the song.
 
 **Logs** — shown in the console and also written to `logs/modbot-<date>.log`, one file per day, appended to. Files
@@ -198,7 +201,8 @@ to empty to turn the files off. Each entry is one line, so a file can be searche
   bot is in.
 - **Use:** every command, button and pop-up that works (who, which channel, how long it took) or fails (and why), each
   chatbot answer and chat action, auto-mod removals, and settings changes with who made them. What people say to the
-  chatbot isn't logged, only that it answered.
+  chatbot isn't logged, only that it answered or did something. Log files hold usernames and user IDs for as many
+  days as they're kept.
 - **The server tag:** every line from a server ends with `=> Server name (ID)`.
 - **Less noise:** web-request and Lavalink chatter only shows at warning level and up.
 

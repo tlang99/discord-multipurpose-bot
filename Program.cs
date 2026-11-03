@@ -206,6 +206,17 @@ if (musicOptions.LavalinkPassword == new MusicOptions().LavalinkPassword &&
         musicOptions.LavalinkUrl);
 }
 
+// Music:ChannelName and Lfg:ChannelName were removed when servers got /settings channel. An old appsettings.json that
+// still has them would otherwise be ignored without a word, leaving music and LFG open in every channel.
+foreach (var oldKey in new[] { "Music:ChannelName", "Lfg:ChannelName" })
+{
+    if (!string.IsNullOrWhiteSpace(builder.Configuration[oldKey]))
+    {
+        WarnAtStartup("ModBot", "{Key} in appsettings.json is no longer used: each server picks its own channel with " +
+                                "/settings channel (until then, any channel works). Remove the key to hide this.", oldKey);
+    }
+}
+
 if (missingAppSettings)
 {
     WarnAtStartup("ModBot",

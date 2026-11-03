@@ -21,23 +21,28 @@ public static partial class SettingsRequestReader
             return null;
         }
 
-        var on = (match.Groups["verb"].Value + match.Groups["state"].Value).ToLowerInvariant() switch
-        {
-            var v when v.Contains("enable") || v.EndsWith("on") => true,
-            _ => false,
-        };
+        var verb = match.Groups["verb"].Value.ToLowerInvariant();
+        var on = verb == "enable" || match.Groups["state"].Value.Equals("on", StringComparison.OrdinalIgnoreCase);
 
-        var name = match.Groups["feature"].Value.ToLowerInvariant();
-        ServerFeature? feature = name switch
+        // Whitespace-normalised, so "chat  bot" is "chat bot"; the regex only lets these names through.
+        ServerFeature? feature = WhitespaceRegex().Replace(match.Groups["feature"].Value.ToLowerInvariant(), " ") switch
         {
-            _ when name.Contains("action") => ServerFeature.ChatActions,
-            _ when name.StartsWith("chat") || name.Contains("bot") || name.Contains("ai") => ServerFeature.Chat,
-            _ when name.StartsWith("music") => ServerFeature.Music,
-            _ when name.StartsWith("lfg") || name.StartsWith("looking") => ServerFeature.Lfg,
-            _ when name.StartsWith("poll") => ServerFeature.Polls,
-            _ when name.StartsWith("remind") => ServerFeature.Reminders,
+            "chat actions" or "actions" => ServerFeature.ChatActions,
+            "chatbot" or "chat bot" or "the bot chat" or "ai chat" or "chat" => ServerFeature.Chat,
+            "music" => ServerFeature.Music,
+            "lfg" or "lfgs" or "looking for group" => ServerFeature.Lfg,
+            "poll" or "polls" => ServerFeature.Polls,
+            "reminder" or "reminders" => ServerFeature.Reminders,
             _ => null,
         };
+
+        // "Disable music" could just mean "stop the song", and switching music off for everyone also stops what's
+        // playing, so that one needs saying plainly: "disable music for this server". The turn on/off forms always
+        // need it already.
+        if (feature == ServerFeature.Music && verb == "disable" && !match.Groups["here"].Success)
+        {
+            return null;
+        }
 
         return feature is { } f ? new FeatureSwitchRequest(f, on) : null;
     }
@@ -50,9 +55,12 @@ public static partial class SettingsRequestReader
     /// <summary>"enable/disable X [here]" or "turn/switch X on/off for this server" / "turn/switch on/off X here".</summary>
     [GeneratedRegex(
         @"^\W*(?:(?:hey|ok|okay|please|pls|can\s+you|could\s+you|would\s+you|go\s+ahead\s+and)[\s,]+)*" +
-        @"(?:(?<verb>enable|disable)\s+(?:the\s+)?" + Feature + @"(?:\s+" + Here + @")?" +
+        @"(?:(?<verb>enable|disable)\s+(?:the\s+)?" + Feature + @"(?<here>\s+" + Here + @")?" +
         @"|(?<verb>turn|switch)\s+(?<state>on|off)\s+(?:the\s+)?" + Feature + @"\s+" + Here +
         @"|(?<verb>turn|switch)\s+(?:the\s+)?" + Feature + @"\s+(?<state>on|off)\s+" + Here + @")" +
         @"(?:[\s,]+(?:now|please|pls))*[\s.!]*$", RegexOptions.IgnoreCase)]
     private static partial Regex RequestRegex();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRegex();
 }

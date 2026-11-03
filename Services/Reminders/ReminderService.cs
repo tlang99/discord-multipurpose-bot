@@ -47,8 +47,8 @@ public class ReminderService
     public TimeZoneInfo TimeZone { get; }
 
     /// <summary>Sets a reminder from a "when" like "in 2 hours" or "tomorrow 9am" (as typed into /remind).</summary>
-    /// <param name="applyWordFilter">Whether the server's word filter applies to this person (auto-mod exempts
-    /// moderators).</param>
+    /// <param name="applyWordFilter">Whether the server's word list applies to this person: everyone but moderators,
+    /// auto-mod on or off, since the bot posts the text later.</param>
     public async Task<ReminderResult> CreateAsync(ulong guildId, ulong channelId, ulong userId, string when, string text,
         bool applyWordFilter, ulong? sourceMessageId = null)
     {
@@ -92,7 +92,7 @@ public class ReminderService
         if (applyWordFilter)
         {
             var settings = await _settingsStore.GetAsync(guildId);
-            if (settings.AutoModEnabled && TextFilter.FindViolation(text, settings) is not null)
+            if (TextFilter.FindViolation(text, settings) is not null)
             {
                 return new(false, "That reminder breaks this server's word filter, so I can't post it later.");
             }
