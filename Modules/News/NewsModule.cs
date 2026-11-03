@@ -73,8 +73,9 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 
     [SlashCommand("notify", "Turns notifications for a feed's posts on or off (feeds post silently by default).")]
     public async Task NotifyAsync(
-        [Summary(description: "Feed name, as shown by /news list - leave out for every feed")] string? name = null,
-        [Summary(description: "True: notify people. False: post silently")] bool enabled = false)
+        // Required, so leaving it out can't flip a feed the opposite way from what was meant.
+        [Summary(description: "True: notify people. False: post silently")] bool enabled,
+        [Summary(description: "Feed name, as shown by /news list - leave out for every feed")] string? name = null)
         => await RespondAsync(await _notifications.SetAsync(Context.Guild.Id, name, silent: !enabled, Context.User),
             ephemeral: true);
 

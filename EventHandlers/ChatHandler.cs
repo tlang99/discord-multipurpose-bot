@@ -130,7 +130,7 @@ public partial class ChatHandler
         // Admin switches from chat: a feature on/off ("disable polls") or news notifications ("mute news
         // notifications"), for this server only.
         var change = SettingsRequestReader.Read(words);
-        var newsNotify = change is null ? NewsNotifications.Read(words) : null;
+        var newsNotify = change is null ? await _newsNotifications.ReadForGuildAsync(guild.Id, words) : null;
         if (message.Author is SocketGuildUser member && (change is not null || newsNotify is not null))
         {
             if (IsOnCooldown(guild.Id, member.Id))

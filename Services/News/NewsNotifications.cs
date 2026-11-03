@@ -59,6 +59,17 @@ public partial class NewsNotifications
     }
 
     /// <summary>
+    /// <see cref="Read"/>, plus a check that a named feed is one this server actually follows: "mute the sports news"
+    /// in a server without a "sports" feed isn't a request about its feeds, so it goes on to normal chat instead of
+    /// getting a "no such feed" reply.
+    /// </summary>
+    public async Task<NewsNotifyRequest?> ReadForGuildAsync(ulong guildId, string message)
+        => Read(message) is { } request &&
+           (request.Feed is null || await _store.GetAsync(guildId, request.Feed) is not null)
+            ? request
+            : null;
+
+    /// <summary>
     /// Spots "mute news notifications", "unmute the news", "turn news notifications on", "make the mw4 feed silent" in
     /// chat, with plain rules like the other admin switches. The whole message has to be the request.
     /// </summary>

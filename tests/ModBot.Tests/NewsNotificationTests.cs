@@ -84,6 +84,17 @@ public sealed class NewsNotificationTests : IDisposable
     [InlineData("turn off the music")]
     public void Ignores_everything_else(string message) => Assert.Null(NewsNotifications.Read(message));
 
+    [Fact]
+    public async Task A_named_feed_the_server_doesnt_follow_is_not_a_request()
+    {
+        await Follow(guildId: 1, "mw4", silent: true);
+
+        Assert.NotNull(await _notifications.ReadForGuildAsync(1, "make the mw4 feed notify"));
+        Assert.NotNull(await _notifications.ReadForGuildAsync(1, "mute news notifications"));
+        Assert.Null(await _notifications.ReadForGuildAsync(1, "mute the sports news")); // goes on to normal chat
+        Assert.Null(await _notifications.ReadForGuildAsync(2, "make the mw4 feed notify")); // another server's feed
+    }
+
     private static IUser Admin => DiscordFake.Create<IUser>(new() { ["get_Username"] = "mod", ["get_Id"] = 9UL });
 
     private Task Follow(ulong guildId, string name, bool silent)
