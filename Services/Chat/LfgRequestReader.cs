@@ -60,20 +60,17 @@ public static partial class LfgRequestReader
     /// <summary>The highest rank named, checked top down so "diamond, not gold" style mentions settle on the higher one
     /// consistently.</summary>
     private static LfgRankOption? ReadRank(string text, LfgGameProfile game)
-        => Enumerable.Reverse(game.Ranks).FirstOrDefault(r => Names(r.Name, r.Aliases).Any(n => HasWord(text, n)));
+        => Enumerable.Reverse(game.Ranks).FirstOrDefault(r => r.AllNames().Any(n => HasWord(text, n)));
 
     /// <summary>Ranked playlists first (a ranked playlist usually rotates modes, so "ranked hardpoint" is the ranked
     /// one), then the rest in the server's list order, which is how a server says which wins ("hardcore domination"
     /// is Hardcore if it's listed above Domination).</summary>
     private static LfgPlaylistOption? ReadPlaylist(string text, LfgGameProfile game)
     {
-        bool Named(LfgPlaylistOption p) => Names(p.Name, p.Aliases).Any(n => HasWord(text, n));
+        bool Named(LfgPlaylistOption p) => p.AllNames().Any(n => HasWord(text, n));
         return game.Playlists.FirstOrDefault(p => p.Ranked && Named(p)) ??
                game.Playlists.FirstOrDefault(p => !p.Ranked && Named(p));
     }
-
-    private static IEnumerable<string> Names(string name, IEnumerable<string> aliases)
-        => aliases.Prepend(name).Select(n => n.Trim().ToLowerInvariant()).Where(n => n.Length > 0);
 
     private static bool? ReadMic(string text)
     {

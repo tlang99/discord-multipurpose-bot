@@ -131,7 +131,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             IAutocompleteInteraction autocompleteInteraction, IParameterInfo parameter, IServiceProvider services)
         {
             var game = await services.GetRequiredService<ServerSettingsService>().LfgGameAsync(context.Guild.Id);
-            return Suggest(autocompleteInteraction, game.Playlists.Select(p => (p.Name, p.Aliases)));
+            return Suggest(autocompleteInteraction, game.Playlists);
         }
     }
 
@@ -142,19 +142,18 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             IAutocompleteInteraction autocompleteInteraction, IParameterInfo parameter, IServiceProvider services)
         {
             var game = await services.GetRequiredService<ServerSettingsService>().LfgGameAsync(context.Guild.Id);
-            return Suggest(autocompleteInteraction, game.Ranks.Select(r => (r.Name, r.Aliases)));
+            return Suggest(autocompleteInteraction, game.Ranks);
         }
     }
 
     /// <summary>The names matching what's been typed so far (in the name or one of its other names), in the server's
     /// order. Discord shows at most 25, which is also the most a server can set.</summary>
     private static AutocompletionResult Suggest(IAutocompleteInteraction interaction,
-        IEnumerable<(string Name, List<string> Aliases)> options)
+        IEnumerable<LfgNamedOption> options)
     {
-        var typed = (interaction.Data.Current.Value as string ?? "").Trim();
+        var typed = interaction.Data.Current.Value as string ?? "";
         var matches = options
-            .Where(o => typed.Length == 0 || o.Name.Contains(typed, StringComparison.OrdinalIgnoreCase) ||
-                        o.Aliases.Any(a => a.Contains(typed, StringComparison.OrdinalIgnoreCase)))
+            .Where(o => o.Matches(typed))
             .Take(LfgGameProfileText.MaxEntries)
             .Select(o => new AutocompleteResult(o.Name, o.Name));
         return AutocompletionResult.FromSuccess(matches);

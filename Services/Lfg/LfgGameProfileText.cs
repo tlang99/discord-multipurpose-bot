@@ -22,32 +22,49 @@ public static class LfgGameProfileText
     public const int MaxAliasLength = 30;
     public const int MaxAliasesPerEntry = 10;
 
-    /// <summary>The pop-up's text box limit, comfortably above 25 full lines.</summary>
+    /// <summary>Discord's limit for a pop-up text box. 25 lines with every name at full length wouldn't fit, so the
+    /// saved text is checked against it too (see <see cref="Parse"/>).</summary>
     public const int MaxBoxLength = 4000;
 
     /// <summary>The profile the two boxes describe, or what's wrong with them (naming the line). Both empty is the
     /// blank profile.</summary>
     public static (LfgGameProfile? Profile, string? Problem) Parse(string? playlists, string? ranks)
     {
-        var game = new LfgGameProfile();
+        // One set of taken names across both boxes: chat reads both lists from the same message, so a playlist and a
+        // rank both called "Diamond" would make "diamond" set both.
+        var taken = new Dictionary<string, string>();
 
-        var (playlistEntries, playlistProblem) = ParseLines(playlists, "Playlists", allowRanked: true);
+        var (playlistEntries, playlistProblem) = ParseLines(playlists, "Playlists", allowRanked: true, taken);
         if (playlistProblem is not null)
         {
             return (null, playlistProblem);
         }
 
-        var (rankEntries, rankProblem) = ParseLines(ranks, "Ranks", allowRanked: false);
+        var (rankEntries, rankProblem) = ParseLines(ranks, "Ranks", allowRanked: false, taken);
         if (rankProblem is not null)
         {
             return (null, rankProblem);
         }
 
-        game.Playlists = playlistEntries.Select(e => new LfgPlaylistOption
+        var game = new LfgGameProfile
         {
-            Name = e.Name, Aliases = e.Aliases, Ranked = e.Ranked,
-        }).ToList();
-        game.Ranks = rankEntries.Select(e => new LfgRankOption { Name = e.Name, Aliases = e.Aliases }).ToList();
+            Playlists = playlistEntries.Select(e => new LfgPlaylistOption
+            {
+                Name = e.Name, Aliases = e.Aliases, Ranked = e.Ranked,
+            }).ToList(),
+            Ranks = rankEntries.Select(e => new LfgRankOption { Name = e.Name, Aliases = e.Aliases }).ToList(),
+        };
+
+        // The pop-up is pre-filled with the saved lists written out tidily (Format), which can be longer than what was
+        // typed ("hp,snd" comes back as "hp, snd"). Saving more than a box holds would leave the server unable to open
+        // /settings lfg-game again, so it's refused now, while the admin can trim it.
+        var (playlistText, rankText) = Format(game);
+        if (playlistText.Length > MaxBoxLength || rankText.Length > MaxBoxLength)
+        {
+            return (null, $"{(playlistText.Length > MaxBoxLength ? "Playlists" : "Ranks")}: too long to fit back in " +
+                          $"this pop-up ({MaxBoxLength} characters once tidied). Use fewer or shorter other names.");
+        }
+
         return (game, null);
     }
 
@@ -61,8 +78,11 @@ public static class LfgGameProfileText
 
     private sealed record Entry(string Name, List<string> Aliases, bool Ranked);
 
-    private static (List<Entry> Entries, string? Problem) ParseLines(string? text, string box, bool allowRanked)
+    /// <param name="taken">Every name used so far, in either box, and whose it is ("the Diamond rank").</param>
+    private static (List<Entry> Entries, string? Problem) ParseLines(string? text, string box, bool allowRanked,
+        Dictionary<string, string> taken)
     {
+        var kind = allowRanked ? "playlist" : "rank";
         var entries = new List<Entry>();
         var lines = (text ?? "").Split('\n').Select(l => l.Trim()).ToList();
         for (var i = 0; i < lines.Count; i++)
@@ -108,12 +128,17 @@ public static class LfgGameProfileText
                 return ([], Problem($"at most {MaxAliasesPerEntry} other names per line."));
             }
 
-            // A name or alias pointing at two entries would make /lfg and chat pick one at random.
-            var words = aliases.Prepend(name.ToLowerInvariant());
-            if (entries.FirstOrDefault(e => words.Any(w => e.Name.Equals(w, StringComparison.OrdinalIgnoreCase) ||
-                                                           e.Aliases.Contains(w))) is { } clash)
+            // A name pointing at two entries would make /lfg and chat pick one at random. Checked with the same name
+            // list they match against (LfgNamedOption.AllNames), so this can't drift from what they resolve.
+            var option = new LfgRankOption { Name = name, Aliases = aliases };
+            if (option.AllNames().FirstOrDefault(taken.ContainsKey) is { } clash)
             {
-                return ([], Problem($"a name here is already used by **{clash.Name}**."));
+                return ([], Problem($"`{clash}` is already used by **{taken[clash]}**."));
+            }
+
+            foreach (var word in option.AllNames())
+            {
+                taken[word] = $"the {name} {kind}";
             }
 
             entries.Add(new Entry(name, aliases, ranked));

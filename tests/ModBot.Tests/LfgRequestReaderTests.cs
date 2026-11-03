@@ -171,8 +171,9 @@ public class LfgGameProfileTests
         => Assert.True(LfgGameProfileText.Parse("", "  \n ").Profile!.IsEmpty);
 
     [Theory]
-    [InlineData("Hardpoint\nhardpoint", "", "already used by **Hardpoint**")] // same name twice
-    [InlineData("Hardpoint : hp\nHot Pursuit : hp", "", "already used by **Hardpoint**")] // alias clash
+    [InlineData("Hardpoint\nhardpoint", "", "already used by **the Hardpoint playlist**")] // same name twice
+    [InlineData("Hardpoint : hp\nHot Pursuit : hp", "", "already used by **the Hardpoint playlist**")] // alias clash
+    [InlineData("Diamond Mode", "Gold\nDiamond mode", "already used by **the Diamond Mode playlist**")] // across boxes
     [InlineData("", "Gold*", "only marks a ranked **playlist**")]
     [InlineData(" : hp", "", "line 1")]
     public void Reports_the_line_that_is_wrong(string playlists, string ranks, string expected)
@@ -209,5 +210,33 @@ public class LfgGameProfileTests
         Assert.Contains("only applies to **Ranked Play**", cod.Combine(cod.FindPlaylist("hp"), gold).Problem);
         Assert.Null(LfgGames.RocketLeague.Combine(LfgGames.RocketLeague.FindPlaylist("2s"),
             LfgGames.RocketLeague.FindRank("gc")).Problem);
+    }
+}
+
+public class LfgGameProfileLengthTests
+{
+    [Fact]
+    public void Refuses_a_list_that_would_not_fit_back_in_the_pop_up()
+    {
+        // 25 lines, each with 10 other names typed without spaces: fits the 4000-character box as typed, but not once
+        // tidied (" : " and ", "), which is what the pop-up would be pre-filled with next time.
+        var lines = Enumerable.Range(1, 25).Select(i =>
+            $"M{i:00}:" + string.Join(",", Enumerable.Range(0, 10).Select(j => $"{i:00}{j}".PadRight(14, 'x'))));
+        var typed = string.Join("\n", lines);
+
+        var (profile, problem) = LfgGameProfileText.Parse(typed, "");
+
+        Assert.True(typed.Length <= LfgGameProfileText.MaxBoxLength);
+        Assert.Null(profile);
+        Assert.Contains("too long to fit back", problem);
+    }
+
+    [Fact]
+    public void A_saved_list_always_fits_back_in_the_pop_up()
+    {
+        var (playlists, ranks) = LfgGameProfileText.Format(LfgGames.CallOfDuty);
+
+        Assert.True(playlists.Length <= LfgGameProfileText.MaxBoxLength);
+        Assert.True(ranks.Length <= LfgGameProfileText.MaxBoxLength);
     }
 }

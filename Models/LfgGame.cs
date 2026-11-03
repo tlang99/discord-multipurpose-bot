@@ -1,25 +1,35 @@
 namespace ModBot.Models;
 
-/// <summary>A playlist or game mode a server's LFG posts can name (e.g. "Hardpoint", "Ranked Play").</summary>
-public class LfgPlaylistOption
+/// <summary>A named entry in a server's LFG game (a playlist or a rank), with other names people use for it.</summary>
+public abstract class LfgNamedOption
 {
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Other words for it in chat and in /lfg ("hp", "comp"), lowercase.</summary>
+    /// <summary>Other words for it in chat and in /lfg ("hp", "plat"), lowercase.</summary>
     public List<string> Aliases { get; set; } = [];
 
+    /// <summary>The name and every other name, lowercase. The one list everything matches against: /lfg's lookups and
+    /// suggestions, chat, and the duplicate check when a server saves its game, so they can't disagree.</summary>
+    public IEnumerable<string> AllNames()
+        => Aliases.Prepend(Name).Select(n => n.Trim().ToLowerInvariant()).Where(n => n.Length > 0);
+
+    /// <summary>Whether <paramref name="value"/> is exactly one of its names (any case, ignoring outer spaces).</summary>
+    public bool IsNamed(string value) => AllNames().Contains(value.Trim().ToLowerInvariant());
+
+    /// <summary>Whether one of its names contains <paramref name="typed"/>, for suggestions as someone types.</summary>
+    public bool Matches(string typed)
+        => typed.Trim().Length == 0 || AllNames().Any(n => n.Contains(typed.Trim(), StringComparison.OrdinalIgnoreCase));
+}
+
+/// <summary>A playlist or game mode a server's LFG posts can name (e.g. "Hardpoint", "Ranked Play").</summary>
+public class LfgPlaylistOption : LfgNamedOption
+{
     /// <summary>A ranked playlist: the one a minimum rank belongs to.</summary>
     public bool Ranked { get; set; }
 }
 
 /// <summary>A skill rank a server's LFG posts can ask for as a minimum (e.g. "Gold").</summary>
-public class LfgRankOption
-{
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Other words for it ("plat", "top250"), lowercase.</summary>
-    public List<string> Aliases { get; set; } = [];
-}
+public class LfgRankOption : LfgNamedOption;
 
 /// <summary>A playlist and rank resolved against a server's game, or why they don't go together.</summary>
 public record LfgChoice(LfgPlaylistOption? Playlist, LfgRankOption? Rank, string? Problem = null);
@@ -44,9 +54,9 @@ public class LfgGameProfile
     /// <summary>Whether ranks belong to particular playlists. If no playlist is marked ranked, a rank goes with any.</summary>
     public bool HasRankedPlaylists => Playlists.Any(p => p.Ranked);
 
-    public LfgPlaylistOption? FindPlaylist(string value) => Find(Playlists, value, p => p.Name, p => p.Aliases);
+    public LfgPlaylistOption? FindPlaylist(string value) => Playlists.FirstOrDefault(p => p.IsNamed(value));
 
-    public LfgRankOption? FindRank(string value) => Find(Ranks, value, r => r.Name, r => r.Aliases);
+    public LfgRankOption? FindRank(string value) => Ranks.FirstOrDefault(r => r.IsNamed(value));
 
     public bool IsTopRank(LfgRankOption rank) => Ranks.Count > 0 && ReferenceEquals(Ranks[^1], rank);
 
@@ -71,13 +81,5 @@ public class LfgGameProfile
             ? new(playlist, rank)
             : new(playlist, null, $"A minimum rank only applies to {string.Join(" or ",
                 Playlists.Where(p => p.Ranked).Select(p => $"**{p.Name}**"))} - pick that, or leave the rank empty.");
-    }
-
-    private static T? Find<T>(IEnumerable<T> options, string value, Func<T, string> name,
-        Func<T, IEnumerable<string>> aliases) where T : class
-    {
-        value = value.Trim();
-        return options.FirstOrDefault(o => name(o).Equals(value, StringComparison.OrdinalIgnoreCase) ||
-                                           aliases(o).Any(a => a.Equals(value, StringComparison.OrdinalIgnoreCase)));
     }
 }
