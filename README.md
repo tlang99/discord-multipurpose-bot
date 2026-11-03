@@ -4,6 +4,17 @@ A Discord moderation bot built on [Discord.Net](https://github.com/discord-net/D
 (`Discord.Net.Interactions`) and the .NET Generic Host for configuration/DI. The architecture is intentionally
 modular so new feature areas can be added later without touching moderation code.
 
+**Host it yourself.** This repository is for running your own copy: you bring the Discord application, the machine,
+and (optionally) an AI model. See [Self-hosting](#self-hosting) below. The copy run by the author is private and
+only in friends' servers.
+
+## License
+
+Source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). You're free to use, change, and
+self-host it for personal and other non-commercial purposes, including for your own and your friends' servers.
+**Commercial use is not allowed**: selling it, offering it as a paid service, or using it in a business needs the
+author's permission. Copies you share must include the license and its `Required Notice` line.
+
 ## Features
 
 **Moderation commands** (all permission-gated, see below): `/kick`, `/ban`, `/unban`, `/timeout`, `/untimeout`,
@@ -36,7 +47,8 @@ Any auto-moderation removal is logged to the mod-log channel just like a manual 
 - `/news follow-game game:<game> channel:#channel` — built-in game feeds (currently Call of Duty: Modern Warfare 4,
   via a Bing News search, which includes each article's summary snippet and thumbnail in the embed). Run it again
   with a different channel to move it.
-- `/news follow-feed name url channel` — any other RSS/Atom feed (`https://` only).
+- `/news follow-feed name url channel` — any other RSS/Atom feed (`https://` only), so any game works: most game
+  sites, patch-note pages and Steam news have one.
 - `/news list`, `/news unfollow name`, `/news latest name [count]` (preview the newest articles, only visible to you).
 - **Silent by default:** feeds post as silent messages. They show up and count as unread, but send no push or
   desktop notification. `/news notify enabled:True name:<feed>` makes one feed notify again (leave `name` out for every
@@ -316,6 +328,36 @@ Swapping providers later means writing a new implementation of that interface an
 `Program.cs` — the auto-moderation handler and slash commands don't know which backend is behind it.
 
 ## Setup
+
+### Self-hosting
+
+What you need:
+- **.NET 10 SDK** to build and run the bot (`dotnet run`).
+- **A Discord application and bot token** (step 1 below).
+- **Optional extras:**
+  - **Music:** Java 17+ and [Lavalink](lavalink/README.md).
+  - **AI chat:** [Ollama](https://ollama.com) with any model, on your machine or Ollama's cloud.
+  - **Image moderation:** a [Sightengine](https://sightengine.com) account.
+
+**Ollama is optional.** Every feature works through slash commands without it: moderation, auto-mod, music, LFG,
+polls, reminders, news, `/settings`. The model only powers:
+- **Chatting** when someone @mentions the bot.
+- **Asking it in chat** ("play X", "make a poll…"). Every one of these has a slash command too.
+- **AI write-ups of news articles.** Without the model, articles post with the site's own summary.
+
+Without a model, set `Chat:Enabled` to `false` in `appsettings.json`. Otherwise mentions wait out
+`Chat:TimeoutSeconds` (default 120) and then reply with an error.
+
+**Public or private bot:** in the Developer Portal under **Bot**, **Public Bot** decides who can add your copy to a
+server. Turn it **off** to keep it to servers you add it to yourself, which is what you want for a copy that uses
+your own model, music server, and API keys. Turn it on only if anyone with the invite link may add it.
+
+Every server starts on safe defaults:
+- auto-mod off,
+- every feature on, with no channel locks,
+- news posted silently.
+
+Server admins set it up with `/settings`, `/automod`, `/news` and `/chat personality`. Then follow steps 1–8:
 
 ### 1. Create the Discord application
 

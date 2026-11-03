@@ -162,8 +162,8 @@ public partial class ChatHandler
         var question = Describe(message, guild, bot.Id);
         if (question.Length == 0)
         {
-            await ReplyAsync(message, $"👋 Ask me something after the mention, like \"@{bot.DisplayName} what's a " +
-                                      "good Hardpoint strategy?\"");
+            await ReplyAsync(message, $"👋 Ask me something after the mention, like \"@{bot.DisplayName} what should " +
+                                      "we play tonight?\"");
             return;
         }
 
