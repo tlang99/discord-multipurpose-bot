@@ -3,10 +3,11 @@ namespace ModBot.Models;
 /// <summary>A named entry in a server's LFG game (a playlist or a rank), with other names people use for it.</summary>
 public abstract class LfgNamedOption
 {
-    public string Name { get; set; } = string.Empty;
+    // The setters turn nulls from a hand-edited settings file into empty values, so nothing reading them can crash.
+    public string Name { get; set => field = value ?? string.Empty; } = string.Empty;
 
     /// <summary>Other words for it in chat and in /lfg ("hp", "plat"), lowercase.</summary>
-    public List<string> Aliases { get; set; } = [];
+    public List<string> Aliases { get; set => field = value?.Where(a => a is not null).ToList() ?? []; } = [];
 
     /// <summary>The name and every other name, lowercase. The one list everything matches against: /lfg's lookups and
     /// suggestions, chat, and the duplicate check when a server saves its game, so they can't disagree.</summary>
@@ -42,10 +43,10 @@ public record LfgChoice(LfgPlaylistOption? Playlist, LfgRankOption? Rank, string
 public class LfgGameProfile
 {
     /// <summary>In order: the first one a chat message names wins.</summary>
-    public List<LfgPlaylistOption> Playlists { get; set; } = [];
+    public List<LfgPlaylistOption> Playlists { get; set => field = value?.Where(p => p is not null).ToList() ?? []; } = [];
 
     /// <summary>Lowest first, so the last is the top rank.</summary>
-    public List<LfgRankOption> Ranks { get; set; } = [];
+    public List<LfgRankOption> Ranks { get; set => field = value?.Where(r => r is not null).ToList() ?? []; } = [];
 
     public static LfgGameProfile Empty => new();
 

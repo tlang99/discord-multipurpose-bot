@@ -240,3 +240,29 @@ public class LfgGameProfileLengthTests
         Assert.True(ranks.Length <= LfgGameProfileText.MaxBoxLength);
     }
 }
+
+public class LfgGameRobustnessTests
+{
+    [Fact]
+    public void A_hand_edited_file_with_nulls_loads_as_empty_values()
+    {
+        var game = System.Text.Json.JsonSerializer.Deserialize<LfgGameProfile>(
+            """{"Playlists":[null,{"Name":null,"Aliases":null}],"Ranks":null}""")!;
+
+        Assert.Single(game.Playlists);
+        Assert.Empty(game.Ranks);
+        Assert.Null(game.FindPlaylist("hp")); // and nothing throws
+        Assert.False(game.IsEmpty);
+    }
+
+    [Fact]
+    public void The_pop_up_text_stays_within_discords_limits()
+    {
+        // Over these, Discord refuses to open the pop-up at all.
+        Assert.True(ModBot.Modules.Settings.LfgGameModal.PlaylistsPlaceholder.Length <= 100);
+        Assert.True(ModBot.Modules.Settings.LfgGameModal.RanksPlaceholder.Length <= 100);
+        Assert.True(ModBot.Modules.Settings.LfgGameModal.PlaylistsLabel.Length <= 45);
+        Assert.True(ModBot.Modules.Settings.LfgGameModal.RanksLabel.Length <= 45);
+        Assert.True(ModBot.Modules.Settings.LfgGameModal.ModalTitle.Length <= 45);
+    }
+}

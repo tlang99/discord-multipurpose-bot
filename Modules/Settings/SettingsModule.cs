@@ -109,14 +109,14 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     {
         var (playlists, ranks) = LfgGameProfileText.Format(await _settings.LfgGameAsync(Context.Guild.Id));
         var modal = new ModalBuilder()
-            .WithTitle("LFG game for this server")
+            .WithTitle(LfgGameModal.ModalTitle)
             .WithCustomId(LfgGameModalId)
-            .AddTextInput("Playlists / modes (one per line)", LfgGameModal.PlaylistsId, TextInputStyle.Paragraph,
-                placeholder: "Ranked Play* : ranked, comp\nHardpoint : hp\nSearch & Destroy : snd\n(* = ranked; after : = other names)",
-                maxLength: LfgGameProfileText.MaxBoxLength, required: false, value: playlists)
-            .AddTextInput("Ranks, lowest first (one per line)", LfgGameModal.RanksId, TextInputStyle.Paragraph,
-                placeholder: "Bronze\nSilver\nGold\nPlatinum : plat",
-                maxLength: LfgGameProfileText.MaxBoxLength, required: false, value: ranks)
+            .AddTextInput(LfgGameModal.PlaylistsLabel, LfgGameModal.PlaylistsId, TextInputStyle.Paragraph,
+                placeholder: LfgGameModal.PlaylistsPlaceholder, maxLength: LfgGameProfileText.MaxBoxLength,
+                required: false, value: playlists)
+            .AddTextInput(LfgGameModal.RanksLabel, LfgGameModal.RanksId, TextInputStyle.Paragraph,
+                placeholder: LfgGameModal.RanksPlaceholder, maxLength: LfgGameProfileText.MaxBoxLength,
+                required: false, value: ranks)
             .Build();
         await RespondWithModalAsync(modal);
     }
@@ -228,16 +228,24 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
 /// <see cref="SettingsModule.LfgGameAsync"/> (so it can be pre-filled); this only reads it back by the boxes' IDs.</summary>
 public class LfgGameModal : IModal
 {
+    public const string ModalTitle = "LFG game for this server";
     public const string PlaylistsId = "playlists";
     public const string RanksId = "ranks";
 
-    public string Title => "LFG game for this server";
+    // Discord's limits: labels 45 characters, placeholders 100. Over that, the pop-up refuses to open at all, so a test
+    // checks these. The format hint lives in the label, where it always shows.
+    public const string PlaylistsLabel = "Modes, one per line (* = ranked)";
+    public const string PlaylistsPlaceholder = "Ranked Play* : ranked, comp\nHardpoint : hp\nSearch & Destroy : snd";
+    public const string RanksLabel = "Ranks, lowest first, one per line";
+    public const string RanksPlaceholder = "Bronze\nSilver\nGold\nPlatinum : plat";
 
-    [InputLabel("Playlists / modes (one per line)")]
+    public string Title => ModalTitle;
+
+    [InputLabel(PlaylistsLabel)]
     [ModalTextInput(PlaylistsId, TextInputStyle.Paragraph, maxLength: LfgGameProfileText.MaxBoxLength)]
     public string? Playlists { get; set; }
 
-    [InputLabel("Ranks, lowest first (one per line)")]
+    [InputLabel(RanksLabel)]
     [ModalTextInput(RanksId, TextInputStyle.Paragraph, maxLength: LfgGameProfileText.MaxBoxLength)]
     public string? Ranks { get; set; }
 }
