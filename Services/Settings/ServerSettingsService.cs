@@ -72,6 +72,10 @@ public class ServerSettingsService
 
     public string DefaultPingRoleName => ConfiguredChannels.RoleName(_lfg.PingRoleName);
 
+    /// <summary>The server's LFG playlists and ranks, or blank if it hasn't set any.</summary>
+    public async Task<LfgGameProfile> LfgGameAsync(ulong guildId)
+        => (await _store.GetAsync(guildId)).LfgGame ?? LfgGameProfile.Empty;
+
     public async Task<LfgPingRole> LfgPingRoleAsync(IGuild guild)
     {
         var settings = await _store.GetAsync(guild.Id);

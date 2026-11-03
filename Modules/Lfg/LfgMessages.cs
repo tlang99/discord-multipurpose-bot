@@ -19,26 +19,6 @@ public static class LfgMessages
     private static readonly Color OpenColor = new(0x3BA55D);
     private static readonly Color ClosedColor = new(0x747F8D);
 
-    public static string ModeLabel(LfgMode mode) => mode switch
-    {
-        LfgMode.Multiplayer => "Multiplayer",
-        _ => mode.ToString(),
-    };
-
-    public static string PlaylistLabel(LfgPlaylist playlist) => playlist switch
-    {
-        LfgPlaylist.RankedPlay => "Ranked Play",
-        LfgPlaylist.Hardpoint => "Hardpoint",
-        LfgPlaylist.SearchAndDestroy => "Search & Destroy",
-        LfgPlaylist.TeamDeathmatch => "Team Deathmatch",
-        LfgPlaylist.Domination => "Domination",
-        LfgPlaylist.KillConfirmed => "Kill Confirmed",
-        LfgPlaylist.Hardcore => "Hardcore",
-        _ => "Any playlist",
-    };
-
-    public static string RankLabel(LfgRank rank) => rank == LfgRank.Top250 ? "Top 250" : rank.ToString();
-
     public static string PlatformLabel(LfgPlatform platform) => platform switch
     {
         LfgPlatform.PcOnly => "PC only",
@@ -46,18 +26,22 @@ public static class LfgMessages
         _ => "Crossplay",
     };
 
-    /// <summary>"Multiplayer · Ranked Play", or just "Multiplayer" when any playlist goes.</summary>
-    private static string Heading(LfgPost post) => post.Details.Playlist == LfgPlaylist.Any
-        ? ModeLabel(post.Mode)
-        : $"{ModeLabel(post.Mode)} · {PlaylistLabel(post.Details.Playlist)}";
+    /// <summary>The playlist the post is for ("Ranked Play"), or "LFG" when any goes. Playlist names are the server's
+    /// own (/settings lfg-game), so they're escaped for Discord formatting.</summary>
+    private static string Heading(LfgPost post) => post.Details.Playlist is { } playlist ? Format.Sanitize(playlist) : "LFG";
 
-    /// <summary>"🏆 Gold+ · 🎧 Mic required · 🖥️ PC only" - only the details the host actually set.</summary>
+    /// <summary>"Ranked Play squad", or just "squad".</summary>
+    private static string Squad(LfgPost post)
+        => post.Details.Playlist is { } playlist ? $"{Format.Sanitize(playlist)} squad" : "squad";
+
+    /// <summary>"🏆 Gold+ · 🎧 Mic required · 🖥️ PC only" - only the details the host actually set. The game's top
+    /// rank has no "+" ("🏆 Top 250"): there's nothing above it.</summary>
     public static string? Tags(LfgDetails details)
     {
         var tags = new List<string>();
         if (details.MinRank is { } rank)
         {
-            tags.Add(rank == LfgRank.Top250 ? "🏆 Top 250" : $"🏆 {RankLabel(rank)}+");
+            tags.Add(details.MinRankIsTop ? $"🏆 {Format.Sanitize(rank)}" : $"🏆 {Format.Sanitize(rank)}+");
         }
 
         if (details.MicRequired is { } mic)
@@ -104,7 +88,7 @@ public static class LfgMessages
     {
         var spots = post.OpenSpots == 1 ? "1 spot" : $"{post.OpenSpots} spots";
         return ($"{MentionUtils.MentionRole(roleId)} {MentionUtils.MentionUser(post.HostId)} is looking for a " +
-                $"{Heading(post)} squad ({spots} open).",
+                $"{Squad(post)} ({spots} open).",
             new AllowedMentions(AllowedMentionTypes.None) { RoleIds = [roleId] });
     }
 
@@ -131,7 +115,7 @@ public static class LfgMessages
     public static (string Text, AllowedMentions Mentions) ReadyPing(LfgPost post, bool full)
     {
         var mentions = string.Join(" ", post.Members.Select(MentionUtils.MentionUser));
-        var text = $"{mentions}\n🎮 Your {Heading(post)} squad is {(full ? "full" : "ready")} " +
+        var text = $"{mentions}\n🎮 Your {Squad(post)} is {(full ? "full" : "ready")} " +
                    $"({post.Members.Count}/{post.Size}) — hop in voice and get on!";
         return (text, new AllowedMentions(AllowedMentionTypes.None) { UserIds = [.. post.Members] });
     }

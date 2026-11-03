@@ -184,7 +184,7 @@ public partial class ChatHandler
                 if (_options.Actions && server.IsEnabled(ServerFeature.ChatActions) &&
                     message.Author is SocketGuildUser && words.Length > 0)
                 {
-                    action = await _actionParser.ParseAsync(words);
+                    action = await _actionParser.ParseAsync(words, server.LfgGame);
                 }
 
                 if (action is null)

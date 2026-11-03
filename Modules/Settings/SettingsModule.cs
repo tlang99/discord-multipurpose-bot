@@ -7,6 +7,7 @@ using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Modules.Lfg;
+using ModBot.Services.Lfg;
 using ModBot.Services.Settings;
 using ModBot.Services.Storage;
 
@@ -88,6 +89,10 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
                 $"Music: {await DescribeAsync(ChannelFeature.Music)}\n" +
                 $"LFG: {await DescribeAsync(ChannelFeature.Lfg)}")
             .AddField("LFG pings", $"{pingText}{(server.LfgPingRoleId is null && !server.LfgPingsOff ? " (default)" : "")}")
+            .AddField("LFG game", server.LfgGame is { IsEmpty: false } game
+                ? $"{TextTools.Count(game.Playlists.Count, "playlist")}, {TextTools.Count(game.Ranks.Count, "rank")} " +
+                  "(change with `/settings lfg-game`)"
+                : "not set up: `/lfg` has no playlist or rank options yet (`/settings lfg-game`)")
             .AddField("Auto-mod",
                 $"{(moderation.AutoModEnabled ? "✅ On" : "🚫 Off")} - change it and the filters with `/automod`, and " +
                 "the log channel with `/modlog`.")
@@ -95,6 +100,48 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
                         "Admins can also ask me, e.g. \"@bot disable polls\".")
             .Build();
         await RespondAsync(embed: embed, ephemeral: true, allowedMentions: AllowedMentions.None);
+    }
+
+    private const string LfgGameModalId = "settings-lfg-game";
+
+    [SlashCommand("lfg-game", "Sets the playlists/modes and ranks /lfg offers here, in a pop-up. Blank until set.")]
+    public async Task LfgGameAsync()
+    {
+        var (playlists, ranks) = LfgGameProfileText.Format(await _settings.LfgGameAsync(Context.Guild.Id));
+        var modal = new ModalBuilder()
+            .WithTitle("LFG game for this server")
+            .WithCustomId(LfgGameModalId)
+            .AddTextInput("Playlists / modes (one per line)", LfgGameModal.PlaylistsId, TextInputStyle.Paragraph,
+                placeholder: "Ranked Play* : ranked, comp\nHardpoint : hp\nSearch & Destroy : snd\n(* = ranked; after : = other names)",
+                maxLength: LfgGameProfileText.MaxBoxLength, required: false, value: playlists)
+            .AddTextInput("Ranks, lowest first (one per line)", LfgGameModal.RanksId, TextInputStyle.Paragraph,
+                placeholder: "Bronze\nSilver\nGold\nPlatinum : plat",
+                maxLength: LfgGameProfileText.MaxBoxLength, required: false, value: ranks)
+            .Build();
+        await RespondWithModalAsync(modal);
+    }
+
+    // ignoreGroupNames: the modal's ID is a plain string, not prefixed with "settings" (see ChatModule's pop-up).
+    [ModalInteraction(LfgGameModalId, ignoreGroupNames: true)]
+    public async Task OnLfgGameSubmittedAsync(LfgGameModal modal)
+    {
+        var (game, problem) = LfgGameProfileText.Parse(modal.Playlists, modal.Ranks);
+        if (game is null)
+        {
+            await RespondAsync($"{problem}\nNothing was changed - run `/settings lfg-game` again to fix it.",
+                ephemeral: true, allowedMentions: AllowedMentions.None);
+            return;
+        }
+
+        await _settings.UpdateAsync(Context.Guild.Id, s => s.LfgGame = game.IsEmpty ? null : game);
+        _logger.LogInformation("LFG game set to {Playlists} playlist(s), {Ranks} rank(s) by {User} ({UserId}).",
+            game.Playlists.Count, game.Ranks.Count, Context.User.Username, Context.User.Id);
+
+        await RespondAsync(game.IsEmpty
+            ? "Cleared: `/lfg` here has no playlist or rank options now (squad size, mic, platform and notes still work)."
+            : $"Saved: {TextTools.Count(game.Playlists.Count, "playlist")} and {TextTools.Count(game.Ranks.Count, "rank")}. " +
+              "`/lfg` suggests them as you type, and chat understands them (\"make an lfg for …\").",
+            ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 
     [SlashCommand("feature", "Turns one of the bot's features on or off for this server.")]
@@ -175,4 +222,22 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         return where.Anywhere ? "any channel (pick one with `/settings channel`)"
             : where.Channel?.Mention ?? "(the chosen channel was deleted - pick another with `/settings channel`)";
     }
+}
+
+/// <summary>The values submitted from the /settings lfg-game pop-up. The pop-up itself is built in
+/// <see cref="SettingsModule.LfgGameAsync"/> (so it can be pre-filled); this only reads it back by the boxes' IDs.</summary>
+public class LfgGameModal : IModal
+{
+    public const string PlaylistsId = "playlists";
+    public const string RanksId = "ranks";
+
+    public string Title => "LFG game for this server";
+
+    [InputLabel("Playlists / modes (one per line)")]
+    [ModalTextInput(PlaylistsId, TextInputStyle.Paragraph, maxLength: LfgGameProfileText.MaxBoxLength)]
+    public string? Playlists { get; set; }
+
+    [InputLabel("Ranks, lowest first (one per line)")]
+    [ModalTextInput(RanksId, TextInputStyle.Paragraph, maxLength: LfgGameProfileText.MaxBoxLength)]
+    public string? Ranks { get; set; }
 }

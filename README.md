@@ -126,13 +126,49 @@ note.
 > SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
 > SoundCloud links.
 
-**Looking for group** — `/lfg` posts a Multiplayer LFG card, e.g. `/lfg players:4 playlist:Ranked Play rank:Gold+
-mic:True`. Every option is optional:
+**Looking for group** — `/lfg` posts an LFG card, e.g. `/lfg players:4 playlist:Ranked Play rank:Gold mic:True`.
+Every option is optional:
 - `players` — squad size 2–6 including you (default 4).
-- `playlist` — Ranked Play, Hardpoint, Search & Destroy, Team Deathmatch, Domination, Kill Confirmed, Hardcore, or
-  any. `rank` — minimum Ranked Play division (picking one implies Ranked Play).
+- `playlist` and `rank` — the server's own playlists/modes and ranks, suggested as you type (see *LFG game* below).
+  In a game with a ranked playlist, picking a rank implies it.
 - `mic` — whether a mic is required. `platform` — crossplay (default), PC only, or console only.
 - `note` — free text, up to 100 characters.
+
+**LFG game** — no game is built in. A new server's `/lfg` has no playlist or rank options. Everything else works
+(squad size, mic, platform, note, Join/Leave/Start/Cancel), and the card just says "LFG". An admin (Manage Server)
+sets the server's game with `/settings lfg-game`, a pop-up with two boxes:
+- **Playlists / modes:** one per line, as `Name : other names`. A `*` after the name marks a ranked playlist, the one
+  a minimum rank belongs to. If none is marked, ranks go with any mode.
+- **Ranks:** lowest first, also `Name : other names`. The last one is the top rank, shown without a "+".
+- **Limits:** up to 25 lines each. Empty both boxes to go back to blank.
+- **Per server:** each server has its own game. The "other names" are what chat understands ("@bot make an lfg for
+  hp, need 2 more") and what `/lfg` accepts as typed.
+
+Example: Call of Duty (paste into `/settings lfg-game`).
+
+Playlists / modes:
+```
+Ranked Play* : ranked, comp, competitive
+Hardcore : hc
+Search & Destroy : search and destroy, s&d, snd
+Hardpoint : hardpoints, hp
+Team Deathmatch : tdm
+Kill Confirmed : kc
+Domination : dom
+```
+Ranks:
+```
+Bronze
+Silver
+Gold
+Platinum : plat
+Diamond
+Crimson
+Iridescent : iri
+Top 250 : top250
+```
+In chat, ranked playlists are recognised first and then the rest in list order, so put the one that should win
+higher: "hardcore domination" is Hardcore because Hardcore is listed above Domination.
 
 The chosen details show as tags on the card (e.g. "🏆 Gold+ · 🎧 Mic required · 🖥️ PC only").
 Once a server picks an LFG channel with `/settings channel`, `/lfg` only works there (until then, anywhere). Elsewhere it replies
@@ -202,6 +238,7 @@ saved in `data/server-settings.json`:
   Channels are saved by ID, so renaming one doesn't break it.
 - `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
   pings off, or leave both out for the default.
+- `/settings lfg-game` — the playlists/modes and ranks `/lfg` offers (blank until set; see *LFG game* above).
 - Moderation is per server too: `/automod` (auto-mod is **off** in a new server until it runs `/automod enable`) and `/modlog`. So is the
   chatbot's personality (`/chat personality`). Auto-mod on or off only decides whether members' messages are
   scanned and removed: what the bot itself posts (chatbot replies, news write-ups, polls, reminders, song titles) always

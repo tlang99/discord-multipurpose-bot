@@ -124,7 +124,9 @@ public partial class ChatActionParser
 
     /// <summary>The action <paramref name="message"/> asks for, or null if it's just chat (or the model couldn't be
     /// reached, so the caller falls back to chatting).</summary>
-    public async Task<ChatAction?> ParseAsync(string message, CancellationToken cancellationToken = default)
+    /// <param name="lfgGame">The server's LFG playlists and ranks (/settings lfg-game); blank when not given.</param>
+    public async Task<ChatAction?> ParseAsync(string message, LfgGameProfile? lfgGame = null,
+        CancellationToken cancellationToken = default)
     {
         // A reminder phrase plus a time is unambiguous, so it's settled without the model.
         if (ReminderRequestReader.Read(message, DateTimeOffset.UtcNow, _reminders.TimeZone) is { } reminder)
@@ -168,7 +170,7 @@ public partial class ChatActionParser
                 return await ReadSongAsync(message, cancellationToken);
 
             case "create_lfg":
-                var (players, details) = LfgRequestReader.Read(message);
+                var (players, details) = LfgRequestReader.Read(message, lfgGame ?? LfgGameProfile.Empty);
                 return new CreateLfgAction(players, details);
 
             case "music_control":
