@@ -5,9 +5,10 @@ namespace ModBot.Services.Chat;
 
 /// <summary>
 /// Reads LFG details from a chat message ("make an lfg for ranked, need 3 more, mic required") with plain keyword
-/// rules. Used instead of the model: tested against llama3.2 with a forced answer shape, it invented details on almost
-/// every request (a gold rank and "mic required" nobody asked for) and miscounted squads. The vocabulary here is small
-/// and fixed, so rules get it right and predictably; anything not mentioned keeps the /lfg default.
+/// rules, using the playlists and ranks the server set up (/settings lfg-game). Used instead of the model: tested
+/// against llama3.2 with a forced answer shape, it invented details on almost every request (a gold rank and "mic
+/// required" nobody asked for) and miscounted squads. The vocabulary is the server's own list plus a few fixed words
+/// (squad sizes, mic, platform), so rules get it right and predictably; anything not mentioned keeps the /lfg default.
 /// </summary>
 public static partial class LfgRequestReader
 {
@@ -16,21 +17,50 @@ public static partial class LfgRequestReader
         ["one"] = 1, ["two"] = 2, ["three"] = 3, ["four"] = 4, ["five"] = 5,
     };
 
-    /// <summary>The squad size and details asked for. No note: free text is left to /lfg.</summary>
-    public static (int Players, LfgDetails Details) Read(string message)
+    /// <summary>Words this reader already gives a meaning (squad size, mic, platform, the request itself), plus everyday
+    /// words that would turn up in almost any message.</summary>
+    private static readonly HashSet<string> TakenWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "lfg", "more", "for", "of", "with", "need", "and", "or", "the", "an", "me", "us", "my", "to", "in", "on", "no",
+        "duo", "duos", "trio", "trios", "quad", "quads", "stack", "squad", "group", "team", "party", "players", "player",
+        "people", "ppl", "man", "mic", "mics", "pc", "console", "only", "crossplay", "required", "optional", "needed",
+    };
+
+    /// <summary>
+    /// Why <paramref name="word"/> can't be a playlist or rank name (or other name), or null if it's fine. Chat
+    /// matches names as whole words anywhere in a message, so one that's a single character, a number, or a word this
+    /// reader already uses would fire on messages that aren't about it: a rank called "3" would be set by "need 3
+    /// more", and one called "one" by "need one more".
+    /// </summary>
+    public static string? WhyCantBeAName(string word)
+    {
+        word = word.Trim();
+        if (word.Length < 2)
+        {
+            return "is too short - names need at least 2 characters";
+        }
+
+        if (word.All(char.IsDigit) || NumberWords.ContainsKey(word))
+        {
+            return "is a number, which chat reads as a squad size";
+        }
+
+        return TakenWords.Contains(word) ? "is a word chat already uses (squad size, mic, platform or the request)" : null;
+    }
+
+    /// <summary>The squad size and details asked for, with playlists and ranks from the server's game (blank by
+    /// default, when only size, mic and platform are read). No note: free text is left to /lfg.</summary>
+    public static (int Players, LfgDetails Details) Read(string message, LfgGameProfile game)
     {
         var text = " " + WhitespaceRegex().Replace(message.ToLowerInvariant(), " ") + " ";
 
-        var rank = ReadRank(text);
-        var playlist = ReadPlaylist(text, rank is not null);
+        var rank = ReadRank(text, game);
+        var choice = game.Combine(ReadPlaylist(text, game), rank);
 
-        // As in /lfg, a rank only means something in Ranked Play.
-        if (playlist != LfgPlaylist.RankedPlay)
-        {
-            rank = null;
-        }
-
-        return (Math.Clamp(ReadPlayers(text), 2, 6), new LfgDetails(playlist, rank, ReadMic(text), ReadPlatform(text)));
+        // A rank with a playlist it doesn't go with is dropped here, where /lfg would say so: from chat, posting
+        // with the playlist the person named beats refusing.
+        return (Math.Clamp(ReadPlayers(text), 2, 6),
+            LfgDetails.From(game, choice with { Problem = null }, ReadMic(text), ReadPlatform(text)));
     }
 
     private static int ReadPlayers(string text)
@@ -58,32 +88,19 @@ public static partial class LfgRequestReader
     private static int? ToNumber(string value)
         => int.TryParse(value, out var number) ? number : NumberWords.TryGetValue(value, out number) ? number : null;
 
-    private static LfgRank? ReadRank(string text)
-    {
-        if (text.Contains("top 250") || text.Contains("top250")) return LfgRank.Top250;
-        if (HasWord(text, "iridescent", "iri")) return LfgRank.Iridescent;
-        if (HasWord(text, "crimson")) return LfgRank.Crimson;
-        if (HasWord(text, "diamond", "diamonds")) return LfgRank.Diamond;
-        if (HasWord(text, "platinum", "plat")) return LfgRank.Platinum;
-        if (HasWord(text, "gold")) return LfgRank.Gold;
-        if (HasWord(text, "silver")) return LfgRank.Silver;
-        if (HasWord(text, "bronze")) return LfgRank.Bronze;
-        return null;
-    }
+    /// <summary>The highest rank named, checked top down so "diamond, not gold" style mentions settle on the higher one
+    /// consistently.</summary>
+    private static LfgRankOption? ReadRank(string text, LfgGameProfile game)
+        => Enumerable.Reverse(game.Ranks).FirstOrDefault(r => r.AllNames().Any(n => HasWord(text, n)));
 
-    /// <summary>Ranked first (it rotates modes, so "ranked hardpoint" is Ranked Play), then Hardcore (its own
-    /// playlist, so "hardcore domination" is Hardcore), then the individual modes.</summary>
-    private static LfgPlaylist ReadPlaylist(string text, bool rankNamed)
+    /// <summary>Ranked playlists first (a ranked playlist usually rotates modes, so "ranked hardpoint" is the ranked
+    /// one), then the rest in the server's list order, which is how a server says which wins ("hardcore domination"
+    /// is Hardcore if it's listed above Domination).</summary>
+    private static LfgPlaylistOption? ReadPlaylist(string text, LfgGameProfile game)
     {
-        if (rankNamed || HasWord(text, "ranked", "comp", "competitive")) return LfgPlaylist.RankedPlay;
-        if (HasWord(text, "hardcore", "hc")) return LfgPlaylist.Hardcore;
-        if (text.Contains("search and destroy") || text.Contains("search & destroy") || HasWord(text, "s&d", "snd", "snd's"))
-            return LfgPlaylist.SearchAndDestroy;
-        if (HasWord(text, "hardpoint", "hardpoints", "hp")) return LfgPlaylist.Hardpoint;
-        if (text.Contains("team deathmatch") || HasWord(text, "tdm")) return LfgPlaylist.TeamDeathmatch;
-        if (text.Contains("kill confirmed") || HasWord(text, "kc")) return LfgPlaylist.KillConfirmed;
-        if (HasWord(text, "domination", "dom")) return LfgPlaylist.Domination;
-        return LfgPlaylist.Any;
+        bool Named(LfgPlaylistOption p) => p.AllNames().Any(n => HasWord(text, n));
+        return game.Playlists.FirstOrDefault(p => p.Ranked && Named(p)) ??
+               game.Playlists.FirstOrDefault(p => !p.Ranked && Named(p));
     }
 
     private static bool? ReadMic(string text)

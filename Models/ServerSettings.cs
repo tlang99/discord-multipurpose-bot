@@ -37,6 +37,10 @@ public class ServerSettings
     /// <summary>This server turned LFG pings off.</summary>
     public bool LfgPingsOff { get; set; }
 
+    /// <summary>The game this server's LFG posts are for: its playlists and ranks (/settings lfg-game). Null = blank, so
+    /// LFG works without game-specific options until an admin fills them in.</summary>
+    public LfgGameProfile? LfgGame { get; set; }
+
     /// <remarks>Null-safe: a hand-edited file with <c>"DisabledFeatures": null</c> means nothing is off.</remarks>
     public bool IsEnabled(ServerFeature feature) => DisabledFeatures?.Contains(feature.ToString()) != true;
 }

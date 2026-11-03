@@ -146,7 +146,11 @@ public class DiscordBotService : BackgroundService
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction)
     {
         using var scope = ServerScope((interaction.Channel as IGuildChannel)?.Guild);
-        _started[interaction.Id] = Stopwatch.GetTimestamp();
+        // Not suggestions (/lfg playlist as you type): they get no "done" line, so their start time would never go.
+        if (interaction is not SocketAutocompleteInteraction)
+        {
+            _started[interaction.Id] = Stopwatch.GetTimestamp();
+        }
         try
         {
             var context = new SocketInteractionContext(_client, interaction);

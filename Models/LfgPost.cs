@@ -5,31 +5,6 @@ public enum LfgMode
     Multiplayer,
 }
 
-public enum LfgPlaylist
-{
-    Any,
-    RankedPlay,
-    Hardpoint,
-    SearchAndDestroy,
-    TeamDeathmatch,
-    Domination,
-    KillConfirmed,
-    Hardcore,
-}
-
-/// <summary>Ranked Play skill divisions, lowest first, so "at least" comparisons work.</summary>
-public enum LfgRank
-{
-    Bronze,
-    Silver,
-    Gold,
-    Platinum,
-    Diamond,
-    Crimson,
-    Iridescent,
-    Top250,
-}
-
 public enum LfgPlatform
 {
     Crossplay,
@@ -38,13 +13,22 @@ public enum LfgPlatform
 }
 
 /// <summary>Optional details the host picks on /lfg, shown as tags on the card.</summary>
-/// <param name="MinRank">Only meaningful for <see cref="LfgPlaylist.RankedPlay"/>.</param>
+/// <param name="Playlist">A playlist/mode name from the server's <see cref="LfgGameProfile"/>; null = any.</param>
+/// <param name="MinRank">A rank name from the server's game; null = any. See <see cref="LfgGameProfile.Combine"/>.</param>
+/// <param name="MinRankIsTop">The rank is the game's top one, shown as "Top 250" rather than "Top 250+".</param>
 /// <param name="MicRequired">null = not specified.</param>
 public record LfgDetails(
-    LfgPlaylist Playlist = LfgPlaylist.Any,
-    LfgRank? MinRank = null,
+    string? Playlist = null,
+    string? MinRank = null,
     bool? MicRequired = null,
-    LfgPlatform Platform = LfgPlatform.Crossplay);
+    LfgPlatform Platform = LfgPlatform.Crossplay,
+    bool MinRankIsTop = false)
+{
+    /// <summary>The details for a playlist and rank resolved with <see cref="LfgGameProfile.Combine"/>.</summary>
+    public static LfgDetails From(LfgGameProfile game, LfgChoice choice, bool? mic, LfgPlatform platform)
+        => new(choice.Playlist?.Name, choice.Rank?.Name, mic, platform,
+            choice.Rank is { } rank && game.IsTopRank(rank));
+}
 
 /// <summary>
 /// An open "looking for group" post. Only open posts exist: once a post fills up, is started, cancelled or expires it

@@ -1,6 +1,7 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ModBot.Common;
 using ModBot.Models;
@@ -33,32 +34,8 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         _logger = logger;
     }
 
-    // Slash-command choices. Kept here rather than on the Models enums so Models stays free of Discord.Net; mapped by
-    // ToDetails below.
-    public enum PlaylistChoice
-    {
-        [ChoiceDisplay("Any playlist")] Any,
-        [ChoiceDisplay("Ranked Play")] RankedPlay,
-        [ChoiceDisplay("Hardpoint")] Hardpoint,
-        [ChoiceDisplay("Search & Destroy")] SearchAndDestroy,
-        [ChoiceDisplay("Team Deathmatch")] TeamDeathmatch,
-        [ChoiceDisplay("Domination")] Domination,
-        [ChoiceDisplay("Kill Confirmed")] KillConfirmed,
-        [ChoiceDisplay("Hardcore")] Hardcore,
-    }
-
-    public enum RankChoice
-    {
-        [ChoiceDisplay("Bronze+")] Bronze,
-        [ChoiceDisplay("Silver+")] Silver,
-        [ChoiceDisplay("Gold+")] Gold,
-        [ChoiceDisplay("Platinum+")] Platinum,
-        [ChoiceDisplay("Diamond+")] Diamond,
-        [ChoiceDisplay("Crimson+")] Crimson,
-        [ChoiceDisplay("Iridescent+")] Iridescent,
-        [ChoiceDisplay("Top 250")] Top250,
-    }
-
+    // Kept here rather than on the Models enum so Models stays free of Discord.Net. Playlists and ranks aren't fixed:
+    // they're each server's own (/settings lfg-game), offered as suggestions by the handlers below.
     public enum PlatformChoice
     {
         [ChoiceDisplay("Crossplay (anyone)")] Crossplay,
@@ -70,8 +47,10 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("lfg", "Looking for a group? Post it here and let people join.")]
     public async Task LfgAsync(
         [Summary(description: "Total squad size, including you")] [MinValue(2)] [MaxValue(6)] int players = 4,
-        [Summary(description: "Which playlist")] PlaylistChoice playlist = PlaylistChoice.Any,
-        [Summary(description: "Minimum rank (Ranked Play)")] RankChoice? rank = null,
+        [Summary(description: "Which playlist or mode (this server's list)")] [Autocomplete(typeof(PlaylistSuggestions))]
+        [MaxLength(LfgGameProfileText.MaxNameLength)] string? playlist = null,
+        [Summary(description: "Minimum rank (this server's list)")] [Autocomplete(typeof(RankSuggestions))]
+        [MaxLength(LfgGameProfileText.MaxNameLength)] string? rank = null,
         [Summary(description: "Do people need a mic?")] bool? mic = null,
         [Summary(description: "Who can join")] PlatformChoice platform = PlatformChoice.Crossplay,
         [Summary(description: "Anything else, e.g. \"chill games, no sweats\"")] [MaxLength(MaxNoteLength)] string? note = null)
@@ -79,17 +58,22 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         // Acknowledge first (privately): posting the card can take long enough to miss Discord's 3-second window.
         await DeferAsync(ephemeral: true);
 
-        // A rank only means something in Ranked Play: picking one implies it, but not alongside another playlist.
-        if (rank is not null && playlist is not (PlaylistChoice.Any or PlaylistChoice.RankedPlay))
+        // Suggestions are only suggestions: a typed value has to be one of this server's names or other names.
+        var game = await _serverSettings.LfgGameAsync(Context.Guild.Id);
+        var (chosenPlaylist, playlistProblem) = Pick(playlist, game.Playlists, "playlist");
+        var (chosenRank, rankProblem) = Pick(rank, game.Ranks, "rank");
+        if ((playlistProblem ?? rankProblem) is { } unknown)
         {
-            await FollowupAsync("A minimum rank only applies to **Ranked Play** - pick that playlist, or leave rank empty.",
-                ephemeral: true);
+            await FollowupAsync(unknown, ephemeral: true, allowedMentions: AllowedMentions.None);
             return;
         }
 
-        if (rank is not null)
+        // A rank only means something in a ranked playlist: picking one implies it, but not alongside another one.
+        var choice = game.Combine(chosenPlaylist, chosenRank);
+        if (choice.Problem is { } problem)
         {
-            playlist = PlaylistChoice.RankedPlay;
+            await FollowupAsync(problem, ephemeral: true, allowedMentions: AllowedMentions.None);
+            return;
         }
 
         if (Context.Channel is not ITextChannel channel)
@@ -111,8 +95,79 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        var result = await _poster.PostAsync(host, channel, players, ToDetails(playlist, rank, mic, platform), note);
+        var details = LfgDetails.From(game, choice, mic, platform switch
+        {
+            PlatformChoice.PcOnly => LfgPlatform.PcOnly,
+            PlatformChoice.ConsoleOnly => LfgPlatform.ConsoleOnly,
+            _ => LfgPlatform.Crossplay,
+        });
+        var result = await _poster.PostAsync(host, channel, players, details, note);
         await FollowupAsync(result.Message, ephemeral: true, allowedMentions: AllowedMentions.None);
+    }
+
+    /// <summary>"Ranked isn't one of this server's playlists" plus what is, or how to set them up when there are none.</summary>
+    private static string Unknown(string what, string typed, IEnumerable<string> names)
+    {
+        var list = names.ToList();
+        return list.Count == 0
+            ? $"This server hasn't set up any {what}s for LFG yet - a server admin can add them with " +
+              "`/settings lfg-game`. Leave it empty to post without one."
+            : $"`{Format.Sanitize(typed.Trim())}` isn't one of this server's {what}s. Pick one of: " +
+              $"{string.Join(", ", list.Select(n => $"**{Format.Sanitize(n)}**"))}.";
+    }
+
+    /// <summary>The playlist or rank a typed value names (by name or other name), or, if it names none, what to tell
+    /// the person. Nothing typed is fine: no playlist or rank.</summary>
+    private static (T? Found, string? Problem) Pick<T>(string? typed, IReadOnlyList<T> options, string what)
+        where T : LfgNamedOption
+    {
+        if (string.IsNullOrWhiteSpace(typed))
+        {
+            return (null, null);
+        }
+
+        return options.FirstOrDefault(o => o.IsNamed(typed)) is { } found
+            ? (found, null)
+            : (null, Unknown(what, typed, options.Select(o => o.Name)));
+    }
+
+    /// <summary>Suggests the server's playlists as the person types /lfg playlist.</summary>
+    public sealed class PlaylistSuggestions : LfgSuggestions
+    {
+        protected override IEnumerable<LfgNamedOption> Options(LfgGameProfile game) => game.Playlists;
+    }
+
+    /// <summary>Suggests the server's ranks as the person types /lfg rank.</summary>
+    public sealed class RankSuggestions : LfgSuggestions
+    {
+        protected override IEnumerable<LfgNamedOption> Options(LfgGameProfile game) => game.Ranks;
+    }
+
+    /// <summary>
+    /// Suggests names from the server's LFG game matching what's been typed so far (in the name or one of its other
+    /// names), in the server's order; Discord shows at most 25, which is also the most a server can set. Nothing is
+    /// suggested outside a server or while the server has LFG turned off, the same places /lfg itself won't run.
+    /// </summary>
+    public abstract class LfgSuggestions : AutocompleteHandler
+    {
+        protected abstract IEnumerable<LfgNamedOption> Options(LfgGameProfile game);
+
+        public override async Task<AutocompletionResult> GenerateSuggestionsAsync(IInteractionContext context,
+            IAutocompleteInteraction autocompleteInteraction, IParameterInfo parameter, IServiceProvider services)
+        {
+            var settings = services.GetRequiredService<ServerSettingsService>();
+            if (context.Guild is not { } guild || !await settings.IsEnabledAsync(guild.Id, ServerFeature.Lfg))
+            {
+                return AutocompletionResult.FromSuccess();
+            }
+
+            var typed = autocompleteInteraction.Data.Current.Value as string ?? "";
+            var matches = Options(await settings.LfgGameAsync(guild.Id))
+                .Where(o => o.Matches(typed))
+                .Take(LfgGameProfileText.MaxEntries)
+                .Select(o => new AutocompleteResult(o.Name, o.Name));
+            return AutocompletionResult.FromSuccess(matches);
+        }
     }
 
     [RequireFeature(ServerFeature.Lfg)]
@@ -353,37 +408,4 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
                 break;
         }
     }
-
-    private static LfgDetails ToDetails(PlaylistChoice playlist, RankChoice? rank, bool? mic, PlatformChoice platform)
-        => new(
-            Playlist: playlist switch
-            {
-                PlaylistChoice.RankedPlay => LfgPlaylist.RankedPlay,
-                PlaylistChoice.Hardpoint => LfgPlaylist.Hardpoint,
-                PlaylistChoice.SearchAndDestroy => LfgPlaylist.SearchAndDestroy,
-                PlaylistChoice.TeamDeathmatch => LfgPlaylist.TeamDeathmatch,
-                PlaylistChoice.Domination => LfgPlaylist.Domination,
-                PlaylistChoice.KillConfirmed => LfgPlaylist.KillConfirmed,
-                PlaylistChoice.Hardcore => LfgPlaylist.Hardcore,
-                _ => LfgPlaylist.Any,
-            },
-            MinRank: rank switch
-            {
-                null => null,
-                RankChoice.Silver => LfgRank.Silver,
-                RankChoice.Gold => LfgRank.Gold,
-                RankChoice.Platinum => LfgRank.Platinum,
-                RankChoice.Diamond => LfgRank.Diamond,
-                RankChoice.Crimson => LfgRank.Crimson,
-                RankChoice.Iridescent => LfgRank.Iridescent,
-                RankChoice.Top250 => LfgRank.Top250,
-                _ => LfgRank.Bronze,
-            },
-            MicRequired: mic,
-            Platform: platform switch
-            {
-                PlatformChoice.PcOnly => LfgPlatform.PcOnly,
-                PlatformChoice.ConsoleOnly => LfgPlatform.ConsoleOnly,
-                _ => LfgPlatform.Crossplay,
-            });
 }
