@@ -75,7 +75,8 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
     public async Task NotifyAsync(
         [Summary(description: "Feed name, as shown by /news list - leave out for every feed")] string? name = null,
         [Summary(description: "True: notify people. False: post silently")] bool enabled = false)
-        => await RespondAsync(await _notifications.SetAsync(Context.Guild.Id, name, silent: !enabled), ephemeral: true);
+        => await RespondAsync(await _notifications.SetAsync(Context.Guild.Id, name, silent: !enabled, Context.User),
+            ephemeral: true);
 
     public enum FilterKind
     {

@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using Discord;
+using Microsoft.Extensions.Logging;
 using ModBot.Services.Storage;
 
 namespace ModBot.Services.News;
@@ -14,37 +16,46 @@ public record NewsNotifyRequest(string? Feed, bool Silent);
 public partial class NewsNotifications
 {
     private readonly INewsSubscriptionStore _store;
+    private readonly ILogger<NewsNotifications> _logger;
 
-    public NewsNotifications(INewsSubscriptionStore store)
+    public NewsNotifications(INewsSubscriptionStore store, ILogger<NewsNotifications> logger)
     {
         _store = store;
+        _logger = logger;
     }
 
     /// <summary>Sets <paramref name="feed"/> (or, when null, every feed this server follows) to post silently or
-    /// not. Returns what to tell the admin.</summary>
-    public async Task<string> SetAsync(ulong guildId, string? feed, bool silent)
+    /// not, logs who changed it, and returns what to tell the admin.</summary>
+    /// <param name="by">Who changed it, for the log.</param>
+    public async Task<string> SetAsync(ulong guildId, string? feed, bool silent, IUser by)
     {
-        var how = silent ? "🔕 posts silently (no notifications)" : "🔔 notifies people again";
+        var state = silent ? "silent" : "notify";
         if (feed is not null)
         {
             var name = feed.Trim().ToLowerInvariant();
-            return await _store.UpdateAsync(guildId, name, s => s.Silent = silent)
-                ? $"**{name}** {how}."
-                : "No followed feed has that name - check `/news list`.";
+            if (!await _store.UpdateAsync(guildId, name, s => s.Silent = silent))
+            {
+                return "No followed feed has that name - check `/news list`.";
+            }
+
+            _logger.LogInformation("News feed {Feed} set to {State} by {User} ({UserId}).", name, state, by.Username,
+                by.Id);
+            return $"**{name}** {(silent ? "🔕 posts silently (no notifications)" : "🔔 notifies people again")}.";
         }
 
-        var feeds = await _store.GetForGuildAsync(guildId);
-        if (feeds.Count == 0)
+        // One locked step for every feed, counting what actually changed.
+        var (feeds, changed) = await _store.SetSilentForGuildAsync(guildId, silent);
+        if (feeds == 0)
         {
             return "This server isn't following any news yet. Try `/news follow-game`.";
         }
 
-        foreach (var subscription in feeds)
-        {
-            await _store.UpdateAsync(guildId, subscription.Name, s => s.Silent = silent);
-        }
-
-        return $"All {feeds.Count} news feed{(feeds.Count == 1 ? "" : "s")} here {(silent ? "post silently now" : "notify people again")}.";
+        _logger.LogInformation("All news feeds ({Changed} of {Feeds} changed) set to {State} by {User} ({UserId}).",
+            changed, feeds, state, by.Username, by.Id);
+        var all = $"{(feeds == 1 ? "The" : $"All {feeds}")} news feed{(feeds == 1 ? "" : "s")} here";
+        return changed == 0
+            ? $"{all} already {(silent ? "post silently" : "notify people")}."
+            : $"{all} {(silent ? "post silently now" : "notify people again")} ({changed} changed).";
     }
 
     /// <summary>

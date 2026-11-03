@@ -143,16 +143,12 @@ public partial class ChatHandler
                     ? "Only server admins (**Manage Server**) can turn features on or off. See `/settings`."
                     : "Only server admins (**Manage Server**) can change news notifications. See `/news notify`.");
             }
-            else if (change is not null)
-            {
-                await ReplyAsync(message, await _featureSwitch.SetAsync(guild, change.Feature, change.On, member));
-            }
             else
             {
-                var result = await _newsNotifications.SetAsync(guild.Id, newsNotify!.Feed, newsNotify.Silent);
-                _logger.LogInformation("News notifications for {Feed} set to {State} from chat by {User} ({UserId}).",
-                    newsNotify.Feed ?? "every feed", newsNotify.Silent ? "silent" : "notify", member.Username, member.Id);
-                await ReplyAsync(message, result);
+                // Each switch saves, logs who changed it, and words its own reply.
+                await ReplyAsync(message, change is not null
+                    ? await _featureSwitch.SetAsync(guild, change.Feature, change.On, member)
+                    : await _newsNotifications.SetAsync(guild.Id, newsNotify!.Feed, newsNotify.Silent, member));
             }
 
             return;

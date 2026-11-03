@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Discord;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModBot.Models;
 using ModBot.Services.News;
 using ModBot.Services.Storage;
@@ -14,7 +16,7 @@ public sealed class NewsNotificationTests : IDisposable
     public NewsNotificationTests()
     {
         _store = new JsonNewsSubscriptionStore(Path.Combine(_directory, "news.json"));
-        _notifications = new NewsNotifications(_store);
+        _notifications = new NewsNotifications(_store, NullLogger<NewsNotifications>.Instance);
     }
 
     public void Dispose()
@@ -40,7 +42,7 @@ public sealed class NewsNotificationTests : IDisposable
         await Follow(guildId: 1, "cod-blog", silent: false);
         await Follow(guildId: 2, "mw4", silent: false);
 
-        await _notifications.SetAsync(1, feed: null, silent: true);
+        await _notifications.SetAsync(1, feed: null, silent: true, Admin);
 
         Assert.All(await _store.GetForGuildAsync(1), s => Assert.True(s.Silent));
         Assert.False((await _store.GetAsync(2, "mw4"))!.Silent);
@@ -52,7 +54,7 @@ public sealed class NewsNotificationTests : IDisposable
         await Follow(guildId: 1, "mw4", silent: true);
         await Follow(guildId: 1, "patches", silent: true);
 
-        var reply = await _notifications.SetAsync(1, "Patches", silent: false);
+        var reply = await _notifications.SetAsync(1, "Patches", silent: false, Admin);
 
         Assert.Contains("notifies people again", reply);
         Assert.False((await _store.GetAsync(1, "patches"))!.Silent);
@@ -61,7 +63,7 @@ public sealed class NewsNotificationTests : IDisposable
 
     [Fact]
     public async Task An_unknown_feed_says_so()
-        => Assert.Contains("No followed feed", await _notifications.SetAsync(1, "nope", silent: true));
+        => Assert.Contains("No followed feed", await _notifications.SetAsync(1, "nope", silent: true, Admin));
 
     [Theory]
     [InlineData("mute news notifications", null, true)]
@@ -82,6 +84,8 @@ public sealed class NewsNotificationTests : IDisposable
     [InlineData("turn off the music")]
     public void Ignores_everything_else(string message) => Assert.Null(NewsNotifications.Read(message));
 
+    private static IUser Admin => DiscordFake.Create<IUser>(new() { ["get_Username"] = "mod", ["get_Id"] = 9UL });
+
     private Task Follow(ulong guildId, string name, bool silent)
         => _store.UpsertAsync(guildId, name, (s, _) =>
         {
@@ -89,4 +93,35 @@ public sealed class NewsNotificationTests : IDisposable
             s.ChannelId = 5;
             s.Silent = silent;
         });
+}
+
+public sealed class NewsBulkMuteTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "modbot-tests", Guid.NewGuid().ToString("N"));
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory))
+        {
+            Directory.Delete(_directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Muting_all_counts_only_what_changed()
+    {
+        var store = new JsonNewsSubscriptionStore(Path.Combine(_directory, "news.json"));
+        foreach (var (name, silent) in new[] { ("a", true), ("b", false), ("c", false) })
+        {
+            await store.UpsertAsync(1, name, (s, _) => s.Silent = silent);
+        }
+
+        var notifications = new NewsNotifications(store, NullLogger<NewsNotifications>.Instance);
+        var reply = await notifications.SetAsync(1, feed: null, silent: true,
+            DiscordFake.Create<IUser>(new() { ["get_Username"] = "mod", ["get_Id"] = 9UL }));
+
+        Assert.Equal((3, 0), await store.SetSilentForGuildAsync(1, silent: true)); // nothing left to change
+        Assert.Contains("All 3 news feeds", reply);
+        Assert.Contains("(2 changed)", reply);
+    }
 }
