@@ -117,7 +117,7 @@ public class MusicQueueService : IHostedService
         var playlistName = lookup.PlaylistName;
         var filtered = 0;
         var settings = await _settings.GetAsync(user.Guild.Id);
-        if (TextFilter.AppliesTo(settings, user))
+        if (TextFilter.AppliesToBotPost(user))
         {
             tracks = tracks.Where(t => TextFilter.FindViolation(t.Title, settings) is null).ToList();
             filtered = lookup.Tracks.Count - tracks.Count;
@@ -771,8 +771,10 @@ public class MusicQueueService : IHostedService
                 timer.LastRepost = DateTimeOffset.UtcNow;
             }
 
-            // Only if this is still where the menu lives (an admin may have moved it meanwhile).
-            if (_menus.TryGetValue(channel.GuildId, out var menu) && menu.ChannelId == channel.Id)
+            // Only if this is still where the menu lives (an admin may have moved it meanwhile), and only while the
+            // server has music on: with it off, the menu's buttons don't work, so it shouldn't keep jumping back down.
+            if (_menus.TryGetValue(channel.GuildId, out var menu) && menu.ChannelId == channel.Id &&
+                await _serverSettings.IsEnabledAsync(channel.GuildId, ServerFeature.Music))
             {
                 await PostMenuAsync(channel);
             }

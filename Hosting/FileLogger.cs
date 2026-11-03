@@ -28,6 +28,10 @@ public sealed class FileLoggerProvider : ILoggerProvider, ISupportExternalScope
     private StreamWriter? _writer;
     private DateOnly _day;
 
+    /// <summary>Set after shutdown, or once the folder turned out to be unusable (no permission, bad path): from then
+    /// on entries only go to the console.</summary>
+    private bool _stopped;
+
     public FileLoggerProvider(FileLoggerOptions options)
     {
         _options = options;
@@ -41,6 +45,7 @@ public sealed class FileLoggerProvider : ILoggerProvider, ISupportExternalScope
     {
         lock (_lock)
         {
+            _stopped = true;
             _writer?.Dispose();
             _writer = null;
         }
@@ -48,7 +53,7 @@ public sealed class FileLoggerProvider : ILoggerProvider, ISupportExternalScope
 
     private void Write(LogLevel level, string category, string message, Exception? exception)
     {
-        if (_options.Folder.Length == 0)
+        if (_options.Folder.Length == 0 || _stopped)
         {
             return;
         }
@@ -67,13 +72,29 @@ public sealed class FileLoggerProvider : ILoggerProvider, ISupportExternalScope
 
         lock (_lock)
         {
+            if (_stopped)
+            {
+                return;
+            }
+
+            // A logger must never throw: the framework would pass it on to whatever code was logging, failing that
+            // command or handler. The console still has every entry.
             try
             {
                 WriterForToday().WriteLine(line.ToString());
             }
             catch (IOException)
             {
-                // A full disk or a locked file mustn't take the bot down; the console still has the entry.
+                // Full disk or a file locked for a moment: skip this entry and try again with the next one.
+            }
+            catch (Exception ex)
+            {
+                // No permission, a bad path, a read-only folder: it won't fix itself, so stop trying and say so once.
+                _stopped = true;
+                _writer?.Dispose();
+                _writer = null;
+                Console.Error.WriteLine($"Log files are turned off: can't write to '{_options.Folder}' ({ex.Message}). " +
+                                        "Logs still show in the console. Check Logging:File:Folder.");
             }
         }
     }
@@ -97,23 +118,32 @@ public sealed class FileLoggerProvider : ILoggerProvider, ISupportExternalScope
         return _writer;
     }
 
+    /// <summary>Deletes files older than the retention window. Best effort: a file it can't delete (open in an editor,
+    /// no permission) is left for next time, and never stops today's logging.</summary>
     private void DeleteOldFiles(DateOnly today)
     {
         var oldest = today.AddDays(-(Math.Max(1, _options.RetainDays) - 1));
-        foreach (var file in Directory.EnumerateFiles(_options.Folder, "modbot-*.log"))
+        try
         {
-            var name = Path.GetFileNameWithoutExtension(file)["modbot-".Length..];
-            if (DateOnly.TryParseExact(name, "yyyy-MM-dd", out var day) && day < oldest)
+            foreach (var file in Directory.EnumerateFiles(_options.Folder, "modbot-*.log"))
             {
-                try
+                var name = Path.GetFileNameWithoutExtension(file)["modbot-".Length..];
+                if (DateOnly.TryParseExact(name, "yyyy-MM-dd", out var day) && day < oldest)
                 {
-                    File.Delete(file);
-                }
-                catch (IOException)
-                {
-                    // Open in an editor, say; it'll go next time.
+                    try
+                    {
+                        File.Delete(file);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        // Left for next time.
+                    }
                 }
             }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Couldn't list the folder; nothing to clean up this time.
         }
     }
 

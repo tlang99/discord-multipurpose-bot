@@ -117,7 +117,7 @@ public partial class NewsWriter : INewsWriter
 
         // The model's words, posted publicly, so they follow the server's word rules like the chatbot's replies.
         var settings = await _settingsStore.GetAsync(guildId);
-        if (settings.AutoModEnabled && TextFilter.FindViolation(text, settings) is not null)
+        if (TextFilter.FindViolation(text, settings) is not null)
         {
             _logger.LogInformation("Write-up of '{Title}' broke the word filter in guild {GuildId}; posting the original " +
                                    "summary instead.", article.Title, guildId);

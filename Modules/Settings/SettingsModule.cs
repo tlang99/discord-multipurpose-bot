@@ -142,7 +142,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         // Members give themselves this role from the /lfg-setup panel, so it mustn't be one that carries power.
-        if (role is not null && LfgPoster.WhyUnsafeToSelfAssign(Context.Guild, role) is { } reason)
+        if (role is not null && await LfgPoster.WhyUnsafeToSelfAssignAsync(Context.Guild, role) is { } reason)
         {
             await RespondAsync($"{role.Mention} can't be the ping role: it {reason}. Members give the ping role to " +
                                "themselves, so it has to be a plain role. Leave the role out to use the default, " +

@@ -34,21 +34,32 @@ public class ServerFeatureSwitch
     public async Task<string> SetAsync(IGuild guild, ServerFeature feature, bool on, IUser by)
     {
         var name = ServerSettingsService.NameOf(feature);
-        var was = await _settings.IsEnabledAsync(guild.Id, feature);
-        if (was == on)
-        {
-            return $"{name} is already {(on ? "on" : "off")} here.";
-        }
 
+        // Checked and changed in one step, under the store's lock, so two admins switching it at once both get a true
+        // answer (one "turned off", one "already off").
+        var changed = false;
         await _settings.UpdateAsync(guild.Id, s =>
         {
+            if (s.IsEnabled(feature) == on)
+            {
+                return;
+            }
+
             s.DisabledFeatures ??= [];
             s.DisabledFeatures.Remove(feature.ToString());
             if (!on)
             {
                 s.DisabledFeatures.Add(feature.ToString());
             }
+
+            changed = true;
         });
+
+        if (!changed)
+        {
+            return $"{name} is already {(on ? "on" : "off")} here.";
+        }
+
         _logger.LogInformation("{Feature} turned {State} in server {Server} ({GuildId}) by {User} ({UserId}).",
             feature, on ? "on" : "off", guild.Name, guild.Id, by.Username, by.Id);
 

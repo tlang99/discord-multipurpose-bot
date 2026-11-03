@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Reflection;
 using Discord;
 using Discord.Interactions;
@@ -89,7 +91,7 @@ public class DiscordBotService : BackgroundService
     private async Task OnReadyAsync()
     {
         // Which servers the bot is in, each time it connects, so a problem in one can be matched to its name and ID.
-        _logger.LogInformation("Connected as {Bot} to {Count} server(s): {Servers}", _client.CurrentUser,
+        _logger.LogInformation("Connected as {Bot} to {Count} server(s): {Servers}", _client.CurrentUser.Username,
             _client.Guilds.Count, string.Join(", ", _client.Guilds.OrderBy(g => g.Name).Select(Describe)));
 
         try
@@ -139,24 +141,30 @@ public class DiscordBotService : BackgroundService
 
     /// <summary>When each interaction arrived, so the "done" line can say how long it took. Commands run in the
     /// background, so the start and the end are in different handlers.</summary>
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, long> _started = new();
+    private readonly ConcurrentDictionary<ulong, long> _started = new();
 
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction)
     {
         using var scope = ServerScope((interaction.Channel as IGuildChannel)?.Guild);
-        _started[interaction.Id] = System.Diagnostics.Stopwatch.GetTimestamp();
+        _started[interaction.Id] = Stopwatch.GetTimestamp();
         try
         {
             var context = new SocketInteractionContext(_client, interaction);
             var result = await _interactions.ExecuteCommandAsync(context, _services);
 
-            if (!result.IsSuccess && interaction.Type is InteractionType.ApplicationCommand)
+            if (!result.IsSuccess)
             {
-                _logger.LogWarning("Interaction failed: {Error} - {Reason}", result.Error, result.ErrorReason);
+                // Failed before it started (unknown command, an old button), so no "done" line will take it out.
+                _started.TryRemove(interaction.Id, out _);
+                if (interaction.Type is InteractionType.ApplicationCommand)
+                {
+                    _logger.LogWarning("Interaction failed: {Error} - {Reason}", result.Error, result.ErrorReason);
+                }
             }
         }
         catch (Exception ex)
         {
+            _started.TryRemove(interaction.Id, out _);
             _logger.LogError(ex, "Unhandled exception while executing an interaction.");
         }
     }
@@ -169,7 +177,7 @@ public class DiscordBotService : BackgroundService
     private async Task OnInteractionExecutedAsync(ICommandInfo? command, IInteractionContext context, IResult result)
     {
         var took = _started.TryRemove(context.Interaction.Id, out var start)
-            ? (long)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds
+            ? (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds
             : -1;
         var what = context.Interaction switch
         {

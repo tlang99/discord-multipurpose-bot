@@ -60,3 +60,40 @@ public sealed class FileLoggerTests : IDisposable
 
     private string TodaysFile() => Path.Combine(_folder, $"modbot-{DateTime.Now:yyyy-MM-dd}.log");
 }
+
+public class FileLoggerFailureTests
+{
+    [Fact]
+    public void An_unusable_folder_never_throws_into_the_caller()
+    {
+        // A path with a character Windows and Linux both refuse in a folder name ('\0').
+        using var provider = new FileLoggerProvider(new FileLoggerOptions { Folder = "bad\0folder" });
+        var logger = provider.CreateLogger("Test");
+
+        logger.LogInformation("first");
+        logger.LogInformation("second"); // file logging is off by now; still no throw
+    }
+
+    [Fact]
+    public void Nothing_is_written_after_shutdown()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "modbot-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var provider = new FileLoggerProvider(new FileLoggerOptions { Folder = folder });
+            var logger = provider.CreateLogger("Test");
+            provider.Dispose();
+
+            logger.LogInformation("too late");
+
+            Assert.False(Directory.Exists(folder));
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+}
