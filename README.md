@@ -140,7 +140,8 @@ sets the server's game with `/settings lfg-game`, a pop-up with two boxes:
 - **Playlists / modes:** one per line, as `Name : other names`. A `*` after the name marks a ranked playlist, the one
   a minimum rank belongs to. If none is marked, ranks go with any mode.
 - **Ranks:** lowest first, also `Name : other names`. The last one is the top rank, shown without a "+".
-- **Limits:** up to 25 lines each. Empty both boxes to go back to blank.
+- **Limits:** up to 25 lines each. Empty both boxes to go back to blank. Names need at least 2 characters and can't
+  be plain numbers or words chat already uses ("more", "mic", "pc"...), since chat looks for them in any message.
 - **Per server:** each server has its own game. The "other names" are what chat understands ("@bot make an lfg for
   hp, need 2 more") and what `/lfg` accepts as typed.
 

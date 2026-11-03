@@ -266,3 +266,27 @@ public class LfgGameRobustnessTests
         Assert.True(ModBot.Modules.Settings.LfgGameModal.ModalTitle.Length <= 45);
     }
 }
+
+public class LfgNameRulesTests
+{
+    [Theory]
+    [InlineData("Hardpoint : h", "too short")]
+    [InlineData("Hardpoint : 30", "is a number")]
+    [InlineData("Hardpoint : one", "is a number")]
+    [InlineData("Hardpoint : more", "already uses")]
+    [InlineData("Hardpoint : mic", "already uses")]
+    [InlineData("45", "is a number")] // names too, not just other names
+    public void Refuses_names_chat_would_match_in_ordinary_messages(string playlists, string expected)
+    {
+        var (profile, problem) = LfgGameProfileText.Parse(playlists, "");
+
+        Assert.Null(profile);
+        Assert.Contains(expected, problem);
+    }
+
+    [Theory]
+    [InlineData("2v2 : 2s")] // digits with letters are fine
+    [InlineData("Search & Destroy : s&d, snd")]
+    public void Accepts_ordinary_names(string playlists)
+        => Assert.NotNull(LfgGameProfileText.Parse(playlists, "").Profile);
+}

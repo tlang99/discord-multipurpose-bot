@@ -60,19 +60,11 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
         // Suggestions are only suggestions: a typed value has to be one of this server's names or other names.
         var game = await _serverSettings.LfgGameAsync(Context.Guild.Id);
-        LfgPlaylistOption? chosenPlaylist = null;
-        if (!string.IsNullOrWhiteSpace(playlist) && (chosenPlaylist = game.FindPlaylist(playlist)) is null)
+        var (chosenPlaylist, playlistProblem) = Pick(playlist, game.Playlists, "playlist");
+        var (chosenRank, rankProblem) = Pick(rank, game.Ranks, "rank");
+        if ((playlistProblem ?? rankProblem) is { } unknown)
         {
-            await FollowupAsync(Unknown("playlist", playlist, game.Playlists.Select(p => p.Name)), ephemeral: true,
-                allowedMentions: AllowedMentions.None);
-            return;
-        }
-
-        LfgRankOption? chosenRank = null;
-        if (!string.IsNullOrWhiteSpace(rank) && (chosenRank = game.FindRank(rank)) is null)
-        {
-            await FollowupAsync(Unknown("rank", rank, game.Ranks.Select(r => r.Name)), ephemeral: true,
-                allowedMentions: AllowedMentions.None);
+            await FollowupAsync(unknown, ephemeral: true, allowedMentions: AllowedMentions.None);
             return;
         }
 
@@ -124,39 +116,58 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
               $"{string.Join(", ", list.Select(n => $"**{Format.Sanitize(n)}**"))}.";
     }
 
-    /// <summary>Suggests the server's playlists as the person types /lfg playlist.</summary>
-    public sealed class PlaylistSuggestions : AutocompleteHandler
+    /// <summary>The playlist or rank a typed value names (by name or other name), or, if it names none, what to tell
+    /// the person. Nothing typed is fine: no playlist or rank.</summary>
+    private static (T? Found, string? Problem) Pick<T>(string? typed, IReadOnlyList<T> options, string what)
+        where T : LfgNamedOption
     {
-        public override async Task<AutocompletionResult> GenerateSuggestionsAsync(IInteractionContext context,
-            IAutocompleteInteraction autocompleteInteraction, IParameterInfo parameter, IServiceProvider services)
+        if (string.IsNullOrWhiteSpace(typed))
         {
-            var game = await services.GetRequiredService<ServerSettingsService>().LfgGameAsync(context.Guild.Id);
-            return Suggest(autocompleteInteraction, game.Playlists);
+            return (null, null);
         }
+
+        return options.FirstOrDefault(o => o.IsNamed(typed)) is { } found
+            ? (found, null)
+            : (null, Unknown(what, typed, options.Select(o => o.Name)));
+    }
+
+    /// <summary>Suggests the server's playlists as the person types /lfg playlist.</summary>
+    public sealed class PlaylistSuggestions : LfgSuggestions
+    {
+        protected override IEnumerable<LfgNamedOption> Options(LfgGameProfile game) => game.Playlists;
     }
 
     /// <summary>Suggests the server's ranks as the person types /lfg rank.</summary>
-    public sealed class RankSuggestions : AutocompleteHandler
+    public sealed class RankSuggestions : LfgSuggestions
     {
+        protected override IEnumerable<LfgNamedOption> Options(LfgGameProfile game) => game.Ranks;
+    }
+
+    /// <summary>
+    /// Suggests names from the server's LFG game matching what's been typed so far (in the name or one of its other
+    /// names), in the server's order; Discord shows at most 25, which is also the most a server can set. Nothing is
+    /// suggested outside a server or while the server has LFG turned off, the same places /lfg itself won't run.
+    /// </summary>
+    public abstract class LfgSuggestions : AutocompleteHandler
+    {
+        protected abstract IEnumerable<LfgNamedOption> Options(LfgGameProfile game);
+
         public override async Task<AutocompletionResult> GenerateSuggestionsAsync(IInteractionContext context,
             IAutocompleteInteraction autocompleteInteraction, IParameterInfo parameter, IServiceProvider services)
         {
-            var game = await services.GetRequiredService<ServerSettingsService>().LfgGameAsync(context.Guild.Id);
-            return Suggest(autocompleteInteraction, game.Ranks);
-        }
-    }
+            var settings = services.GetRequiredService<ServerSettingsService>();
+            if (context.Guild is not { } guild || !await settings.IsEnabledAsync(guild.Id, ServerFeature.Lfg))
+            {
+                return AutocompletionResult.FromSuccess();
+            }
 
-    /// <summary>The names matching what's been typed so far (in the name or one of its other names), in the server's
-    /// order. Discord shows at most 25, which is also the most a server can set.</summary>
-    private static AutocompletionResult Suggest(IAutocompleteInteraction interaction,
-        IEnumerable<LfgNamedOption> options)
-    {
-        var typed = interaction.Data.Current.Value as string ?? "";
-        var matches = options
-            .Where(o => o.Matches(typed))
-            .Take(LfgGameProfileText.MaxEntries)
-            .Select(o => new AutocompleteResult(o.Name, o.Name));
-        return AutocompletionResult.FromSuccess(matches);
+            var typed = autocompleteInteraction.Data.Current.Value as string ?? "";
+            var matches = Options(await settings.LfgGameAsync(guild.Id))
+                .Where(o => o.Matches(typed))
+                .Take(LfgGameProfileText.MaxEntries)
+                .Select(o => new AutocompleteResult(o.Name, o.Name));
+            return AutocompletionResult.FromSuccess(matches);
+        }
     }
 
     [RequireFeature(ServerFeature.Lfg)]

@@ -17,6 +17,37 @@ public static partial class LfgRequestReader
         ["one"] = 1, ["two"] = 2, ["three"] = 3, ["four"] = 4, ["five"] = 5,
     };
 
+    /// <summary>Words this reader already gives a meaning (squad size, mic, platform, the request itself), plus everyday
+    /// words that would turn up in almost any message.</summary>
+    private static readonly HashSet<string> TakenWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "lfg", "more", "for", "of", "with", "need", "and", "or", "the", "an", "me", "us", "my", "to", "in", "on", "no",
+        "duo", "duos", "trio", "trios", "quad", "quads", "stack", "squad", "group", "team", "party", "players", "player",
+        "people", "ppl", "man", "mic", "mics", "pc", "console", "only", "crossplay", "required", "optional", "needed",
+    };
+
+    /// <summary>
+    /// Why <paramref name="word"/> can't be a playlist or rank name (or other name), or null if it's fine. Chat
+    /// matches names as whole words anywhere in a message, so one that's a single character, a number, or a word this
+    /// reader already uses would fire on messages that aren't about it: a rank called "3" would be set by "need 3
+    /// more", and one called "one" by "need one more".
+    /// </summary>
+    public static string? WhyCantBeAName(string word)
+    {
+        word = word.Trim();
+        if (word.Length < 2)
+        {
+            return "is too short - names need at least 2 characters";
+        }
+
+        if (word.All(char.IsDigit) || NumberWords.ContainsKey(word))
+        {
+            return "is a number, which chat reads as a squad size";
+        }
+
+        return TakenWords.Contains(word) ? "is a word chat already uses (squad size, mic, platform or the request)" : null;
+    }
+
     /// <summary>The squad size and details asked for, with playlists and ranks from the server's game (blank by
     /// default, when only size, mic and platform are read). No note: free text is left to /lfg.</summary>
     public static (int Players, LfgDetails Details) Read(string message, LfgGameProfile game)

@@ -1,4 +1,5 @@
 using ModBot.Models;
+using ModBot.Services.Chat;
 
 namespace ModBot.Services.Lfg;
 
@@ -121,6 +122,15 @@ public static class LfgGameProfileText
             if (aliases.FirstOrDefault(a => a.Length > MaxAliasLength) is { } longAlias)
             {
                 return ([], Problem($"`{Shorten(longAlias)}` is longer than {MaxAliasLength} characters."));
+            }
+
+            // Names chat would match in ordinary messages ("need 3 more", "make me an lfg").
+            foreach (var word in aliases.Prepend(name))
+            {
+                if (LfgRequestReader.WhyCantBeAName(word) is { } reason)
+                {
+                    return ([], Problem($"`{Shorten(word)}` {reason}."));
+                }
             }
 
             if (aliases.Count > MaxAliasesPerEntry)
