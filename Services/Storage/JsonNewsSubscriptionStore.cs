@@ -8,8 +8,17 @@ public class JsonNewsSubscriptionStore : INewsSubscriptionStore
     /// reappear in a feed aren't re-posted.</summary>
     private const int MaxSeenItemsPerSubscription = 500;
 
-    private readonly JsonFileRepository<NewsSubscription> _repository =
-        JsonFileRepository<NewsSubscription>.InDataFolder("news-subscriptions.json");
+    private readonly JsonFileRepository<NewsSubscription> _repository;
+
+    public JsonNewsSubscriptionStore() : this(Path.Combine("data", "news-subscriptions.json"))
+    {
+    }
+
+    /// <summary>For tests: a store backed by a file of your choosing.</summary>
+    public JsonNewsSubscriptionStore(string filePath)
+    {
+        _repository = new JsonFileRepository<NewsSubscription>(filePath);
+    }
 
     public async Task<IReadOnlyList<NewsSubscription>> GetAllAsync()
         => (await _repository.GetAllAsync()).ToList();
@@ -40,6 +49,20 @@ public class JsonNewsSubscriptionStore : INewsSubscriptionStore
         });
 
     public Task<bool> RemoveAsync(ulong guildId, string name) => _repository.RemoveAsync(Key(guildId, name));
+
+    public Task<(int Feeds, int Changed)> SetSilentForGuildAsync(ulong guildId, bool silent)
+        => _repository.MutateAsync(data =>
+        {
+            var feeds = data.Values.Where(s => s.GuildId == guildId).ToList();
+            var changed = 0;
+            foreach (var subscription in feeds.Where(s => s.Silent != silent))
+            {
+                subscription.Silent = silent;
+                changed++;
+            }
+
+            return (feeds.Count, changed);
+        });
 
     public Task MarkSeenAsync(ulong guildId, string name, IEnumerable<string> itemIds)
         => UpdateAsync(guildId, name, subscription => subscription.MarkSeen(itemIds));

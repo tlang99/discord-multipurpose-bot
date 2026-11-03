@@ -22,6 +22,11 @@ public interface INewsSubscriptionStore
 
     Task<bool> RemoveAsync(ulong guildId, string name);
 
+    /// <summary>Sets <see cref="NewsSubscription.Silent"/> on every feed the guild follows, in one step under the
+    /// store's lock, so a feed followed or unfollowed meanwhile can't make the result wrong. Returns how many feeds
+    /// the guild has and how many of them actually changed.</summary>
+    Task<(int Feeds, int Changed)> SetSilentForGuildAsync(ulong guildId, bool silent);
+
     /// <summary>Records articles as posted. No-op if the subscription was removed in the meantime.</summary>
     Task MarkSeenAsync(ulong guildId, string name, IEnumerable<string> itemIds);
 }

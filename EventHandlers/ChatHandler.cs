@@ -13,6 +13,7 @@ using ModBot.Modules.Polls;
 using ModBot.Modules.Settings;
 using ModBot.Services.Chat;
 using ModBot.Services.Moderation;
+using ModBot.Services.News;
 using ModBot.Services.Polls;
 using ModBot.Services.Reminders;
 using ModBot.Services.Settings;
@@ -56,6 +57,7 @@ public partial class ChatHandler
     private readonly IGuildSettingsStore _settingsStore;
     private readonly ServerSettingsService _serverSettings;
     private readonly ServerFeatureSwitch _featureSwitch;
+    private readonly NewsNotifications _newsNotifications;
     private readonly ChatPersonality _personality;
     private readonly ChatOptions _options;
     private readonly ILogger<ChatHandler> _logger;
@@ -65,6 +67,7 @@ public partial class ChatHandler
         MusicControls musicControls, MusicQueueService musicQueue, LfgPoster lfgPoster,
         ReminderService reminders, PollPoster polls,
         IGuildSettingsStore settingsStore, ServerSettingsService serverSettings, ServerFeatureSwitch featureSwitch,
+        NewsNotifications newsNotifications,
         ChatPersonality personality, IOptions<ChatOptions> options, ILogger<ChatHandler> logger)
     {
         _chat = chat;
@@ -77,6 +80,7 @@ public partial class ChatHandler
         _settingsStore = settingsStore;
         _serverSettings = serverSettings;
         _featureSwitch = featureSwitch;
+        _newsNotifications = newsNotifications;
         _personality = personality;
         _options = options.Value;
         _logger = logger;
@@ -123,17 +127,28 @@ public partial class ChatHandler
             return;
         }
 
-        if (message.Author is SocketGuildUser member && SettingsRequestReader.Read(words) is { } change)
+        // Admin switches from chat: a feature on/off ("disable polls") or news notifications ("mute news
+        // notifications"), for this server only.
+        var change = SettingsRequestReader.Read(words);
+        var newsNotify = change is null ? await _newsNotifications.ReadForGuildAsync(guild.Id, words) : null;
+        if (message.Author is SocketGuildUser member && (change is not null || newsNotify is not null))
         {
             if (IsOnCooldown(guild.Id, member.Id))
             {
                 await ReactAsync(message, "⏳");
             }
+            else if (!isAdmin)
+            {
+                await ReplyAsync(message, change is not null
+                    ? "Only server admins (**Manage Server**) can turn features on or off. See `/settings`."
+                    : "Only server admins (**Manage Server**) can change news notifications. See `/news notify`.");
+            }
             else
             {
-                await ReplyAsync(message, isAdmin
+                // Each switch saves, logs who changed it, and words its own reply.
+                await ReplyAsync(message, change is not null
                     ? await _featureSwitch.SetAsync(guild, change.Feature, change.On, member)
-                    : "Only server admins (**Manage Server**) can turn features on or off. See `/settings`.");
+                    : await _newsNotifications.SetAsync(guild.Id, newsNotify!.Feed, newsNotify.Silent, member));
             }
 
             return;

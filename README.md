@@ -38,6 +38,10 @@ Any auto-moderation removal is logged to the mod-log channel just like a manual 
   with a different channel to move it.
 - `/news follow-feed name url channel` — any other RSS/Atom feed (`https://` only).
 - `/news list`, `/news unfollow name`, `/news latest name [count]` (preview the newest articles, only visible to you).
+- **Silent by default:** feeds post as silent messages. They show up and count as unread, but send no push or
+  desktop notification. `/news notify enabled:True name:<feed>` makes one feed notify again (leave `name` out for every
+  feed), and `silent:False` on `follow-game`/`follow-feed` sets it up that way. It's saved per feed, per server.
+  `/news list` shows 🔕 or 🔔. Admins can also ask: "@bot mute news notifications", "@bot make the mw4 feed notify".
 - `/news filter-add|filter-remove|filter-show name` — keyword filter per feed. *Include* keywords: only articles
   with one in the headline get posted (none = post everything). *Exclude* keywords: articles with one in the
   headline are skipped. Only headlines are checked, since summaries mention update words in passing. Built-in

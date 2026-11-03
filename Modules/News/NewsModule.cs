@@ -23,15 +23,17 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
     private readonly INewsSubscriptionStore _store;
     private readonly INewsFeedReader _feedReader;
     private readonly INewsWriter _writer;
+    private readonly NewsNotifications _notifications;
     private readonly NewsOptions _options;
     private readonly ILogger<NewsModule> _logger;
 
     public NewsModule(INewsSubscriptionStore store, INewsFeedReader feedReader, INewsWriter writer,
-        IOptions<NewsOptions> options, ILogger<NewsModule> logger)
+        NewsNotifications notifications, IOptions<NewsOptions> options, ILogger<NewsModule> logger)
     {
         _store = store;
         _feedReader = feedReader;
         _writer = writer;
+        _notifications = notifications;
         _options = options.Value;
         _logger = logger;
     }
@@ -39,17 +41,19 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
     [SlashCommand("follow-game", "Posts news about a game to a channel as it's published.")]
     public async Task FollowGameAsync(
         [Summary(description: "Which game to follow")] NewsPreset game,
-        [Summary(description: "Channel to post news in")] ITextChannel channel)
+        [Summary(description: "Channel to post news in")] ITextChannel channel,
+        [Summary(description: "Post without notifications (default: yes for new feeds)")] bool? silent = null)
     {
         var preset = NewsPresets.All[game];
-        await FollowAsync(preset.Name, preset.FeedUrl, channel, preset.DisplayName, preset);
+        await FollowAsync(preset.Name, preset.FeedUrl, channel, preset.DisplayName, preset, silent);
     }
 
     [SlashCommand("follow-feed", "Posts articles from any RSS/Atom feed to a channel as they're published.")]
     public async Task FollowFeedAsync(
         [Summary(description: "Short name for this feed, e.g. \"cod-blog\" (letters, numbers, dashes)")] string name,
         [Summary(description: "The feed's https:// URL")] string url,
-        [Summary(description: "Channel to post articles in")] ITextChannel channel)
+        [Summary(description: "Channel to post articles in")] ITextChannel channel,
+        [Summary(description: "Post without notifications (default: yes for new feeds)")] bool? silent = null)
     {
         name = name.Trim().ToLowerInvariant();
         if (!NameRegex().IsMatch(name))
@@ -64,8 +68,16 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
             return;
         }
 
-        await FollowAsync(name, uri.ToString(), channel, name, preset: null);
+        await FollowAsync(name, uri.ToString(), channel, name, preset: null, silent);
     }
+
+    [SlashCommand("notify", "Turns notifications for a feed's posts on or off (feeds post silently by default).")]
+    public async Task NotifyAsync(
+        // Required, so leaving it out can't flip a feed the opposite way from what was meant.
+        [Summary(description: "True: notify people. False: post silently")] bool enabled,
+        [Summary(description: "Feed name, as shown by /news list - leave out for every feed")] string? name = null)
+        => await RespondAsync(await _notifications.SetAsync(Context.Guild.Id, name, silent: !enabled, Context.User),
+            ephemeral: true);
 
     public enum FilterKind
     {
@@ -191,7 +203,8 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
             return;
         }
 
-        var lines = subscriptions.Select(s => $"• **{s.Name}** → <#{s.ChannelId}>\n  <{s.FeedUrl}>");
+        var lines = subscriptions.Select(s =>
+            $"• **{s.Name}** → <#{s.ChannelId}> {(s.Silent ? "🔕 silent" : "🔔 notifies")}\n  <{s.FeedUrl}>");
         await RespondAsync(string.Join("\n", lines), ephemeral: true);
     }
 
@@ -239,8 +252,9 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
         await FollowupAsync(embeds: embeds, ephemeral: true);
     }
 
+    /// <param name="silent">Post silently or not; null keeps an existing feed's setting (new feeds start silent).</param>
     private async Task FollowAsync(string name, string feedUrl, ITextChannel channel, string displayName,
-        NewsPresetInfo? preset)
+        NewsPresetInfo? preset, bool? silent)
     {
         // Without this, Manage Server alone would let someone make the bot post into channels they can't see
         // (e.g. staff-only ones). Only View Channel is required: news channels are usually read-only, so the person
@@ -288,11 +302,18 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
 
         var created = false;
         var hasIncludes = false;
+        var postsSilently = true;
         await _store.UpsertAsync(Context.Guild.Id, name, (subscription, isNew) =>
         {
             created = isNew;
             subscription.FeedUrl = feedUrl;
             subscription.ChannelId = channel.Id;
+            if (silent is { } chosen)
+            {
+                subscription.Silent = chosen;
+            }
+
+            postsSilently = subscription.Silent;
 
             // Apply the preset's default filter to new subscriptions, and to existing ones that have no filter yet -
             // but never overwrite keywords a server has customised.
@@ -308,7 +329,10 @@ public partial class NewsModule : InteractionModuleBase<SocketInteractionContext
         });
 
         await FollowupAsync(
-            $"{(created ? "Now following" : "Updated")} **{displayName}** - new articles will be posted in {channel.Mention}. " +
+            $"{(created ? "Now following" : "Updated")} **{displayName}** - new articles will be posted in {channel.Mention}" +
+            (postsSilently
+                ? " silently 🔕 (no notifications; `/news notify` changes that). "
+                : " with notifications 🔔. ") +
             $"Use `/news latest {name}` to see what's out right now" +
             (hasIncludes ? $", and `/news filter-show {name}` to see what gets posted." : "."),
             ephemeral: true);

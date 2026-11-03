@@ -170,7 +170,9 @@ public class NewsPollingService : BackgroundService
             writeUps += writeUp is null ? 0 : 1;
 
             await channel.SendMessageAsync(embed: NewsEmbedFactory.Build(article, subscription.Name, writeUp,
-                _options.ShowOriginalSummary));
+                _options.ShowOriginalSummary),
+                // Silent feeds (the default) post without a push or desktop notification: still visible and unread.
+                flags: subscription.Silent ? MessageFlags.SuppressNotification : MessageFlags.None);
 
             // Mark one at a time so a failure mid-way (e.g. permissions revoked) retries only what wasn't sent.
             await _store.MarkSeenAsync(subscription.GuildId, subscription.Name, [article.Id]);

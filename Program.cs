@@ -116,6 +116,7 @@ builder.Services.AddSingleton<IChatSettingsStore, JsonChatSettingsStore>();
 builder.Services.AddSingleton<IServerSettingsStore, JsonServerSettingsStore>();
 builder.Services.AddSingleton<ModBot.Services.Settings.ServerSettingsService>();
 builder.Services.AddSingleton<ModBot.Modules.Settings.ServerFeatureSwitch>();
+builder.Services.AddSingleton<ModBot.Services.News.NewsNotifications>();
 builder.Services.AddSingleton<ModBot.Modules.Polls.PollPoster>();
 
 builder.Services.AddSingleton<IModerationService, ModerationService>();
