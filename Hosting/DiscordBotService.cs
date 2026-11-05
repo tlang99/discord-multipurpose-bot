@@ -259,6 +259,13 @@ public class DiscordBotService : BackgroundService
             _ => LogLevel.Information
         };
 
+        // Voice encryption (DAVE) warns about every packet it can't decrypt yet while it's being set up, a few dozen
+        // in the first second or two of listening. That's expected, not a problem: keep it out of the log files.
+        if (level == LogLevel.Warning && message.Source.StartsWith("Dave", StringComparison.Ordinal))
+        {
+            level = LogLevel.Debug;
+        }
+
         _logger.Log(level, message.Exception, "[{Source}] {Message}", message.Source, message.Message);
         return Task.CompletedTask;
     }
