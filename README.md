@@ -126,8 +126,9 @@ note.
 > SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
 > SoundCloud links.
 
-**Voice commands** — off until a server turns them on (`/settings feature`). Then `/voice listen` (or "@bot listen in
-voice") has the bot join your voice channel, muted, and listen for its name: "hey ModBot, make an LFG for ranked",
+**Voice commands** — off until a server turns them on (`/settings feature`). Then the bot joins voice by itself when
+people are there (voice auto-join; `/settings voice-channel` limits it to one channel, or turn it off and use
+`/voice listen` / "@bot listen in voice"), and listens for its name, chiming when it hears it: "hey ModBot, make an LFG for ranked",
 "hey ModBot, remind me in 20 minutes to check the oven". What's said after the name is handled exactly like the same
 words typed as an @mention, by the same person. The bot posts what it heard in the voice channel's chat and replies
 to that. Speech is turned into text on the bot's own machine (Whisper), and no audio is kept. It stops on `/voice
@@ -243,9 +244,10 @@ Server). appsettings.json only holds the defaults for servers that haven't chang
 saved in `data/server-settings.json`:
 - `/settings show` — everything at a glance: which features are on, the music and LFG channels, the LFG ping role and
   whether auto-mod is on.
-- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls, reminders or voice commands on or off.
-  Everything starts on except voice commands. Turning music off stops what's playing, and turning voice commands off
-  stops listening. Things already underway still finish: LFG posts can be cancelled, polls ended, and reminders are
+- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls, reminders, voice commands or voice
+  auto-join on or off. Everything starts on except voice commands (voice auto-join does nothing until they're on).
+  Turning music off stops what's playing, and turning voice commands off stops listening.
+- `/settings voice-channel` — voice auto-join only joins this voice channel; leave it out for whichever one is busiest. Things already underway still finish: LFG posts can be cancelled, polls ended, and reminders are
   delivered.
 - `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.
   Channels are saved by ID, so renaming one doesn't break it.

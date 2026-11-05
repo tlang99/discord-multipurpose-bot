@@ -25,7 +25,8 @@ public static partial class SettingsRequestReader
         var on = verb == "enable" || match.Groups["state"].Value.Equals("on", StringComparison.OrdinalIgnoreCase);
 
         // Whitespace-normalised, so "chat  bot" is "chat bot"; the regex only lets these names through.
-        ServerFeature? feature = WhitespaceRegex().Replace(match.Groups["feature"].Value.ToLowerInvariant(), " ") switch
+        var name = WhitespaceRegex().Replace(match.Groups["feature"].Value.ToLowerInvariant(), " ");
+        ServerFeature? feature = name.Contains("auto") ? ServerFeature.VoiceAutoJoin : name switch
         {
             "chat actions" or "actions" => ServerFeature.ChatActions,
             "chatbot" or "chat bot" or "the bot chat" or "ai chat" or "chat" => ServerFeature.Chat,
@@ -49,7 +50,7 @@ public static partial class SettingsRequestReader
     }
 
     private const string Feature =
-        @"(?<feature>chat\s*bot|the\s+bot\s+chat|ai\s+chat|chat\s+actions|actions|chat|music|lfgs?|looking\s+for\s+group|polls?|reminders?|voice\s+commands?|voice\s+control)";
+        @"(?<feature>(?:voice\s+)?auto[\s-]?join(?:ing)?(?:\s+voice)?|chat\s*bot|the\s+bot\s+chat|ai\s+chat|chat\s+actions|actions|chat|music|lfgs?|looking\s+for\s+group|polls?|reminders?|voice\s+commands?|voice\s+control)";
 
     private const string Here = @"(?:for\s+(?:this|the)\s+server|on\s+this\s+server|server[\s-]?wide|here|feature)";
 

@@ -17,6 +17,10 @@ public enum ServerFeature
     /// <summary>Listening in voice for "hey ModBot". Off until a server turns it on (<see cref="ServerSettings.IsOptIn"/>),
     /// since it means the bot hearing the voice channel.</summary>
     VoiceCommands,
+
+    /// <summary>With voice commands on, joining voice by itself when people are in a voice channel, so "hey ModBot" is
+    /// all it takes. On by default, but does nothing until <see cref="VoiceCommands"/> is on too.</summary>
+    VoiceAutoJoin,
 }
 
 /// <summary>
@@ -38,6 +42,10 @@ public class ServerSettings
     public ChannelChoice Music { get; set; } = new();
 
     public ChannelChoice Lfg { get; set; } = new();
+
+    /// <summary>The one voice channel the bot joins by itself (voice auto-join); null means whichever one people are
+    /// in (/settings voice-channel).</summary>
+    public ChannelChoice AutoJoinChannel { get; set; } = new();
 
     /// <summary>The role new LFG posts ping. Null uses the default (<c>Lfg:PingRoleName</c>, made by /lfg-setup).</summary>
     public ulong? LfgPingRoleId { get; set; }

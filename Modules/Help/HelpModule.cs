@@ -137,10 +137,13 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
             {
                 var name = Context.Guild.CurrentUser.DisplayName;
                 builder.AddField("🎙️ Voice commands",
-                    $"In a voice channel, `/voice listen` (or ask me to \"listen in voice\"), then say \"hey {name}\" " +
-                    $"and what you want: \"hey {name}, make an LFG for ranked\". I do it as if you'd typed it, and " +
-                    "post what I heard. Speech is turned into text on the bot's own computer and no audio is kept. " +
-                    $"`/voice stop` or \"hey {name}, stop listening\" to stop. Not while music's playing.");
+                    (server.IsEnabled(ServerFeature.VoiceAutoJoin)
+                        ? "I join voice by myself when people are in a voice channel. "
+                        : "In a voice channel, `/voice listen` (or ask me to \"listen in voice\"). ") +
+                    $"Say \"hey {name}\" and what you want: \"hey {name}, make an LFG for ranked\". I do it as if " +
+                    "you'd typed it, and post what I heard. Speech is turned into text on the bot's own computer and " +
+                    $"no audio is kept. `/voice stop` or \"hey {name}, stop listening\" to stop. Not while music's " +
+                    "playing.");
             }
         }
 

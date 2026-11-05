@@ -83,16 +83,37 @@ public class ServerFeatureSwitch
             note = " I stopped listening and left voice.";
         }
 
+        // Only the listening it started by itself: someone who asked for it can still have it.
+        if (!on && feature == ServerFeature.VoiceAutoJoin && _voice.IsAutoListening(guild.Id))
+        {
+            await _voice.StopAsync(guild.Id, null);
+            note = " I stopped listening and left voice. `/voice listen` still works.";
+        }
+
+        var server = await _settings.GetAsync(guild.Id);
         if (on && feature == ServerFeature.VoiceCommands)
         {
             // On, but the bot itself may not be able to: tell the admin now rather than at the first "listen".
             note = _voice.SetupProblem is { } problem
                 ? $" But voice commands aren't set up on this bot yet - for whoever runs it: {problem}"
-                : " Join a voice channel and use `/voice listen` (or ask me to \"listen in voice\") to start.";
+                : server.IsEnabled(ServerFeature.VoiceAutoJoin)
+                    ? " I'll join voice by myself when people are in a voice channel (turn that off with the " +
+                      "**Voice auto-join** feature, or pick one channel with `/settings voice-channel`)."
+                    : " Join a voice channel and use `/voice listen` (or ask me to \"listen in voice\") to start.";
+        }
+
+        if (on && feature == ServerFeature.VoiceAutoJoin && !server.IsEnabled(ServerFeature.VoiceCommands))
+        {
+            note = " It does nothing until **Voice commands** is on too.";
+        }
+
+        if (on && feature is ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin or ServerFeature.Chat)
+        {
+            _voice.AutoJoinSoon(guild.Id); // anyone already in voice
         }
 
         return on
-            ? ServerSettings.IsOptIn(feature) ? $"✅ {name} is on.{note}" : $"✅ {name} is on again."
+            ? ServerSettings.IsOptIn(feature) || note.Length > 0 ? $"✅ {name} is on.{note}" : $"✅ {name} is on again."
             : $"🚫 {name} is off on this server.{note} Turn it back on any time.";
     }
 }

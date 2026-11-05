@@ -174,12 +174,11 @@ public class MusicService
         };
 
         // Listening for voice commands holds the server's one voice connection, which music needs to play. Music wins:
-        // stop listening and give Discord a moment to see the bot leave before Lavalink joins.
+        // stop listening and give Discord a moment to see the bot leave before Lavalink joins. (With voice auto-join on,
+        // it comes back once the music's done and the player has left.)
         if (GetPlayer(user.Guild.Id) is null && _voice.IsListening(user.Guild.Id))
         {
-            await _voice.StopAsync(user.Guild.Id,
-                "🎶 Music's starting, so I've stopped listening for voice commands - I can't do both at once. Ask me " +
-                "to listen again once the music's done.");
+            await _voice.StopForMusicAsync(user.Guild.Id);
             await Task.Delay(TimeSpan.FromSeconds(1));
         }
 

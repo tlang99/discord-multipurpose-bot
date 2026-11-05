@@ -21,6 +21,11 @@ public class VoiceOptions
     /// <summary>Longest stretch of speech turned into text at once, in seconds: past this it's cut and checked.</summary>
     public int MaxSpeechSeconds { get; set; } = 15;
 
-    /// <summary>Stop listening after this many minutes, even if people are still in the channel (0 = never).</summary>
+    /// <summary>Stop listening after this many minutes, even if people are still in the channel (0 = never). Only when
+    /// someone started it: when the bot joined by itself (voice auto-join), it stays until everyone's left.</summary>
     public int MaxListenMinutes { get; set; } = 180;
+
+    /// <summary>Play a short chime when the bot hears its name, so people know it's listening. Needs the Speak
+    /// permission in the voice channel; without it, the bot just doesn't chime.</summary>
+    public bool Chime { get; set; } = true;
 }
