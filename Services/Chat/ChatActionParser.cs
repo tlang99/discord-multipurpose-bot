@@ -126,6 +126,10 @@ public partial class ChatActionParser
         _logger = logger;
     }
 
+    /// <summary>A web search asked for in so many words ("search for …"), or null.</summary>
+    public static WebSearchAction? ReadSearch(string message)
+        => SearchRequestReader.Read(message) is { } query ? new WebSearchAction(query) : null;
+
     /// <summary>The action <paramref name="message"/> asks for, or null if it's just chat (or the model couldn't be
     /// reached, so the caller falls back to chatting).</summary>
     /// <param name="lfgGame">The server's LFG playlists and ranks (/settings lfg-game); blank when not given.</param>
@@ -134,9 +138,9 @@ public partial class ChatActionParser
     {
         // A web search is only done when asked for in so many words ("search for …"), so it's read by rules too, and
         // first: what follows "search for" is the search, whatever it says ("search for poll ideas").
-        if (SearchRequestReader.Read(message) is { } query)
+        if (ReadSearch(message) is { } search)
         {
-            return new WebSearchAction(query);
+            return search;
         }
 
         // A reminder phrase plus a time is unambiguous, so it's settled without the model.

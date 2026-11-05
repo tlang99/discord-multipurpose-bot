@@ -10,7 +10,6 @@ using ModBot.Modules.Lfg;
 using ModBot.Modules.Voice;
 using ModBot.Services.Chat;
 using ModBot.Services.Lfg;
-using ModBot.Services.Search;
 using ModBot.Services.Settings;
 using ModBot.Services.Storage;
 
@@ -33,13 +32,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     private readonly ChatOptions _chat;
     private readonly ChatPersonality _personality;
     private readonly VoiceListener _voice;
-    private readonly WebSearchAnswerer _search;
+    private readonly SearchOptions _search;
     private readonly ILogger<SettingsModule> _logger;
 
     public SettingsModule(ServerSettingsService settings, ServerFeatureSwitch featureSwitch,
         IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ChatPersonality personality, VoiceListener voice,
-        WebSearchAnswerer search,
-        ILogger<SettingsModule> logger)
+        IOptions<SearchOptions> search, ILogger<SettingsModule> logger)
     {
         _settings = settings;
         _switch = featureSwitch;
@@ -47,7 +45,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         _chat = chat.Value;
         _personality = personality;
         _voice = voice;
-        _search = search;
+        _search = search.Value;
         _logger = logger;
     }
 

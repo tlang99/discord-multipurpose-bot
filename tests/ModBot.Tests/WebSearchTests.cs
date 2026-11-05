@@ -31,6 +31,12 @@ public class SearchRequestReaderTests
     [InlineData("search for 2 players for ranked")]
     [InlineData("search")]
     [InlineData("look up")]
+    [InlineData("search for")]
+    [InlineData("search results are bad lately")] // sentences about searching or Google, not requests
+    [InlineData("Google is down today")]
+    [InlineData("google pixel looks nice")]
+    [InlineData("google's new phone is out")]
+    [InlineData("look up at the sky")]
     public void Ignores_everything_else(string message) => Assert.Null(SearchRequestReader.Read(message));
 
     [Fact]

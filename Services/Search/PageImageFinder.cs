@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -40,24 +41,32 @@ public partial class PageImageFinder
             using var response = await _httpClient.GetAsync(page, HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
             if (response.StatusCode != HttpStatusCode.OK ||
-                response.Content.Headers.ContentType?.MediaType is { } type && !type.Contains("html"))
+                response.Content.Headers.ContentType?.MediaType is not ("text/html" or "application/xhtml+xml"))
             {
                 return null;
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            var buffer = new byte[MaxBytes];
-            var read = 0;
-            int got;
-            while (read < buffer.Length && (got = await stream.ReadAsync(buffer.AsMemory(read), cancellationToken)) > 0)
+            var buffer = ArrayPool<byte>.Shared.Rent(MaxBytes);
+            try
             {
-                read += got;
-            }
+                var read = 0;
+                int got;
+                while (read < MaxBytes &&
+                       (got = await stream.ReadAsync(buffer.AsMemory(read, MaxBytes - read), cancellationToken)) > 0)
+                {
+                    read += got;
+                }
 
-            return FromHtml(Encoding.UTF8.GetString(buffer, 0, read), response.RequestMessage?.RequestUri ?? page);
+                return FromHtml(Encoding.UTF8.GetString(buffer, 0, read), response.RequestMessage?.RequestUri ?? page);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or
-                                   News.BlockedAddressException && !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException or IOException or
+                                       News.BlockedAddressException) && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogDebug(ex, "Couldn't read a search result's preview image.");
             return null;
@@ -71,8 +80,8 @@ public partial class PageImageFinder
         foreach (Match tag in MetaTagRegex().Matches(html))
         {
             var attributes = tag.Value;
-            var name = AttributeRegex("property").Match(attributes) is { Success: true } p ? p.Groups[1].Value
-                : AttributeRegex("name").Match(attributes) is { Success: true } n ? n.Groups[1].Value : "";
+            var name = PropertyRegex().Match(attributes) is { Success: true } p ? p.Groups[1].Value
+                : NameRegex().Match(attributes) is { Success: true } n ? n.Groups[1].Value : "";
             if (!name.Equals("og:image", StringComparison.OrdinalIgnoreCase) &&
                 !name.Equals("og:image:url", StringComparison.OrdinalIgnoreCase) &&
                 !name.Equals("twitter:image", StringComparison.OrdinalIgnoreCase))
@@ -80,7 +89,7 @@ public partial class PageImageFinder
                 continue;
             }
 
-            if (AttributeRegex("content").Match(attributes) is { Success: true } content &&
+            if (ContentRegex().Match(attributes) is { Success: true } content &&
                 Uri.TryCreate(page, WebUtility.HtmlDecode(content.Groups[1].Value.Trim()), out var image) &&
                 WebLinks.TryParse(image.AbsoluteUri, out _, httpsOnly: true))
             {
@@ -94,6 +103,15 @@ public partial class PageImageFinder
     [GeneratedRegex(@"<meta\b[^>]*>", RegexOptions.IgnoreCase)]
     private static partial Regex MetaTagRegex();
 
-    private static Regex AttributeRegex(string attribute)
-        => new($@"\b{attribute}\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase);
+    // An attribute's value. The look-behind stops "name" matching inside "data-name".
+    private const string Value = @"\s*=\s*[""']([^""']*)[""']";
+
+    [GeneratedRegex(@"(?<![\w-])property" + Value, RegexOptions.IgnoreCase)]
+    private static partial Regex PropertyRegex();
+
+    [GeneratedRegex(@"(?<![\w-])name" + Value, RegexOptions.IgnoreCase)]
+    private static partial Regex NameRegex();
+
+    [GeneratedRegex(@"(?<![\w-])content" + Value, RegexOptions.IgnoreCase)]
+    private static partial Regex ContentRegex();
 }

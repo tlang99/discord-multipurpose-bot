@@ -5,7 +5,6 @@ using Microsoft.Extensions.Options;
 using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
-using ModBot.Services.Search;
 using ModBot.Services.Settings;
 
 namespace ModBot.Modules.Help;
@@ -20,15 +19,15 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly ServerSettingsService _settings;
     private readonly ChatOptions _chat;
-    private readonly WebSearchAnswerer _search;
+    private readonly SearchOptions _search;
     private readonly ILogger<HelpModule> _logger;
 
-    public HelpModule(ServerSettingsService settings, IOptions<ChatOptions> chat, WebSearchAnswerer search,
+    public HelpModule(ServerSettingsService settings, IOptions<ChatOptions> chat, IOptions<SearchOptions> search,
         ILogger<HelpModule> logger)
     {
         _settings = settings;
         _chat = chat.Value;
-        _search = search;
+        _search = search.Value;
         _logger = logger;
     }
 

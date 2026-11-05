@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ModBot.Configuration;
 using ModBot.EventHandlers;
 using ModBot.Hosting;
@@ -77,15 +78,11 @@ BindOptions<PollOptions>(PollOptions.SectionName);
 BindOptions<VoiceOptions>(VoiceOptions.SectionName);
 
 // Web search uses an Ollama account key, the same kind the chatbot uses for ollama.com, so one key does both.
-var searchOptions = BindOptions<SearchOptions>(SearchOptions.SectionName);
-if (string.IsNullOrWhiteSpace(searchOptions.ApiKey))
-{
-    searchOptions.ApiKey = chatOptions.ApiKey;
-}
-
+// Only for ollama.com, though: the chatbot's key is never sent to a search address someone else configured.
+BindOptions<SearchOptions>(SearchOptions.SectionName);
 builder.Services.PostConfigure<SearchOptions>(options =>
 {
-    if (string.IsNullOrWhiteSpace(options.ApiKey))
+    if (string.IsNullOrWhiteSpace(options.ApiKey) && options.UsesDefaultUrl)
     {
         options.ApiKey = chatOptions.ApiKey;
     }
@@ -210,8 +207,9 @@ builder.Services.AddSingleton<ChatPersonality>();
 builder.Services.AddSingleton<ChatActionParser>();
 
 // Web search: Ollama's web search API (only the search words are sent), with the chatbot writing the answer.
-builder.Services.AddHttpClient<IWebSearch, OllamaWebSearch>(client =>
+builder.Services.AddHttpClient<IWebSearch, OllamaWebSearch>((services, client) =>
 {
+    var searchOptions = services.GetRequiredService<IOptions<SearchOptions>>().Value;
     if (Uri.TryCreate(searchOptions.Url.TrimEnd('/') + "/", UriKind.Absolute, out var searchUri))
     {
         client.BaseAddress = searchUri;
@@ -219,7 +217,8 @@ builder.Services.AddHttpClient<IWebSearch, OllamaWebSearch>(client =>
 
     // The answerer applies its own, shorter limit; this is only a backstop.
     client.Timeout = TimeSpan.FromSeconds(Math.Clamp(searchOptions.TimeoutSeconds, 5, 120) + 10);
-    if (!string.IsNullOrWhiteSpace(searchOptions.ApiKey))
+    // No key over plain http, where anyone on the way could read it (SetupProblem says so).
+    if (searchOptions.IsEnabled)
     {
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", searchOptions.ApiKey);
     }
@@ -282,7 +281,7 @@ if (host.Services.GetRequiredService<ModBot.Services.Voice.SpeechToText>().Probl
 }
 
 // Web search is optional too: without a key, /search and "search for" just say it isn't set up.
-if (host.Services.GetRequiredService<WebSearchAnswerer>().SetupProblem is { } searchProblem)
+if (host.Services.GetRequiredService<IOptions<SearchOptions>>().Value.SetupProblem is { } searchProblem)
 {
     host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Search")
         .LogInformation("Web search isn't available: {Problem}", searchProblem);

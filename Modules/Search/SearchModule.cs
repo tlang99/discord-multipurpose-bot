@@ -1,6 +1,7 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
+using Microsoft.Extensions.Logging;
 using ModBot.Common;
 using ModBot.Models;
 using ModBot.Services.Moderation;
@@ -18,11 +19,13 @@ public class SearchModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly WebSearchAnswerer _search;
     private readonly IGuildSettingsStore _moderation;
+    private readonly ILogger<SearchModule> _logger;
 
-    public SearchModule(WebSearchAnswerer search, IGuildSettingsStore moderation)
+    public SearchModule(WebSearchAnswerer search, IGuildSettingsStore moderation, ILogger<SearchModule> logger)
     {
         _search = search;
         _moderation = moderation;
+        _logger = logger;
     }
 
     [RequireFeature(ServerFeature.WebSearch)]
@@ -44,7 +47,7 @@ public class SearchModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        if (_search.WhyCantSearch(Context.Guild.Id, user.Id) is { } reason)
+        if (_search.TryStart(Context.Guild.Id, user.Id) is { } reason)
         {
             await RespondAsync(reason, ephemeral: true);
             return;
@@ -52,19 +55,30 @@ public class SearchModule : InteractionModuleBase<SocketInteractionContext>
 
         // Searching and writing the answer take a few seconds, longer than Discord waits for a first reply.
         await DeferAsync();
-        var found = await _search.AnswerAsync(Context.Guild.Id, Context.Guild.Name, Context.Guild.CurrentUser.DisplayName,
-            user.Id, question);
-
-        // Web pages, and the model's answer from them, are third-party text: the server's word rules apply.
-        if (TextFilter.FindViolation(found.Text + "\n" + MessageTools.EmbedText(found.Embed), settings) is not null)
+        try
         {
-            await FollowupAsync("I found an answer, but it broke this server's word filter, so I'm keeping it to myself.",
-                allowedMentions: AllowedMentions.None);
-            return;
-        }
+            var found = await _search.AnswerAsync(Context.Guild.Id, Context.Guild.Name,
+                Context.Guild.CurrentUser.DisplayName, question);
 
-        // An answer is all in the embed, like a news post (Discord already shows who used /search above it).
-        await FollowupAsync(found.Text.Length > 0 ? found.Text : null, embed: found.Embed,
-            allowedMentions: AllowedMentions.None);
+            // Web pages, and the model's answer from them, are third-party text: the server's word rules apply. (They
+            // apply to the answer even when a moderator, who's exempt for their own words, asked.)
+            if (TextFilter.FindViolation(found.Text + "\n" + MessageTools.EmbedText(found.Embed), settings) is not null)
+            {
+                await FollowupAsync("I found an answer, but it broke this server's word filter, so I'm keeping it to " +
+                                    "myself.", allowedMentions: AllowedMentions.None);
+                return;
+            }
+
+            // An answer is all in the embed, like a news post (Discord already shows who used /search above it).
+            await FollowupAsync(found.Text.Length > 0 ? found.Text : null, embed: found.Embed,
+                allowedMentions: AllowedMentions.None);
+        }
+        catch (Exception ex)
+        {
+            // Never leave the reply stuck on "thinking…".
+            _logger.LogWarning(ex, "/search failed in guild {GuildId}.", Context.Guild.Id);
+            await FollowupAsync("Something went wrong searching - try again in a bit.",
+                allowedMentions: AllowedMentions.None);
+        }
     }
 }

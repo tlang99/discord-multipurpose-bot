@@ -28,7 +28,7 @@ public static class NewsEmbedFactory
                 // The source name comes from the feed: an over-long one would make Discord.Net throw, and the article
                 // would then fail on every check.
                 builder.AddField(TextTools.Truncate($"From {source ?? "the article"}", EmbedFieldBuilder.MaxFieldNameLength),
-                    TextTools.Truncate(original, 300));
+                    TextTools.TruncateEscaped(original, 300));
             }
 
             // Says plainly that the description is the bot's take, not the outlet's words.
@@ -39,7 +39,8 @@ public static class NewsEmbedFactory
         {
             if (article.Summary is { Length: > 0 } summary)
             {
-                builder.WithDescription(TextTools.Truncate(summary, 350));
+                // Summaries may be escaped already (search results are), so the cut mustn't split a "\*".
+                builder.WithDescription(TextTools.TruncateEscaped(summary, 350));
             }
 
             builder.WithFooter(TextTools.Truncate(source is null ? feedLabel : $"{source} • {feedLabel}",

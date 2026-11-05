@@ -33,9 +33,17 @@ public static partial class SearchRequestReader
         return query.Length > MaxQueryLength ? query[..MaxQueryLength].TrimEnd() : query;
     }
 
+    /// <summary>After a bare "search" or "google", words that make it a sentence about searching or Google rather than
+    /// a request: "search results are bad lately", "Google is down", "google pixel looks nice".</summary>
+    private const string NotARequest =
+        @"(?!\s*(?:for|is|isn't|are|aren't|was|wasn't|were|has|hasn't|have|had|does|doesn't|did|didn't|will|won't|" +
+        @"can|can't|keeps|kept|seems|says|said|knows|results?|engines?|bar|box|history|terms|chrome|pixel|maps|docs|" +
+        @"drive|sheets|slides|play|home|nest|meet|translate|photos|assistant|cloud|account|gemini)\b)";
+
     [GeneratedRegex(
         @"^\W*(?:(?:hey|ok|okay|please|pls|yo|can\s+you|could\s+you|would\s+you|will\s+you|go\s+ahead\s+and)[\s,]+)*" +
-        @"(?:search(?:\s+(?:the\s+web|the\s+internet|online|google))?(?:\s+for)?|look\s+up|google|web\s+search(?:\s+for)?)" +
+        @"(?:search(?:\s+(?:the\s+web|the\s+internet|online|google))?\s+for|search\s+(?:the\s+web|the\s+internet|online|google)" +
+        @"|web\s+search(?:\s+for)?|look\s+up(?!\s+(?:at|to|from|and|there|here)\b)|(?:search|google)" + NotARequest + ")" +
         @"[\s:,]+(?<query>.+?)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RequestRegex();

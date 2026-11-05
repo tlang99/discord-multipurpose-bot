@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
 using Discord;
@@ -48,7 +47,7 @@ public partial class WebSearchAnswerer
     private readonly SearchOptions _options;
     private readonly ChatOptions _chatOptions;
     private readonly ILogger<WebSearchAnswerer> _logger;
-    private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastSearch = new();
+    private readonly UserCooldowns _cooldowns;
 
     public WebSearchAnswerer(IWebSearch search, IChatService chat, ChatPersonality personality, PageImageFinder images,
         IOptions<SearchOptions> options, IOptions<ChatOptions> chatOptions, ILogger<WebSearchAnswerer> logger)
@@ -59,48 +58,38 @@ public partial class WebSearchAnswerer
         _images = images;
         _options = options.Value;
         _chatOptions = chatOptions.Value;
+        _cooldowns = new UserCooldowns(_options.CooldownSeconds);
         _logger = logger;
     }
 
-    /// <summary>Why searching can't work on this bot at all (turned off, or no key), or null if it can.</summary>
-    public string? SetupProblem => !_options.Enabled
-        ? "Web search is turned off in the bot's own settings."
-        : !_options.IsEnabled
-            ? "Web search isn't set up on this bot yet: whoever runs it needs to add an Ollama API key (see the README)."
-            : null;
-
-    /// <summary>Why <paramref name="userId"/> can't search right now (not set up, or a search too recently), or null
-    /// if they can. Doesn't count as a search.</summary>
-    public string? WhyCantSearch(ulong guildId, ulong userId)
+    /// <summary>
+    /// Takes <paramref name="userId"/>'s turn to search, in one step so two requests at once can't both get one.
+    /// Returns why they can't search right now (not set up, or a search too recently), or null if the turn is theirs:
+    /// then call <see cref="AnswerAsync"/>. Failed or empty searches count too, since each used the key's allowance.
+    /// </summary>
+    public string? TryStart(ulong guildId, ulong userId)
     {
-        if (SetupProblem is { } problem)
+        if (_options.SetupProblem is { } problem)
         {
             return problem;
         }
 
-        var cooldown = TimeSpan.FromSeconds(Math.Max(0, _options.CooldownSeconds));
-        if (_lastSearch.TryGetValue((guildId, userId), out var last) && DateTimeOffset.UtcNow - last < cooldown)
-        {
-            var wait = (int)Math.Ceiling((cooldown - (DateTimeOffset.UtcNow - last)).TotalSeconds);
-            return $"⏳ Give it {TextTools.Count(wait, "second")} before searching again.";
-        }
-
-        return null;
+        return _cooldowns.TryClaim(guildId, userId, out var wait)
+            ? null
+            : $"⏳ Give it {TextTools.Count((int)Math.Ceiling(wait.TotalSeconds), "second")} before searching again.";
     }
 
-    /// <summary>Searches for <paramref name="query"/> as <paramref name="userId"/> and writes the answer.</summary>
+    /// <summary>Searches for <paramref name="query"/> and writes the answer; <see cref="TryStart"/> comes
+    /// first.</summary>
     /// <param name="botName">The bot's name in the server, and the server's, for the personality.</param>
-    public async Task<SearchAnswer> AnswerAsync(ulong guildId, string serverName, string botName, ulong userId,
-        string query, CancellationToken cancellationToken = default)
+    public async Task<SearchAnswer> AnswerAsync(ulong guildId, string serverName, string botName, string query,
+        CancellationToken cancellationToken = default)
     {
         query = query.Trim();
-        if (WhyCantSearch(guildId, userId) is { } reason)
+        if (_options.SetupProblem is { } problem)
         {
-            return new(reason, null);
+            return new(problem, null);
         }
-
-        // Counted before searching, so failed or empty searches count too: each one used the key's allowance.
-        _lastSearch[(guildId, userId)] = DateTimeOffset.UtcNow;
 
         IReadOnlyList<WebResult> results;
         try
@@ -123,20 +112,20 @@ public partial class WebSearchAnswerer
         }
 
         // Not what was searched for: the log stays free of what people ask, as it does for chat.
-        _logger.LogInformation("Web search for user {UserId} in guild {GuildId}: {Count} result(s).", userId, guildId,
-            results.Count);
+        _logger.LogInformation("Web search in guild {GuildId}: {Count} result(s).", guildId, results.Count);
         if (results.Count == 0)
         {
             return new($"I searched for \"{TextTools.Escape(TextTools.Truncate(query, 100))}\" but found nothing. " +
                        "Try different words?", null);
         }
 
-        // The answer and the picture don't depend on each other, so they're fetched together.
+        // The answer and the picture don't depend on each other, so they're fetched together (and both awaited, so a
+        // failure in one never leaves the other running unobserved).
         var top = results[0];
         var answerTask = WriteAnswerAsync(guildId, serverName, botName, query, results, cancellationToken);
         var imageTask = FindImageAsync(top.Url, cancellationToken);
-        var answer = await answerTask;
-        return new("", BuildEmbed(top, answer, botName, await imageTask));
+        await Task.WhenAll(answerTask, imageTask);
+        return new("", BuildEmbed(top, answerTask.Result, botName, imageTask.Result));
     }
 
     /// <summary>The model's answer from <paramref name="results"/>, or null if it couldn't be had.</summary>

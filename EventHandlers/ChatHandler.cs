@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Discord;
 using Discord.WebSocket;
@@ -69,7 +68,7 @@ public partial class ChatHandler
     private readonly WebSearchAnswerer _search;
     private readonly ChatOptions _options;
     private readonly ILogger<ChatHandler> _logger;
-    private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
+    private readonly UserCooldowns _questions;
 
     public ChatHandler(IChatService chat, ChatActionParser actionParser,
         MusicControls musicControls, MusicQueueService musicQueue, LfgPoster lfgPoster,
@@ -94,6 +93,7 @@ public partial class ChatHandler
         _personality = personality;
         _voice = voice;
         _options = options.Value;
+        _questions = new UserCooldowns(_options.CooldownSeconds);
         _logger = logger;
     }
 
@@ -327,10 +327,13 @@ public partial class ChatHandler
             try
             {
                 // "Play X" / "make an LFG" are done, not chatted about. Only the asker's own message is looked at.
-                if (_options.Actions && server.IsEnabled(ServerFeature.ChatActions) &&
-                    asker is SocketGuildUser && words.Length > 0)
+                // Web search has its own switch and is asked for in so many words, so it works with chat actions off
+                // too (the ground rules tell people to ask for one).
+                if (asker is SocketGuildUser && words.Length > 0)
                 {
-                    action = await _actionParser.ParseAsync(words, server.LfgGame);
+                    action = _options.Actions && server.IsEnabled(ServerFeature.ChatActions)
+                        ? await _actionParser.ParseAsync(words, server.LfgGame)
+                        : ChatActionParser.ReadSearch(words);
                 }
 
                 if (action is null)
@@ -375,8 +378,9 @@ public partial class ChatHandler
                     else if (action is WebSearchAction search)
                     {
                         // The answer in the server's personality, its sources in an embed under it.
-                        var found = await _search.AnswerAsync(guild.Id, guild.Name, bot.DisplayName, asker.Id,
-                            search.Query);
+                        var found = _search.TryStart(guild.Id, asker.Id) is { } reason
+                            ? new SearchAnswer(reason, null)
+                            : await _search.AnswerAsync(guild.Id, guild.Name, bot.DisplayName, search.Query);
                         (text, embed) = (found.Text, found.Embed);
                     }
                     else
@@ -630,24 +634,7 @@ public partial class ChatHandler
     }
 
     /// <summary>Records the question if the person is allowed to ask now; true if they have to wait.</summary>
-    private bool IsOnCooldown(ulong guildId, ulong userId)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var cooldown = TimeSpan.FromSeconds(Math.Max(0, _options.CooldownSeconds));
-        var allowed = false;
-        _lastQuestion.AddOrUpdate((guildId, userId),
-            _ =>
-            {
-                allowed = true;
-                return now;
-            },
-            (_, last) =>
-            {
-                allowed = now - last >= cooldown;
-                return allowed ? now : last;
-            });
-        return !allowed;
-    }
+    private bool IsOnCooldown(ulong guildId, ulong userId) => !_questions.TryClaim(guildId, userId, out _);
 
     /// <summary>Who the bot is, then the server's personality (or the default), then the ground rules.</summary>
     private async Task<string> BuildSystemPromptAsync(SocketGuild guild, SocketGuildUser bot)

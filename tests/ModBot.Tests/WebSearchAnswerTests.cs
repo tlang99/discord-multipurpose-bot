@@ -61,7 +61,7 @@ public class WebSearchAnswererTests
         var answerer = Answerer(new FakeSearch(TwoResults),
             new FakeChat("Season 2 brings three new maps [1]. See https://example.com/patch or [this](https://x.y)."));
 
-        var found = await answerer.AnswerAsync(1, "Server", "ModBot", 2, "season 2 maps");
+        var found = await answerer.AnswerAsync(1, "Server", "ModBot", "season 2 maps");
 
         // All in the embed: titled with the top result and linking to it, the answer as its text (links and result
         // numbers taken out), the page's own picture, and the news footer.
@@ -78,7 +78,7 @@ public class WebSearchAnswererTests
     public async Task Shows_the_top_results_own_summary_when_the_chatbot_is_down()
     {
         var found = await Answerer(new FakeSearch(TwoResults), new FakeChat("", fail: true))
-            .AnswerAsync(1, "Server", "ModBot", 2, "season 2 maps");
+            .AnswerAsync(1, "Server", "ModBot", "season 2 maps");
 
         Assert.Equal("Season 2 patch notes", found.Embed!.Title);
         Assert.Contains("Season 2 adds three maps", found.Embed.Description);
@@ -89,25 +89,30 @@ public class WebSearchAnswererTests
     public async Task A_page_without_a_picture_just_has_none()
     {
         var found = await Answerer(new FakeSearch(TwoResults), new FakeChat("An answer."), page: "<html></html>")
-            .AnswerAsync(1, "Server", "ModBot", 2, "q");
+            .AnswerAsync(1, "Server", "ModBot", "q");
 
         Assert.Null(found.Embed!.Image);
     }
 
     [Fact]
-    public async Task One_search_per_person_per_cooldown()
+    public void One_search_per_person_per_cooldown()
     {
-        var search = new FakeSearch(TwoResults);
-        var answerer = Answerer(search, new FakeChat("An answer."));
+        var answerer = Answerer(new FakeSearch(TwoResults), new FakeChat("An answer."));
 
-        await answerer.AnswerAsync(1, "Server", "ModBot", 2, "first");
-        var second = await answerer.AnswerAsync(1, "Server", "ModBot", 2, "second");
-        var someoneElse = await answerer.AnswerAsync(1, "Server", "ModBot", 3, "theirs");
+        Assert.Null(answerer.TryStart(1, 2));
+        Assert.StartsWith("⏳", answerer.TryStart(1, 2));
+        Assert.Null(answerer.TryStart(1, 3)); // someone else
+        Assert.Null(answerer.TryStart(4, 2)); // the same person in another server
+    }
 
-        Assert.StartsWith("⏳", second.Text);
-        Assert.Null(second.Embed);
-        Assert.NotNull(someoneElse.Embed);
-        Assert.Equal(2, search.Calls);
+    [Fact]
+    public async Task Only_one_of_two_searches_at_the_same_moment_gets_the_turn()
+    {
+        var answerer = Answerer(new FakeSearch(TwoResults), new FakeChat("x"));
+
+        var starts = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => Task.Run(() => answerer.TryStart(1, 2))));
+
+        Assert.Single(starts, s => s is null);
     }
 
     [Theory]
@@ -117,7 +122,7 @@ public class WebSearchAnswererTests
     public async Task Says_what_went_wrong_without_details(int status, string expected)
     {
         var found = await Answerer(new FakeSearch(failWith: status), new FakeChat("x"))
-            .AnswerAsync(1, "Server", "ModBot", 2, "q");
+            .AnswerAsync(1, "Server", "ModBot", "q");
 
         Assert.Contains(expected, found.Text);
         Assert.Null(found.Embed);
@@ -126,7 +131,7 @@ public class WebSearchAnswererTests
     [Fact]
     public async Task Says_so_when_nothing_was_found()
     {
-        var found = await Answerer(new FakeSearch([]), new FakeChat("x")).AnswerAsync(1, "Server", "ModBot", 2, "zzz");
+        var found = await Answerer(new FakeSearch([]), new FakeChat("x")).AnswerAsync(1, "Server", "ModBot", "zzz");
 
         Assert.Contains("found nothing", found.Text);
     }
@@ -137,12 +142,22 @@ public class WebSearchAnswererTests
         var search = new FakeSearch(TwoResults);
         var answerer = Answerer(search, new FakeChat("x"), apiKey: "");
 
-        var found = await answerer.AnswerAsync(1, "Server", "ModBot", 2, "q");
+        var found = await answerer.AnswerAsync(1, "Server", "ModBot", "q");
 
         Assert.Contains("isn't set up", found.Text);
-        Assert.NotNull(answerer.SetupProblem);
+        Assert.Contains("isn't set up", answerer.TryStart(1, 2));
         Assert.Equal(0, search.Calls);
     }
+
+    [Theory]
+    [InlineData("http://ollama.com/")] // the key would go over plain http
+    [InlineData("")]
+    public void Needs_an_https_address(string url)
+        => Assert.Contains("https", new SearchOptions { ApiKey = "key", Url = url }.SetupProblem);
+
+    [Fact]
+    public void Is_ready_with_a_key_and_the_default_address()
+        => Assert.Null(new SearchOptions { ApiKey = "key" }.SetupProblem);
 
     [Fact]
     public void A_summary_from_a_page_cant_become_markdown()
