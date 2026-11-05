@@ -42,13 +42,6 @@ public sealed class UserCooldowns
         return allowed;
     }
 
-    /// <summary>How long until the person can go again (zero if now), without taking a turn.</summary>
-    public TimeSpan Remaining(ulong guildId, ulong userId)
-        => _last.TryGetValue((guildId, userId), out var last) && last + _cooldown - DateTimeOffset.UtcNow is var left &&
-           left > TimeSpan.Zero
-            ? left
-            : TimeSpan.Zero;
-
     /// <summary>Gives the turn back, e.g. when what it was for failed before doing anything.</summary>
     public void Release(ulong guildId, ulong userId) => _last.TryRemove((guildId, userId), out _);
 

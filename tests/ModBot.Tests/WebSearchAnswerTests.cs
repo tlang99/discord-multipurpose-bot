@@ -75,10 +75,16 @@ public class WebSearchAnswererTests
     }
 
     [Fact]
-    public async Task Shows_the_top_results_own_summary_when_the_chatbot_is_down()
+    public Task Shows_the_top_results_own_summary_when_the_chatbot_is_down()
+        => ShowsTheResultsOwnSummary(new FakeChat("", fail: true));
+
+    [Fact]
+    public Task Shows_the_top_results_own_summary_when_the_answer_was_only_links()
+        => ShowsTheResultsOwnSummary(new FakeChat("https://example.com/patch [1]"));
+
+    private static async Task ShowsTheResultsOwnSummary(IChatService chat)
     {
-        var found = await Answerer(new FakeSearch(TwoResults), new FakeChat("", fail: true))
-            .AnswerAsync(1, "Server", "ModBot", "season 2 maps");
+        var found = await Answerer(new FakeSearch(TwoResults), chat).AnswerAsync(1, "Server", "ModBot", "season 2 maps");
 
         Assert.Equal("Season 2 patch notes", found.Embed!.Title);
         Assert.Contains("Season 2 adds three maps", found.Embed.Description);

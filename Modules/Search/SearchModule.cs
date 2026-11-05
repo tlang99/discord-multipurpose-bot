@@ -38,6 +38,14 @@ public class SearchModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
+        // Spaces only would take the cooldown for a search Ollama turns down.
+        question = question.Trim();
+        if (question.Length < 2)
+        {
+            await RespondAsync("What should I look up? Give me a few words.", ephemeral: true);
+            return;
+        }
+
         // Everything that can refuse is checked first, so a refusal is private (once the reply is deferred publicly, it
         // can't be made private any more).
         var settings = await _moderation.GetAsync(Context.Guild.Id);

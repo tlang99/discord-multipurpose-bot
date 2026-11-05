@@ -536,8 +536,9 @@ bot logs a warning at startup.
 **Web search (optional):** `/search` and "search for …" use Ollama's web search, which needs a free Ollama account
 key even if the chatbot runs locally. Create one at [ollama.com/settings/keys](https://ollama.com/settings/keys) and
 set it with `dotnet user-secrets set "Search:ApiKey" "<api-key>"` or the `OLLAMA_SEARCH_API_KEY` environment
-variable. If you already set `Chat:ApiKey` / `OLLAMA_API_KEY` for Ollama's cloud, search uses that one (only while `Search:Url` is left at ollama.com, so the key never goes elsewhere; the URL must be https). Without a key,
-`/search` says it isn't set up and everything else works as before.
+variable. If you already set `Chat:ApiKey` / `OLLAMA_API_KEY` for Ollama's cloud, search uses that one, but only
+while `Search:Url` is left at ollama.com, so that key never goes anywhere else (and the URL must be https). Without a
+key, `/search` says it isn't set up and everything else works as before.
 
 ### 7. Run it
 

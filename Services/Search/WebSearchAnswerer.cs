@@ -175,14 +175,15 @@ public partial class WebSearchAnswerer
     }
 
     /// <summary>The model's answer, ready to post: no links (the source is the embed's title, and a link from a web
-    /// page could be anything) and no leftover result numbers, short enough for the embed.</summary>
-    public static string CleanAnswer(string reply)
+    /// page could be anything) and no leftover result numbers, short enough for the embed. Null if nothing's left (the
+    /// model wrote only links), so the result's own summary is shown instead, without claiming an AI write-up.</summary>
+    public static string? CleanAnswer(string reply)
     {
         var text = MarkdownLinkRegex().Replace(reply, "$1");
         text = BareLinkRegex().Replace(text, "");
         text = CitationRegex().Replace(text, "");
         text = SpacesRegex().Replace(text, " ").Replace(" .", ".").Replace(" ,", ",").Trim();
-        return TextTools.Truncate(text.Length > 0 ? text : "I found something - see the link.", MaxAnswerLength);
+        return text.Length > 0 ? TextTools.Truncate(text, MaxAnswerLength) : null;
     }
 
     /// <summary>
