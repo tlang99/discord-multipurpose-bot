@@ -8,13 +8,13 @@ sees what it acted on, and anything it misheard) and replies to that.
 ## Privacy
 
 - Each server has to turn it on: `/settings feature` → Voice commands (off by default).
-- **Voice auto-join** (on once voice commands are): the bot joins a voice channel by itself a few seconds after
-  someone does, so "hey ModBot" is all it takes. With several channels in use, it joins the busiest one (one voice
-  connection per server). `/settings voice-channel` limits it to one channel. Turn it off with `/settings feature` →
-  Voice auto-join (or "@ModBot disable voice auto-join"). Then someone starts it by hand with `/voice listen`, or by
-  asking the chatbot ("@ModBot listen in voice").
-- It doesn't post "listening" or "stopped" notices in chat: the bot showing in the voice channel is the sign it's
-  listening. `/help` explains voice commands to anyone who asks.
+- Then someone starts it by hand with `/voice listen`, or by asking the chatbot ("@ModBot listen in voice").
+- **Voice auto-join**, also off until a server turns it on (`/settings feature` → Voice auto-join, or "@ModBot enable
+  voice auto-join"): the bot joins a voice channel by itself a few seconds after someone does, so "hey ModBot" is all
+  it takes. With several channels in use, it joins the busiest one (one voice connection per server).
+  `/settings voice-channel` limits it to one channel.
+- Each time it joins, it posts one short line in the voice channel's chat ("🎙️ Listening for "hey ModBot"...") and
+  how to send it away. Nothing else: no heads-up for each person who joins, no "stopped" notices.
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
   off for every server with `Voice:Chime`).
 - Speech is turned into text **on the machine running the bot** (Whisper). Nothing is sent to any other service.

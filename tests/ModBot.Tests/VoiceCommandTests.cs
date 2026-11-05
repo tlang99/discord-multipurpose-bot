@@ -165,13 +165,13 @@ public class AutoJoinPickerTests
 public class VoiceCommandsSwitchTests
 {
     [Fact]
-    public void Voice_commands_start_off_and_everything_else_on()
+    public void Voice_commands_and_auto_join_start_off_and_everything_else_on()
     {
         var settings = new ServerSettings();
+        ServerFeature[] voice = [ServerFeature.VoiceCommands, ServerFeature.VoiceAutoJoin];
 
-        Assert.False(settings.IsEnabled(ServerFeature.VoiceCommands));
-        Assert.All(Enum.GetValues<ServerFeature>().Where(f => f != ServerFeature.VoiceCommands),
-            f => Assert.True(settings.IsEnabled(f)));
+        Assert.All(voice, f => Assert.False(settings.IsEnabled(f)));
+        Assert.All(Enum.GetValues<ServerFeature>().Except(voice), f => Assert.True(settings.IsEnabled(f)));
     }
 
     [Fact]
@@ -206,15 +206,22 @@ public class VoiceCommandsSwitchTests
         => Assert.Equal(new FeatureSwitchRequest(ServerFeature.VoiceCommands, on), SettingsRequestReader.Read(message));
 
     [Fact]
-    public void Auto_join_is_on_by_default_and_waits_for_voice_commands()
+    public void Auto_join_has_to_be_turned_on_and_needs_voice_commands_and_the_chatbot()
     {
         var settings = new ServerSettings();
-
-        Assert.False(ServerSettings.IsOptIn(ServerFeature.VoiceAutoJoin));
-        Assert.True(settings.IsEnabled(ServerFeature.VoiceAutoJoin));
+        Assert.True(ServerSettings.IsOptIn(ServerFeature.VoiceAutoJoin));
         Assert.Null(settings.AutoJoinChannel.ChannelId);
-        settings.Set(ServerFeature.VoiceAutoJoin, false);
-        Assert.Equal(["VoiceAutoJoin"], settings.DisabledFeatures);
+        Assert.False(settings.AutoJoinsVoice);
+
+        settings.Set(ServerFeature.VoiceAutoJoin, true);
+        Assert.Equal(["VoiceAutoJoin"], settings.EnabledFeatures);
+        Assert.False(settings.AutoJoinsVoice); // voice commands still off
+
+        settings.Set(ServerFeature.VoiceCommands, true);
+        Assert.True(settings.AutoJoinsVoice);
+
+        settings.Set(ServerFeature.Chat, false);
+        Assert.False(settings.AutoJoinsVoice); // every voice request goes through the chatbot
     }
 
     [Theory]

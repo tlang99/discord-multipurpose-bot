@@ -137,7 +137,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
             {
                 var name = Context.Guild.CurrentUser.DisplayName;
                 builder.AddField("🎙️ Voice commands",
-                    (server.IsEnabled(ServerFeature.VoiceAutoJoin)
+                    (server.AutoJoinsVoice
                         ? "I join voice by myself when people are in a voice channel. "
                         : "In a voice channel, `/voice listen` (or ask me to \"listen in voice\"). ") +
                     $"Say \"hey {name}\" and what you want: \"hey {name}, make an LFG for ranked\". I do it as if " +

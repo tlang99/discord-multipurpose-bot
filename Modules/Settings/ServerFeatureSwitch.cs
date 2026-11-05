@@ -77,7 +77,7 @@ public class ServerFeatureSwitch
         }
 
         // Voice requests go through the chatbot, so switching either off stops the listening.
-        if (!on && feature is ServerFeature.VoiceCommands or ServerFeature.Chat && _voice.IsListening(guild.Id))
+        if (!on && feature is (ServerFeature.VoiceCommands or ServerFeature.Chat) && _voice.IsListening(guild.Id))
         {
             await _voice.StopAsync(guild.Id);
             note += " I stopped listening and left voice.";
@@ -97,9 +97,10 @@ public class ServerFeatureSwitch
             note += _voice.SetupProblem is { } problem
                 ? $" But voice commands aren't set up on this bot yet - for whoever runs it: {problem}"
                 : server.IsEnabled(ServerFeature.VoiceAutoJoin)
-                    ? " I'll join voice by myself when people are in a voice channel (turn that off with the " +
-                      "**Voice auto-join** feature, or pick one channel with `/settings voice-channel`)."
-                    : " Join a voice channel and use `/voice listen` (or ask me to \"listen in voice\") to start.";
+                    ? " I'll join voice by myself when people are in a voice channel (pick one channel with " +
+                      "`/settings voice-channel`)."
+                    : " Join a voice channel and use `/voice listen` (or ask me to \"listen in voice\") to start, " +
+                      "or turn on **Voice auto-join** so I join by myself.";
         }
 
         if (on && feature == ServerFeature.VoiceAutoJoin && !server.IsEnabled(ServerFeature.VoiceCommands))
@@ -107,7 +108,7 @@ public class ServerFeatureSwitch
             note += " It does nothing until **Voice commands** is on too.";
         }
 
-        if (on && feature is ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin or ServerFeature.Chat)
+        if (on && feature is (ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin or ServerFeature.Chat))
         {
             _voice.AutoJoinSoon(guild.Id); // anyone already in voice
         }

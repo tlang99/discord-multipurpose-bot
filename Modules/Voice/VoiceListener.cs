@@ -27,8 +27,8 @@ namespace ModBot.Modules.Voice;
 /// <para>One voice connection per server is all Discord allows, and music (Lavalink) needs it to play, so the bot
 /// listens only while no music is playing: starting the music stops the listening (<see cref="MusicService"/> calls
 /// <see cref="StopAsync"/>), and it won't start listening over music.</para>
-/// <para>It posts nothing about itself (no "listening" or "stopped" notices): the bot showing in the voice channel is
-/// the sign, and the chime when it hears its name.</para>
+/// <para>It posts one short "listening" line when it joins, and nothing else about itself: no per-person heads-up,
+/// no "stopped" notices. The chime when it hears its name is the other sign.</para>
 /// <para>Voice auto-join (on by default once a server turns voice commands on): the bot joins by itself when people
 /// are in a voice channel, the busiest one if several are (<see cref="AutoJoinPicker"/>), and comes back when the
 /// music's done. Told to stop listening, or taken out of the channel, it stays out of that channel until everyone's
@@ -181,9 +181,10 @@ public sealed class VoiceListener
 
             // Asked for by name, so it's welcome back in a channel it was told to stay out of.
             _stayOut.TryRemove(guild.Id, out _);
-            var name = guild.CurrentUser.DisplayName;
-            return $"🎙️ Listening in {channel.Mention}: say \"hey {name}\" and what you want." +
-                   (replyChannel.Id == askedIn.Id ? "" : " My replies go in its chat.");
+            // The listening line already went where they asked, when that's where replies go.
+            return replyChannel.Id == askedIn.Id
+                ? ""
+                : $"🎙️ Listening in {channel.Mention} - my replies go in its chat.";
         });
 
     /// <summary>
@@ -290,7 +291,8 @@ public sealed class VoiceListener
                     return; // stopped before the time limit, the usual case
                 }
 
-                await EndAsync(guild.Id, session);
+                // Staying out, or with voice auto-join on it would rejoin at once and the limit would mean nothing.
+                await EndAsync(guild.Id, session, stayOut: true);
             }, LogLevel.Debug, "Voice time limit failed in guild {GuildId}.", guild.Id);
         }
 
@@ -298,8 +300,19 @@ public sealed class VoiceListener
             channel.Name, channel.Id,
             startedBy is null ? "joined by itself" : $"started by {startedBy.Username} ({startedBy.Id})");
 
-        // Nothing's posted: the bot showing in the channel is the sign it's listening (the server turned voice commands
-        // on, /help explains them). Posts on every join and leave were just noise.
+        // One short line, so whoever's in the channel knows it's listening. (No heads-up for each person who joins,
+        // and nothing when it stops: those were just noise.)
+        var name = guild.CurrentUser.DisplayName;
+        try
+        {
+            await replyChannel.SendMessageAsync($"🎙️ Listening for \"hey {name}\". Say \"hey {name}, stop listening\" " +
+                                                "to send me away.", allowedMentions: AllowedMentions.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Couldn't post the listening line in channel {ChannelId}.", replyChannel.Id);
+        }
+
         return null;
     }
 
@@ -347,7 +360,7 @@ public sealed class VoiceListener
         }
 
         var server = await _settings.GetAsync(guildId);
-        if (!AutoJoins(server))
+        if (!server.AutoJoinsVoice)
         {
             return;
         }
@@ -378,10 +391,6 @@ public sealed class VoiceListener
         }
     }
 
-    private static bool AutoJoins(ServerSettings server)
-        => server.IsEnabled(ServerFeature.Chat) && server.IsEnabled(ServerFeature.VoiceCommands) &&
-           server.IsEnabled(ServerFeature.VoiceAutoJoin);
-
     /// <summary>A channel it may join by itself: allowed in, not full, and able to post in its chat (where the
     /// replies go).</summary>
     private static bool CanJoinByItself(SocketGuildUser me, SocketVoiceChannel channel)
@@ -408,10 +417,13 @@ public sealed class VoiceListener
             return $"Only people in {session.Channel.Mention} (or a moderator) can stop me listening there.";
         }
 
-        // Or voice auto-join would bring it straight back.
-        _stayOut[user.Guild.Id] = session.Channel.Id;
-        var autoJoins = AutoJoins(await _settings.GetAsync(user.Guild.Id));
-        await StopAsync(user.Guild.Id);
+        // Staying out, or voice auto-join would bring it straight back.
+        var autoJoins = (await _settings.GetAsync(user.Guild.Id)).AutoJoinsVoice;
+        if (!await StopAsync(user.Guild.Id, stayOut: true))
+        {
+            return "I'm not listening anywhere right now.";
+        }
+
         return "🎙️ Stopped listening." +
                (autoJoins ? " I won't join that channel by myself again until everyone's left it." : "");
     }
@@ -419,20 +431,33 @@ public sealed class VoiceListener
     /// <summary>Stops listening in the server, if it is, and leaves the voice channel. A join in progress finishes
     /// first (it holds the same lock), so music asking to stop never races one. With voice auto-join on, it comes back
     /// by itself once the music player has left.</summary>
-    public Task StopAsync(ulong guildId)
+    public Task StopAsync(ulong guildId) => StopAsync(guildId, stayOut: false);
+
+    /// <summary>The same, and it keeps out of that channel until everyone's left it: for stops that voice auto-join
+    /// mustn't undo straight away (someone told it to, or it can't post its replies there).</summary>
+    public Task StopAndStayOutAsync(ulong guildId) => StopAsync(guildId, stayOut: true);
+
+    private Task<bool> StopAsync(ulong guildId, bool stayOut)
         => _startStop.RunAsync(guildId, () => _sessions.TryGetValue(guildId, out var session)
-            ? EndHoldingLockAsync(guildId, session, leave: true)
-            : Task.CompletedTask);
+            ? EndHoldingLockAsync(guildId, session, leave: true, stayOut)
+            : Task.FromResult(false));
 
-    private Task EndAsync(ulong guildId, Session session, bool leave = true)
-        => _startStop.RunAsync(guildId, () => EndHoldingLockAsync(guildId, session, leave));
+    private Task EndAsync(ulong guildId, Session session, bool leave = true, bool stayOut = false)
+        => _startStop.RunAsync(guildId, () => EndHoldingLockAsync(guildId, session, leave, stayOut));
 
-    private async Task EndHoldingLockAsync(ulong guildId, Session session, bool leave)
+    /// <summary>Ends <paramref name="session"/> if it's still the current one. Returns whether it was.</summary>
+    private async Task<bool> EndHoldingLockAsync(ulong guildId, Session session, bool leave, bool stayOut)
     {
         // Only the session that's still current: a late event from an old one mustn't end a new one.
         if (!_sessions.TryRemove(new KeyValuePair<ulong, Session>(guildId, session)))
         {
-            return;
+            return false;
+        }
+
+        // Set before leaving: the bot's own leave is what sets auto-join looking again.
+        if (stayOut)
+        {
+            _stayOut[guildId] = session.Channel.Id;
         }
 
         session.Stopping.Cancel();
@@ -444,6 +469,7 @@ public sealed class VoiceListener
 
         _logger.LogInformation("Stopped listening for voice commands in {Channel} ({ChannelId}).",
             session.Channel.Name, session.Channel.Id);
+        return true;
     }
 
     /// <summary>The bot kicked or moved out of the channel, or everyone (but bots) left it: stop. Someone joining voice,
@@ -481,9 +507,8 @@ public sealed class VoiceListener
             // out of there, or voice auto-join would put it straight back.
             if (after.VoiceChannel?.Id != session.Channel.Id)
             {
-                _stayOut[guildId] = session.Channel.Id;
                 Background.Run(_logger,
-                    () => EndAsync(member.Guild.Id, session, leave: false),
+                    () => EndAsync(member.Guild.Id, session, leave: false, stayOut: true),
                     LogLevel.Debug, "Couldn't stop listening in guild {GuildId}.", member.Guild.Id);
             }
 
@@ -716,7 +741,9 @@ public sealed class VoiceListener
         public async Task StopChimingAsync()
         {
             CanChime = false;
-            await _chiming.WaitAsync();
+            // A chime that's playing ends at once (Stopping is cancelled) or within its own 5-second limit; this is
+            // only a backstop, past which the stream is closed anyway.
+            var waited = await _chiming.WaitAsync(TimeSpan.FromSeconds(6));
             try
             {
                 _sound?.Dispose();
@@ -728,7 +755,10 @@ public sealed class VoiceListener
             }
             finally
             {
-                _chiming.Release();
+                if (waited)
+                {
+                    _chiming.Release();
+                }
             }
         }
         private readonly ConcurrentDictionary<ulong, DateTimeOffset> _wakeWords = new();

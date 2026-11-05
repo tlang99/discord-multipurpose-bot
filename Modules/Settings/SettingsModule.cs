@@ -59,7 +59,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("Reminders")] Reminders = ServerFeature.Reminders,
         [ChoiceDisplay("Voice commands (say my name in voice; off by default)")]
         VoiceCommands = ServerFeature.VoiceCommands,
-        [ChoiceDisplay("Voice auto-join (joins voice by itself once voice commands are on)")]
+        [ChoiceDisplay("Voice auto-join (joins voice by itself; off by default)")]
         VoiceAutoJoin = ServerFeature.VoiceAutoJoin,
     }
 
@@ -237,7 +237,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         var note = !server.IsEnabled(ServerFeature.VoiceCommands)
             ? " It applies once **Voice commands** is on (`/settings feature`)."
             : !server.IsEnabled(ServerFeature.VoiceAutoJoin)
-                ? " It applies once **Voice auto-join** is on again (`/settings feature`)."
+                ? " It applies once **Voice auto-join** is on (`/settings feature`)."
                 : "";
         if (channel is not null && _voice.IsAutoListening(Context.Guild.Id))
         {
