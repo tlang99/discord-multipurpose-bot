@@ -14,6 +14,9 @@ public static class WakeWord
 
     private const int MaxWordsPerName = 3;
 
+    /// <summary>Names shorter than this many letters aren't wake words: "Dj" would go off in ordinary talk.</summary>
+    public const int ShortestName = 3;
+
     /// <summary>
     /// What was asked after the wake word: "skip this song" from "Hey ModBot, skip this song.". Empty when they only
     /// said the wake word (the request may follow in the next sentence); null when there's no wake word at all.
@@ -37,10 +40,13 @@ public static class WakeWord
         }
 
         var end = FindName(words, wanted, after)?.Start ?? words.Length;
-        return string.Join(' ', words[after..end]).TrimStart(',', '.', '!', '?', ':', ';', '-', ' ').TrimEnd('.', ' ');
+        return Tidy(string.Join(' ', words[after..end]));
     }
 
-    public const int ShortestName = 3;
+    /// <summary>A request as said: without the comma after the name, or the full stop speech-to-text puts at the end
+    /// ("play Hotel California." would search for the full stop too). A question mark or "!" is kept.</summary>
+    public static string Tidy(string request)
+        => request.Trim().TrimStart(',', '.', '!', '?', ':', ';', '-', ' ').TrimEnd('.', ' ');
 
     /// <summary>The first wake word from <paramref name="from"/> on: where it starts (its greeting, if any) and the
     /// word after the name.</summary>

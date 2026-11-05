@@ -129,11 +129,16 @@ public sealed class VoiceListener
                 return $"I need **View Channel** and **Connect** in {channel.Mention} to listen there.";
             }
 
-            // Replies go in the voice channel's own chat, where the people talking will see them.
-            var replyChannel = ChannelAccess.CanPost(guild.CurrentUser, channel) ? channel : askedIn;
-            if (!ChannelAccess.CanPost(guild.CurrentUser, replyChannel))
+            // Replies go in the voice channel's own chat, where the people talking will see them, or else where they
+            // asked. Only a channel the asker can post in too: a spoken request is only run where the speaker could
+            // have typed it (ChatHandler), so anywhere else every request would be ignored without a word.
+            bool BothCanPost(SocketTextChannel c) =>
+                ChannelAccess.CanPost(guild.CurrentUser, c) && ChannelAccess.CanPost(user, c);
+            var replyChannel = BothCanPost(channel) ? channel : BothCanPost(askedIn) ? askedIn : null;
+            if (replyChannel is null)
             {
-                return $"I can't post in {channel.Mention}'s chat or here, so I'd have nowhere to answer.";
+                return $"Neither {channel.Mention}'s chat nor this channel is somewhere we can both post, so I'd " +
+                       "have nowhere to answer. Ask in a channel you can post in.";
             }
 
             IAudioClient voice;
@@ -219,7 +224,15 @@ public sealed class VoiceListener
             {
                 Background.Run(_logger, async () =>
                 {
-                    await Task.Delay(TimeSpan.FromMinutes(_options.MaxListenMinutes), session.Stopping.Token);
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromMinutes(_options.MaxListenMinutes), session.Stopping.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return; // stopped before the time limit, the usual case
+                    }
+
                     await EndAsync(guild.Id, session, $"🎙️ Stopped listening in {channel.Mention} after " +
                                                       $"{_options.MaxListenMinutes} minutes. Ask me again to keep going.");
                 }, LogLevel.Debug, "Voice time limit failed in guild {GuildId}.", guild.Id);
@@ -434,7 +447,7 @@ public sealed class VoiceListener
                 return;
             }
 
-            request = text.TrimEnd('.', ' ');
+            request = WakeWord.Tidy(text);
         }
 
         if (request.Length == 0)
