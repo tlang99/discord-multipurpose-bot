@@ -126,6 +126,7 @@ if (finished != done.Task)
     Log("Took far too long - giving up.");
 }
 
+var botName = client.CurrentUser?.Username ?? "ModBot"; // read before logging out, which clears it
 await ShutDownAsync();
 await client.LogoutAsync();
 
@@ -249,7 +250,7 @@ async Task TranscribeAsync()
         using var processor = factory.CreateBuilder()
             .WithLanguage("en")
             // Words it should expect, so the wake word and game terms come out spelled right.
-            .WithPrompt($"Hey {client.CurrentUser.Username}, LFG, Hardpoint, ranked.")
+            .WithPrompt($"Hey {botName}, LFG, Hardpoint, ranked.")
             .Build();
 
         var text = new List<string>();
