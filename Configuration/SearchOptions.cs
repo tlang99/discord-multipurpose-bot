@@ -40,7 +40,12 @@ public class SearchOptions
     public int TimeoutSeconds { get; set; } = 20;
 
     /// <summary>Whether <see cref="Url"/> is Ollama's own, the only place the chatbot's key may be sent.</summary>
-    public bool UsesDefaultUrl => Url.TrimEnd('/') == DefaultUrl.TrimEnd('/');
+    public bool UsesDefaultUrl => IsOllamaCom(Url);
+
+    /// <summary>Whether <paramref name="url"/> is Ollama's cloud (https://ollama.com).</summary>
+    public static bool IsOllamaCom(string? url)
+        => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps &&
+           uri.Host.Equals("ollama.com", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Why searching can't work on this bot at all (turned off, no key, or a bad address), or null if it
     /// can.</summary>

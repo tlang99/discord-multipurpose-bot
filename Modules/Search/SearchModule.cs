@@ -70,7 +70,7 @@ public class SearchModule : InteractionModuleBase<SocketInteractionContext>
 
             // Web pages, and the model's answer from them, are third-party text: the server's word rules apply. (They
             // apply to the answer even when a moderator, who's exempt for their own words, asked.)
-            if (TextFilter.FindViolation(found.Text + "\n" + MessageTools.EmbedText(found.Embed), settings) is not null)
+            if (TextFilter.FindViolation(found.Text + "\n" + MessageTools.EmbedText(found.Embed, withLinks: true), settings) is not null)
             {
                 await FollowupAsync("I found an answer, but it broke this server's word filter, so I'm keeping it to " +
                                     "myself.", allowedMentions: AllowedMentions.None);

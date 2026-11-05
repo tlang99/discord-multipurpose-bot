@@ -411,7 +411,7 @@ public partial class ChatHandler
 
                 // Song and playlist titles, and search results and answers, are third-party text, so action replies
                 // follow the word rules too.
-                if (TextFilter.FindViolation(text + "\n" + MessageTools.EmbedText(embed), settings) is not null)
+                if (TextFilter.FindViolation(text + "\n" + MessageTools.EmbedText(embed, withLinks: action is WebSearchAction), settings) is not null)
                 {
                     text = action is PlayMusicAction or MusicControlAction
                         ? "My reply named a song whose title breaks this server's word filter, so I won't repeat it " +

@@ -152,14 +152,16 @@ public partial class WebSearchAnswerer
                 cancellationToken);
             return CleanAnswer(reply);
         }
-        catch (ChatServiceException ex)
+        catch (Exception ex) when ((ex is ChatServiceException or OperationCanceledException) &&
+                                   !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "Couldn't write a web search answer in guild {GuildId}.", guildId);
             return null;
         }
     }
 
-    /// <summary>The top result's preview image, or null; never holds the answer up for long.</summary>
+    /// <summary>The top result's preview image, or null; never holds the answer up for long, and never costs it: the
+    /// picture is optional, so anything going wrong just means none.</summary>
     private async Task<string?> FindImageAsync(string url, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -168,8 +170,9 @@ public partial class WebSearchAnswerer
         {
             return await _images.FindAsync(url, timeout.Token);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.LogDebug(ex, "Couldn't get a search result's picture.");
             return null;
         }
     }

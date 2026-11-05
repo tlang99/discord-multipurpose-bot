@@ -160,6 +160,16 @@ public class WebSearchAnswererTests
         => Assert.Contains("https", new SearchOptions { ApiKey = "key", Url = "http://ollama.com/" }.SetupProblem);
 
     [Theory]
+    [InlineData("https://ollama.com", true)]
+    [InlineData("https://OLLAMA.com/api/", true)]
+    [InlineData("http://ollama.com", false)] // the key would go over plain http
+    [InlineData("http://127.0.0.1:11434", false)] // a local Ollama
+    [InlineData("https://ollama.com.evil.example", false)]
+    [InlineData("https://my-proxy.example/v1", false)]
+    public void Knows_ollamas_cloud_from_other_hosts(string url, bool expected)
+        => Assert.Equal(expected, SearchOptions.IsOllamaCom(url));
+
+    [Theory]
     [InlineData(null)]
     [InlineData("  ")]
     public void A_blank_address_means_ollamas_own(string? url)

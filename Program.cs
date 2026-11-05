@@ -78,11 +78,13 @@ BindOptions<PollOptions>(PollOptions.SectionName);
 BindOptions<VoiceOptions>(VoiceOptions.SectionName);
 
 // Web search uses an Ollama account key, the same kind the chatbot uses for ollama.com, so one key does both.
-// Only for ollama.com, though: the chatbot's key is never sent to a search address someone else configured.
+// Only when both are ollama.com, though: a chat key for another host (a proxy, say) never goes to ollama.com, and the
+// chatbot's key is never sent to a search address someone else configured.
 BindOptions<SearchOptions>(SearchOptions.SectionName);
 builder.Services.PostConfigure<SearchOptions>(options =>
 {
-    if (string.IsNullOrWhiteSpace(options.ApiKey) && options.UsesDefaultUrl)
+    if (string.IsNullOrWhiteSpace(options.ApiKey) && options.UsesDefaultUrl &&
+        SearchOptions.IsOllamaCom(chatOptions.OllamaUrl))
     {
         options.ApiKey = chatOptions.ApiKey;
     }
