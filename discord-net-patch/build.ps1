@@ -21,7 +21,10 @@ $version = '3.20.2.1'
 $releaseCommit = 'be2c8de62d27e38c4e886c209eb1fd9fe4fca1f4'
 
 if (-not (Test-Path $source)) {
-    git clone --quiet --depth 1 --branch 3.20.2 https://github.com/discord-net/Discord.Net.git $source
+    # Long paths on: some of Discord.Net's files pass Windows' old 260-character path limit in a deep folder.
+    # Line endings as committed (LF), like the patch (.gitattributes), so it applies the same on every OS.
+    git -c core.longpaths=true -c core.autocrlf=false clone --quiet --depth 1 --branch 3.20.2 `
+        https://github.com/discord-net/Discord.Net.git $source
     if ($LASTEXITCODE -ne 0) { throw 'git clone failed' }
 }
 
@@ -31,11 +34,20 @@ if ($head -ne $releaseCommit) {
 }
 
 $patch = Join-Path $here 'pr3288.patch'
+# Already applied? (Windows PowerShell turns a native command's error output into a stopping error, so this check,
+# which is expected to "fail" the first time, runs with that off.)
+$ErrorActionPreference = 'Continue'
 git -C $source apply --reverse --check $patch 2>$null
-if ($LASTEXITCODE -ne 0) {
+$applied = $LASTEXITCODE -eq 0
+$ErrorActionPreference = 'Stop'
+if (-not $applied) {
     git -C $source apply $patch
     if ($LASTEXITCODE -ne 0) { throw 'The patch no longer applies.' }
 }
+
+# The repo's nuget.config lists this folder as a package source, and Discord.Net's own restore sees that too: on a
+# fresh clone it has to exist (empty is fine) before anything restores.
+New-Item -ItemType Directory -Force $packages | Out-Null
 
 foreach ($project in 'src/Discord.Net.Core', 'tools/Discord.Net.Dave', 'src/Discord.Net.Rest', 'src/Discord.Net.WebSocket') {
     dotnet pack (Join-Path $source $project) -c Release -p:Version=$version -p:IncludeSymbols=false -o $packages -v q
