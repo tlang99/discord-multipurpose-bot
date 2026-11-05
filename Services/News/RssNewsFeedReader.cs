@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
+using ModBot.Common;
 
 namespace ModBot.Services.News;
 
@@ -130,7 +131,7 @@ public partial class RssNewsFeedReader : INewsFeedReader
             if (pair.StartsWith("url=", StringComparison.OrdinalIgnoreCase))
             {
                 var target = Uri.UnescapeDataString(pair[4..]);
-                if (Uri.TryCreate(target, UriKind.Absolute, out var targetUri) && targetUri.Scheme is "http" or "https")
+                if (WebLinks.TryParse(target, out var targetUri))
                 {
                     return targetUri.ToString();
                 }

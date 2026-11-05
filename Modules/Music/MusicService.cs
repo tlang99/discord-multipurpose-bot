@@ -81,7 +81,7 @@ public class MusicService
 
         // Only hand Lavalink links to sites it's meant to play, rather than relying on its config alone to refuse
         // the rest.
-        if (Uri.TryCreate(query, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" &&
+        if (WebLinks.TryParse(query, out var uri) &&
             !IsAllowedLinkHost(uri.Host))
         {
             // SoundCloud only serves audio in a format Lavalink can't play yet (lavalink/README.md).
@@ -103,7 +103,7 @@ public class MusicService
             return new([], null, problem);
         }
 
-        var isLink = Uri.TryCreate(query, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+        var isLink = WebLinks.TryParse(query, out _);
 
         TrackLoadResult result;
         try

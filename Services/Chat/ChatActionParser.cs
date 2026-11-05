@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using ModBot.Models;
 using ModBot.Services.Polls;
 using ModBot.Services.Reminders;
+using ModBot.Services.Search;
 
 namespace ModBot.Services.Chat;
 
@@ -41,6 +42,9 @@ public record UnclearPollAction : ChatAction;
 /// <param name="SaidMine">"end my poll", rather than "end the poll" / "end that poll", which could mean someone
 /// else's.</param>
 public record EndPollAction(bool SaidMine = false) : ChatAction;
+
+/// <summary>"Search for …" / "look up …": search the web and answer from the results.</summary>
+public record WebSearchAction(string Query) : ChatAction;
 
 /// <summary>
 /// Works out whether a chat message is asking the bot to play music, post an LFG, set a reminder or post a poll, and
@@ -122,12 +126,23 @@ public partial class ChatActionParser
         _logger = logger;
     }
 
+    /// <summary>A web search asked for in so many words ("search for …"), or null.</summary>
+    public static WebSearchAction? ReadSearch(string message)
+        => SearchRequestReader.Read(message) is { } query ? new WebSearchAction(query) : null;
+
     /// <summary>The action <paramref name="message"/> asks for, or null if it's just chat (or the model couldn't be
     /// reached, so the caller falls back to chatting).</summary>
     /// <param name="lfgGame">The server's LFG playlists and ranks (/settings lfg-game); blank when not given.</param>
     public async Task<ChatAction?> ParseAsync(string message, LfgGameProfile? lfgGame = null,
         CancellationToken cancellationToken = default)
     {
+        // A web search is only done when asked for in so many words ("search for …"), so it's read by rules too, and
+        // first: what follows "search for" is the search, whatever it says ("search for poll ideas").
+        if (ReadSearch(message) is { } search)
+        {
+            return search;
+        }
+
         // A reminder phrase plus a time is unambiguous, so it's settled without the model.
         if (ReminderRequestReader.Read(message, DateTimeOffset.UtcNow, _reminders.TimeZone) is { } reminder)
         {

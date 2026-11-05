@@ -93,4 +93,31 @@ public static class Colors
 
     /// <summary>Green: everything music.</summary>
     public static readonly Color Music = new(0x1DB954);
+
+    /// <summary>Darker green: news posts, and web search answers (which are posted like them).</summary>
+    public static readonly Color News = new(0x2B, 0x8A, 0x3E);
+}
+
+/// <summary>Checks on addresses from outside (feeds, search results, what people type) before they're used.</summary>
+public static class WebLinks
+{
+    /// <summary>True, with the parsed address, if <paramref name="value"/> is an absolute http or https link (only https
+    /// with <paramref name="httpsOnly"/>, e.g. for images Discord loads straight from the address). Anything else
+    /// (javascript:, file:, a relative path) is refused.</summary>
+    public static bool TryParse(string? value, out Uri uri, bool httpsOnly = false)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var parsed) &&
+            (parsed.Scheme == Uri.UriSchemeHttps || !httpsOnly && parsed.Scheme == Uri.UriSchemeHttp))
+        {
+            uri = parsed;
+            return true;
+        }
+
+        uri = null!;
+        return false;
+    }
+
+    /// <summary>The site an address is on, without "www." ("www.example.com/a" is "example.com").</summary>
+    public static string SiteOf(Uri uri)
+        => uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? uri.Host[4..] : uri.Host;
 }

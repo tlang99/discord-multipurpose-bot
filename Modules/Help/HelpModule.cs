@@ -19,12 +19,15 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly ServerSettingsService _settings;
     private readonly ChatOptions _chat;
+    private readonly SearchOptions _search;
     private readonly ILogger<HelpModule> _logger;
 
-    public HelpModule(ServerSettingsService settings, IOptions<ChatOptions> chat, ILogger<HelpModule> logger)
+    public HelpModule(ServerSettingsService settings, IOptions<ChatOptions> chat, IOptions<SearchOptions> search,
+        ILogger<HelpModule> logger)
     {
         _settings = settings;
         _chat = chat.Value;
+        _search = search.Value;
         _logger = logger;
     }
 
@@ -104,6 +107,15 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "End one early: right-click it → **Apps** → **End poll** (yours, or any if you're a moderator)");
         }
 
+        if (server.IsEnabled(ServerFeature.WebSearch) && _search.SetupProblem is null)
+        {
+            builder.AddField("🔎 Web search",
+                "`/search question: …` - I look it up and answer, with a link to the source. Also \"@" +
+                $"{Context.Guild.CurrentUser.DisplayName} search for …\", or say \"hey " +
+                $"{Context.Guild.CurrentUser.DisplayName}, look up …\" in voice. Only the search words are sent to " +
+                "the web search.");
+        }
+
         if (_chat.IsEnabled && server.IsEnabled(ServerFeature.Chat))
         {
             var examples = new List<string>();
@@ -125,6 +137,11 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
             if (server.IsEnabled(ServerFeature.Polls))
             {
                 examples.AddRange(["\"make a poll: pizza or tacos?\"", "\"end my poll\""]);
+            }
+
+            if (server.IsEnabled(ServerFeature.WebSearch) && _search.SetupProblem is null)
+            {
+                examples.Add("\"search for the new patch notes\"");
             }
 
             var canAct = _chat.Actions && server.IsEnabled(ServerFeature.ChatActions) && examples.Count > 0;

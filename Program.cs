@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ModBot.Configuration;
 using ModBot.EventHandlers;
 using ModBot.Hosting;
@@ -16,6 +17,7 @@ using ModBot.Services.ContentModeration;
 using ModBot.Services.Lfg;
 using ModBot.Services.Moderation;
 using ModBot.Services.News;
+using ModBot.Services.Search;
 using ModBot.Services.Storage;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -50,6 +52,7 @@ foreach (var (variable, key) in new[]
     ("SIGHTENGINE_API_SECRET", $"{SightengineOptions.SectionName}:ApiSecret"),
     ("LAVALINK_PASSWORD", $"{MusicOptions.SectionName}:LavalinkPassword"),
     ("OLLAMA_API_KEY", $"{ChatOptions.SectionName}:ApiKey"),
+    ("OLLAMA_SEARCH_API_KEY", $"{SearchOptions.SectionName}:ApiKey"),
 })
 {
     if (Environment.GetEnvironmentVariable(variable) is { } value && !string.IsNullOrWhiteSpace(value))
@@ -73,6 +76,19 @@ BindOptions<LfgOptions>(LfgOptions.SectionName);
 BindOptions<ReminderOptions>(ReminderOptions.SectionName);
 BindOptions<PollOptions>(PollOptions.SectionName);
 BindOptions<VoiceOptions>(VoiceOptions.SectionName);
+
+// Web search uses an Ollama account key, the same kind the chatbot uses for ollama.com, so one key does both.
+// Only when both are ollama.com, though: a chat key for another host (a proxy, say) never goes to ollama.com, and the
+// chatbot's key is never sent to a search address someone else configured.
+BindOptions<SearchOptions>(SearchOptions.SectionName);
+builder.Services.PostConfigure<SearchOptions>(options =>
+{
+    if (string.IsNullOrWhiteSpace(options.ApiKey) && options.UsesDefaultUrl &&
+        SearchOptions.IsOllamaCom(chatOptions.OllamaUrl))
+    {
+        options.ApiKey = chatOptions.ApiKey;
+    }
+});
 
 builder.Services.AddSingleton(new DiscordSocketConfig
 {
@@ -191,6 +207,33 @@ builder.Services.AddSingleton<AutoModerationHandler>();
 builder.Services.AddSingleton<ChatRequestLimiter>();
 builder.Services.AddSingleton<ChatPersonality>();
 builder.Services.AddSingleton<ChatActionParser>();
+
+// Web search: Ollama's web search API (only the search words are sent), with the chatbot writing the answer.
+builder.Services.AddHttpClient<IWebSearch, OllamaWebSearch>((services, client) =>
+{
+    var searchOptions = services.GetRequiredService<IOptions<SearchOptions>>().Value;
+    if (Uri.TryCreate(searchOptions.Url.TrimEnd('/') + "/", UriKind.Absolute, out var searchUri))
+    {
+        client.BaseAddress = searchUri;
+    }
+
+    // The answerer applies its own, shorter limit; this is only a backstop.
+    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(searchOptions.TimeoutSeconds, 5, 120) + 10);
+    // No key over plain http, where anyone on the way could read it (SetupProblem says so).
+    if (searchOptions.IsEnabled)
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", searchOptions.ApiKey);
+    }
+});
+// The top result's preview image for the answer's picture: pages come from search results, so only the public
+// internet, like news feeds.
+builder.Services.AddHttpClient<PageImageFinder>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ModBot/1.0 (Discord bot link preview)");
+})
+.ConfigurePrimaryHttpMessageHandler(PublicNetworkHttpHandler.Create);
+builder.Services.AddSingleton<WebSearchAnswerer>();
 builder.Services.AddSingleton<INewsWriter, NewsWriter>();
 builder.Services.AddSingleton<ChatHandler>();
 
@@ -237,6 +280,13 @@ if (host.Services.GetRequiredService<ModBot.Services.Voice.SpeechToText>().Probl
 {
     host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Voice")
         .LogInformation("Voice commands aren't available: {Problem}", voiceProblem);
+}
+
+// Web search is optional too: without a key, /search and "search for" just say it isn't set up.
+if (host.Services.GetRequiredService<IOptions<SearchOptions>>().Value.SetupProblem is { } searchProblem)
+{
+    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Search")
+        .LogInformation("Web search isn't available: {Problem}", searchProblem);
 }
 
 if (missingAppSettings)

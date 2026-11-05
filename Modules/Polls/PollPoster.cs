@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Discord;
 using Microsoft.Extensions.Logging;
@@ -27,18 +26,17 @@ public partial class PollPoster
     private readonly IGuildSettingsStore _settingsStore;
     private readonly PollOptions _options;
     private readonly ILogger<PollPoster> _logger;
-    private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastPoll = new();
+    private readonly UserCooldowns _cooldowns;
 
     public PollPoster(IGuildSettingsStore settingsStore, IOptions<PollOptions> options, ILogger<PollPoster> logger)
     {
         _settingsStore = settingsStore;
         _options = options.Value;
+        _cooldowns = new UserCooldowns(_options.CooldownSeconds);
         _logger = logger;
     }
 
     public int DefaultHours => Math.Clamp(_options.DefaultHours, 1, PollRules.MaxHours);
-
-    private TimeSpan Cooldown => TimeSpan.FromSeconds(Math.Max(0, _options.CooldownSeconds));
 
     /// <summary>
     /// Everything short of posting: permissions, the word filter and the cooldown, which it claims. Null means go
@@ -70,7 +68,7 @@ public partial class PollPoster
             return "That poll breaks this server's word filter, so I can't post it.";
         }
 
-        if (!TryClaimCooldown(asker.GuildId, asker.Id, out var wait))
+        if (!_cooldowns.TryClaim(asker.GuildId, asker.Id, out var wait))
         {
             return $"You just posted a poll - you can post another {CountdownTo(wait)}.";
         }
@@ -78,7 +76,7 @@ public partial class PollPoster
         return null;
     }
 
-    public void Release(ulong guildId, ulong userId) => _lastPoll.TryRemove((guildId, userId), out _);
+    public void Release(ulong guildId, ulong userId) => _cooldowns.Release(guildId, userId);
 
     /// <summary>Posts the poll as a reply to <paramref name="request"/> (the chatbot's path; /poll responds to the
     /// interaction instead). Returns null on success, or what went wrong.</summary>
@@ -229,26 +227,6 @@ public partial class PollPoster
             .Where(m => IsOpen(m) && matches(m))
             .OrderByDescending(m => m.Timestamp)
             .FirstOrDefault();
-    }
-
-    private bool TryClaimCooldown(ulong guildId, ulong userId, out TimeSpan wait)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var cooldown = Cooldown;
-        var allowed = false;
-        var last = _lastPoll.AddOrUpdate((guildId, userId),
-            _ =>
-            {
-                allowed = true;
-                return now;
-            },
-            (_, previous) =>
-            {
-                allowed = now - previous >= cooldown;
-                return allowed ? now : previous;
-            });
-        wait = allowed ? TimeSpan.Zero : last + cooldown - now;
-        return allowed;
     }
 
     /// <summary>"in 42 seconds", as a Discord timestamp so it counts down by itself.</summary>
