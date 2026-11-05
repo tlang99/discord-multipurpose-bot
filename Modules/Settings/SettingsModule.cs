@@ -218,35 +218,15 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync($"LFG pings: {now}.", ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 
-    /// <summary>The "Chatbot personality" field of /settings show: the text as a quote, then a note saying where it
-    /// comes from. The text is written by admins, so its markdown is escaped: otherwise "# Pirate" shows as a huge
-    /// heading, and a "**" or code fence left open by the cut would swallow the note. Cut to fit Discord's limit for a
-    /// field (the note always fits).</summary>
+    /// <summary>The "Chatbot personality" field of /settings show: the text as a quote, shown as typed (admins write
+    /// it, so "# Pirate" mustn't become a heading or a [link](url) a link), then a note saying where it comes from.
+    /// Cut to fit Discord's limit for a field; the note always fits.</summary>
     public static string PersonalityField(string text, bool isCustom)
     {
         var note = "\n-# " + (isCustom
             ? "This server's own - change it with `/chat personality set`, or `reset` for the default."
             : "The default - give this server its own with `/chat personality set`.");
-
-        var quoted = string.Join("\n", text.Trim().Split('\n').Select(line => "> " + EscapeLine(line.TrimEnd('\r'))));
-        return TextTools.Truncate(quoted, EmbedFieldBuilder.MaxFieldValueLength - note.Length) + note;
-    }
-
-    /// <summary>One line with its markdown shown as typed: the inline kind (** _ ` ~ | and so on) and the kind that
-    /// only works at the start of a line (# headings, -# small text, - and 1. lists, > quotes).</summary>
-    private static string EscapeLine(string line)
-    {
-        var escaped = Format.Sanitize(line);
-        var start = escaped.TrimStart();
-        var indent = escaped[..(escaped.Length - start.Length)];
-        if (start.Length > 0 && start[0] is '#' or '-' or '>' or '+')
-        {
-            return indent + "\\" + start;
-        }
-
-        // "1." - a backslash before a digit shows as a backslash, so it goes before the dot instead.
-        var number = System.Text.RegularExpressions.Regex.Match(start, @"^\d+(?=\.)");
-        return number.Success ? indent + number.Value + "\\" + start[number.Length..] : escaped;
+        return TextTools.QuoteAsTyped(text, EmbedFieldBuilder.MaxFieldValueLength - note.Length) + note;
     }
 
     private static string NameOf(ChannelFeature feature) => feature == ChannelFeature.Music ? "Music" : "LFG";

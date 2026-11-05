@@ -99,7 +99,8 @@ public class ChatModule : InteractionModuleBase<SocketInteractionContext>
         private static Embed PersonalityEmbed(string title, string text, string footer) => new EmbedBuilder()
             .WithColor(Colors.Bot)
             .WithTitle(title)
-            .WithDescription(text)
+            // Shown as typed, the same as in /settings show: admins write it, so no headings or links from markdown.
+            .WithDescription(TextTools.QuoteAsTyped(text, EmbedBuilder.MaxDescriptionLength))
             .WithFooter(footer)
             .Build();
     }

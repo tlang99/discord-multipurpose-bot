@@ -1,4 +1,5 @@
 using Discord;
+using ModBot.Common;
 using ModBot.Modules.Settings;
 
 namespace ModBot.Tests;
@@ -69,6 +70,38 @@ public class SettingsShowPersonalityTests
             Assert.True(field.Length <= EmbedFieldBuilder.MaxFieldValueLength, $"{field.Length} characters");
             Assert.Contains("…\n-# ", field);
         }
+    }
+
+    [Fact]
+    public void MaskedLinks_AreNotClickable()
+    {
+        var field = SettingsModule.PersonalityField("Be nice [click here](https://evil.example)", isCustom: true);
+
+        Assert.Contains("\\[click here\\]", field);
+        Assert.DoesNotContain("[click here](", field);
+    }
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(11)]
+    [InlineData(12)]
+    [InlineData(13)]
+    public void Cut_NeverLeavesAStrayBackslash(int max)
+    {
+        // Every character escaped, so wherever the cut falls it's next to a backslash.
+        var cut = TextTools.QuoteAsTyped(new string('*', 50), max);
+
+        Assert.True(cut.Length <= max);
+        Assert.EndsWith("…", cut);
+        var body = cut[..^1];
+        Assert.Equal(0, (body.Length - body.TrimEnd('\\').Length) % 2);
+    }
+
+    [Fact]
+    public void ChatPersonalityShow_UsesTheSameEscaping()
+    {
+        // /chat personality show's embed description goes through QuoteAsTyped too.
+        Assert.Equal("> \\# Pirate \\[x\\]", TextTools.QuoteAsTyped("# Pirate [x]", EmbedBuilder.MaxDescriptionLength));
     }
 
     [Fact]

@@ -37,9 +37,8 @@ public static class MusicFormatting
             title = title[..77] + "...";
         }
 
-        // Format.Sanitize doesn't escape square brackets, and titles go inside [title](url) links: a title like
-        // "x](https://evil) [y" would otherwise break out of the link text and add a link of its own.
-        return Format.Sanitize(title).Replace("[", "\\[").Replace("]", "\\]");
+        // Titles go inside [title](url) links, so the brackets are escaped too (see TextTools.Escape).
+        return TextTools.Escape(title);
     }
 
     /// <summary>A link when there's a web address to go to, else the title in bold.</summary>
