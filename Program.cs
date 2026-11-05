@@ -72,6 +72,7 @@ var musicOptions = BindOptions<MusicOptions>(MusicOptions.SectionName);
 BindOptions<LfgOptions>(LfgOptions.SectionName);
 BindOptions<ReminderOptions>(ReminderOptions.SectionName);
 BindOptions<PollOptions>(PollOptions.SectionName);
+BindOptions<VoiceOptions>(VoiceOptions.SectionName);
 
 builder.Services.AddSingleton(new DiscordSocketConfig
 {
@@ -87,6 +88,9 @@ builder.Services.AddSingleton(new DiscordSocketConfig
     // timestamp compared to this PC's clock. With the clock running a few seconds fast, the default makes every
     // command look expired on arrival ("Cannot defer an interaction after 3 seconds!").
     UseInteractionSnowflakeDate = false,
+    // Voice commands: Discord end-to-end encrypts voice (DAVE), so hearing anyone needs libdave (voice/README.md).
+    // Music isn't affected: Lavalink makes its own voice connection.
+    EnableVoiceDaveEncryption = true,
 });
 
 builder.Services.AddSingleton<DiscordSocketClient>();
@@ -130,6 +134,12 @@ builder.Services.AddSingleton<IMusicQueueStore, JsonMusicQueueStore>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicQueueService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ModBot.Modules.Music.MusicQueueService>());
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicControls>();
+
+// Voice commands: listening in a voice channel for "hey ModBot", with speech-to-text on this machine (voice/README.md).
+// The listener hands requests to the chatbot, which in turn can start and stop it, so it gets the chatbot lazily.
+builder.Services.AddSingleton<ModBot.Services.Voice.SpeechToText>();
+builder.Services.AddSingleton<ModBot.Modules.Voice.VoiceListener>();
+builder.Services.AddSingleton(sp => new Lazy<ChatHandler>(sp.GetRequiredService<ChatHandler>));
 
 builder.Services.AddHttpClient<IImageModerationService, SightengineImageModerationService>(client =>
 {
@@ -216,6 +226,13 @@ foreach (var oldKey in new[] { "Music:ChannelName", "Lfg:ChannelName" })
         WarnAtStartup("ModBot", "{Key} in appsettings.json is no longer used: each server picks its own channel with " +
                                 "/settings channel (until then, any channel works). Remove the key to hide this.", oldKey);
     }
+}
+
+// Voice commands are optional (each server opts in), so a bot without them set up only gets a note, not a warning.
+if (host.Services.GetRequiredService<ModBot.Services.Voice.SpeechToText>().Problem is { } voiceProblem)
+{
+    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Voice")
+        .LogInformation("Voice commands aren't available: {Problem}", voiceProblem);
 }
 
 if (missingAppSettings)

@@ -2,6 +2,7 @@ using Discord;
 using Microsoft.Extensions.Logging;
 using ModBot.Models;
 using ModBot.Modules.Music;
+using ModBot.Modules.Voice;
 using ModBot.Services.Settings;
 
 namespace ModBot.Modules.Settings;
@@ -16,12 +17,15 @@ public class ServerFeatureSwitch
 {
     private readonly ServerSettingsService _settings;
     private readonly MusicService _music;
+    private readonly VoiceListener _voice;
     private readonly ILogger<ServerFeatureSwitch> _logger;
 
-    public ServerFeatureSwitch(ServerSettingsService settings, MusicService music, ILogger<ServerFeatureSwitch> logger)
+    public ServerFeatureSwitch(ServerSettingsService settings, MusicService music, VoiceListener voice,
+        ILogger<ServerFeatureSwitch> logger)
     {
         _settings = settings;
         _music = music;
+        _voice = voice;
         _logger = logger;
     }
 
@@ -45,13 +49,7 @@ public class ServerFeatureSwitch
                 return;
             }
 
-            s.DisabledFeatures ??= [];
-            s.DisabledFeatures.Remove(feature.ToString());
-            if (!on)
-            {
-                s.DisabledFeatures.Add(feature.ToString());
-            }
-
+            s.Set(feature, on);
             changed = true;
         });
 
@@ -78,8 +76,22 @@ public class ServerFeatureSwitch
             }
         }
 
+        if (!on && feature == ServerFeature.VoiceCommands && _voice.IsListening(guild.Id))
+        {
+            await _voice.StopAsync(guild.Id, null);
+            note = " I stopped listening and left voice.";
+        }
+
+        if (on && feature == ServerFeature.VoiceCommands)
+        {
+            // On, but the bot itself may not be able to: tell the admin now rather than at the first "listen".
+            note = _voice.SetupProblem is { } problem
+                ? $" But voice commands aren't set up on this bot yet - for whoever runs it: {problem}"
+                : " Join a voice channel and use `/voice listen` (or ask me to \"listen in voice\") to start.";
+        }
+
         return on
-            ? $"✅ {name} is on again."
+            ? ServerSettings.IsOptIn(feature) ? $"✅ {name} is on.{note}" : $"✅ {name} is on again."
             : $"🚫 {name} is off on this server.{note} Turn it back on any time.";
     }
 }

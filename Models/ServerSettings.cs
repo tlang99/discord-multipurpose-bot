@@ -1,6 +1,6 @@
 namespace ModBot.Models;
 
-/// <summary>A feature a server can turn off for itself with /settings feature.</summary>
+/// <summary>A feature a server can turn off (or, for opt-in ones, on) for itself with /settings feature.</summary>
 /// <remarks>Saved by name (see <see cref="ServerSettings.DisabledFeatures"/>), so reordering these is safe.</remarks>
 public enum ServerFeature
 {
@@ -13,6 +13,10 @@ public enum ServerFeature
     Lfg,
     Polls,
     Reminders,
+
+    /// <summary>Listening in voice for "hey ModBot". Off until a server turns it on (<see cref="ServerSettings.IsOptIn"/>),
+    /// since it means the bot hearing the voice channel.</summary>
+    VoiceCommands,
 }
 
 /// <summary>
@@ -24,8 +28,12 @@ public class ServerSettings
 {
     public ulong GuildId { get; set; }
 
-    /// <summary>Features this server has turned off, by <see cref="ServerFeature"/> name. Everything else is on.</summary>
+    /// <summary>Features this server has turned off, by <see cref="ServerFeature"/> name. Everything else is on, apart
+    /// from the opt-in ones (<see cref="IsOptIn"/>).</summary>
     public List<string> DisabledFeatures { get; set; } = [];
+
+    /// <summary>Opt-in features (<see cref="IsOptIn"/>) this server has turned on, by name.</summary>
+    public List<string> EnabledFeatures { get; set; } = [];
 
     public ChannelChoice Music { get; set; } = new();
 
@@ -41,8 +49,27 @@ public class ServerSettings
     /// LFG works without game-specific options until an admin fills them in.</summary>
     public LfgGameProfile? LfgGame { get; set; }
 
-    /// <remarks>Null-safe: a hand-edited file with <c>"DisabledFeatures": null</c> means nothing is off.</remarks>
-    public bool IsEnabled(ServerFeature feature) => DisabledFeatures?.Contains(feature.ToString()) != true;
+    /// <remarks>Null-safe: a hand-edited file with <c>"DisabledFeatures": null</c> means nothing is off (and
+    /// <c>"EnabledFeatures": null</c> means no opt-in feature is on).</remarks>
+    public bool IsEnabled(ServerFeature feature)
+        => IsOptIn(feature)
+            ? EnabledFeatures?.Contains(feature.ToString()) == true
+            : DisabledFeatures?.Contains(feature.ToString()) != true;
+
+    /// <summary>Features that start off and have to be turned on: voice commands, since they mean the bot listening.</summary>
+    public static bool IsOptIn(ServerFeature feature) => feature == ServerFeature.VoiceCommands;
+
+    /// <summary>Turns <paramref name="feature"/> on or off, in whichever list it's kept.</summary>
+    public void Set(ServerFeature feature, bool on)
+    {
+        var name = feature.ToString();
+        var list = IsOptIn(feature) ? EnabledFeatures ??= [] : DisabledFeatures ??= [];
+        list.Remove(name);
+        if (on == IsOptIn(feature))
+        {
+            list.Add(name);
+        }
+    }
 }
 
 /// <summary>Where a feature works in one server: the channel it picked, or any channel until it picks one.</summary>

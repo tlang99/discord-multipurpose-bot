@@ -41,7 +41,7 @@ var missing = new[] { "libdave.dll", "libsodium.dll", "opus.dll" }
     .Where(f => !File.Exists(Path.Combine(AppContext.BaseDirectory, f))).ToList();
 if (missing.Count > 0 || !Dave.CheckAvailability())
 {
-    Console.WriteLine($"Missing native libraries next to the exe: {string.Join(", ", missing)}. See tools/VoiceTest/README.md.");
+    Console.WriteLine($"Missing native libraries next to the exe: {string.Join(", ", missing)}. Run voice/setup.ps1.");
     return 1;
 }
 
@@ -285,10 +285,10 @@ static float[] ToWhisperSamples(byte[] pcm)
     return output;
 }
 
-// Whisper's small English model (~140 MB), downloaded once into tools/VoiceTest/models (not committed).
+// Whisper's small English model (~140 MB), shared with the bot in voice/models (voice/setup.ps1 downloads it, or this does).
 static async Task<string> EnsureModelAsync()
 {
-    var dir = Path.Combine(Directory.GetCurrentDirectory(), "tools", "VoiceTest", "models");
+    var dir = Path.Combine(Directory.GetCurrentDirectory(), "voice", "models");
     var path = Path.Combine(dir, "ggml-base.en.bin");
     if (!File.Exists(path))
     {

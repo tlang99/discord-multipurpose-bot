@@ -25,7 +25,7 @@ lavalink/plugins/
 lavalink/logs/
 lavalink/secrets.yml
 
-## Voice test tool: native libraries and the speech model (downloaded locally, see tools/VoiceTest/README.md)
-tools/VoiceTest/natives/
-tools/VoiceTest/models/
+## Voice commands: native libraries and the speech model (downloaded by voice/setup.ps1)
+voice/natives/
+voice/models/
 discord-net-patch/vendor/

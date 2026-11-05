@@ -29,11 +29,11 @@ public sealed class ServerSettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Everything_is_on_for_a_new_server()
+    public async Task Everything_is_on_for_a_new_server_but_the_opt_in_features()
     {
         var server = await _settings.GetAsync(GuildId);
 
-        Assert.All(Enum.GetValues<ServerFeature>(), f => Assert.True(server.IsEnabled(f)));
+        Assert.All(Enum.GetValues<ServerFeature>(), f => Assert.Equal(!ServerSettings.IsOptIn(f), server.IsEnabled(f)));
     }
 
     [Fact]

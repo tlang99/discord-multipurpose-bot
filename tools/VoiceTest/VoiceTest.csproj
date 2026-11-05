@@ -20,9 +20,9 @@
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
   </ItemGroup>
 
-  <!-- libdave, libsodium and opus: native libraries Discord.Net loads from next to the exe (not committed). -->
+  <!-- libdave, libsodium and opus, shared with the bot: voice/setup.ps1 downloads them. -->
   <ItemGroup>
-    <None Include="natives\*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+    <None Include="..\..\voice\natives\*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

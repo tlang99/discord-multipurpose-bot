@@ -1,0 +1,113 @@
+using Discord.LibDave;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ModBot.Configuration;
+using Whisper.net;
+
+namespace ModBot.Services.Voice;
+
+/// <summary>
+/// Turns speech into text on this machine with Whisper, and says whether voice commands can work here at all (the
+/// model and Discord's native voice libraries have to be in place, see voice/README.md). One transcription at a time:
+/// each takes about a second of CPU, and running several at once would only slow them all down.
+/// </summary>
+public sealed class SpeechToText : IDisposable
+{
+    /// <summary>Native libraries Discord.Net loads from the bot's folder for voice: Discord's DAVE encryption, the
+    /// transport encryption, and the Opus audio codec.</summary>
+    private static readonly string[] NativeLibraries = ["libdave", "libsodium", "opus"];
+
+    private readonly VoiceOptions _options;
+    private readonly string _modelPath;
+    private readonly ILogger<SpeechToText> _logger;
+    private readonly SemaphoreSlim _one = new(1, 1);
+    private readonly Lazy<string?> _problem;
+    private WhisperFactory? _factory;
+
+    public SpeechToText(IOptions<VoiceOptions> options, IHostEnvironment environment, ILogger<SpeechToText> logger)
+    {
+        _options = options.Value;
+        _modelPath = Path.GetFullPath(_options.ModelPath, environment.ContentRootPath);
+        _logger = logger;
+        _problem = new Lazy<string?>(FindProblem);
+    }
+
+    /// <summary>Why voice commands can't work on this bot (for the admin running it), or null if they can.</summary>
+    public string? Problem => _problem.Value;
+
+    /// <summary>What was said, or "" if nothing could be made out.</summary>
+    /// <param name="samples">16 kHz mono (see <see cref="VoiceAudio.ToWhisperSamples"/>).</param>
+    /// <param name="expect">Words it should expect, so they come out spelled right (the bot's name, game terms).</param>
+    public async Task<string> TranscribeAsync(float[] samples, string expect, CancellationToken cancellationToken)
+    {
+        if (Problem is not null)
+        {
+            return "";
+        }
+
+        await _one.WaitAsync(cancellationToken);
+        try
+        {
+            _factory ??= WhisperFactory.FromPath(_modelPath);
+            await using var processor = _factory.CreateBuilder()
+                .WithLanguage("en")
+                .WithPrompt(expect)
+                .Build();
+
+            var parts = new List<string>();
+            await foreach (var segment in processor.ProcessAsync(samples, cancellationToken))
+            {
+                parts.Add(segment.Text.Trim());
+            }
+
+            return string.Join(' ', parts).Trim();
+        }
+        finally
+        {
+            _one.Release();
+        }
+    }
+
+    private string? FindProblem()
+    {
+        if (!_options.Enabled)
+        {
+            return "Voice commands are turned off in the bot's settings (Voice:Enabled).";
+        }
+
+        // On Windows they sit next to the exe (voice/setup.ps1 puts them there). Elsewhere they're usually installed
+        // system-wide under other names, so only loading libdave below is checked.
+        var missing = OperatingSystem.IsWindows()
+            ? NativeLibraries.Where(name => !File.Exists(Path.Combine(AppContext.BaseDirectory, $"{name}.dll"))).ToList()
+            : [];
+        if (missing.Count > 0)
+        {
+            return $"The voice libraries aren't installed ({string.Join(", ", missing)}): run voice/setup.ps1 " +
+                   "(see voice/README.md), then rebuild.";
+        }
+
+        try
+        {
+            if (!Dave.CheckAvailability())
+            {
+                return "Discord's voice encryption library (libdave) didn't load: run voice/setup.ps1 again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Couldn't load libdave.");
+            return "Discord's voice encryption library (libdave) didn't load: run voice/setup.ps1 again.";
+        }
+
+        return File.Exists(_modelPath)
+            ? null
+            : $"The speech-to-text model isn't at {_options.ModelPath}: run voice/setup.ps1 (see voice/README.md).";
+    }
+
+    public void Dispose()
+    {
+        _factory?.Dispose();
+        _one.Dispose();
+    }
+}

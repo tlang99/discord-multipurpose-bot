@@ -126,6 +126,14 @@ note.
 > SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
 > SoundCloud links.
 
+**Voice commands** — off until a server turns them on (`/settings feature`). Then `/voice listen` (or "@bot listen in
+voice") has the bot join your voice channel, muted, and listen for its name: "hey ModBot, make an LFG for ranked",
+"hey ModBot, remind me in 20 minutes to check the oven". What's said after the name is handled exactly like the same
+words typed as an @mention, by the same person. The bot posts what it heard in the voice channel's chat and replies
+to that. Speech is turned into text on the bot's own machine (Whisper), and no audio is kept. It stops on `/voice
+stop`, "hey ModBot, stop listening", when everyone leaves, or when music starts: one voice connection can't play and
+listen at once. Needs a one-time setup, see [voice/README.md](voice/README.md).
+
 **Looking for group** — `/lfg` posts an LFG card, e.g. `/lfg players:4 playlist:Ranked Play rank:Gold mic:True`.
 Every option is optional:
 - `players` — squad size 2–6 including you (default 4).
@@ -235,9 +243,10 @@ Server). appsettings.json only holds the defaults for servers that haven't chang
 saved in `data/server-settings.json`:
 - `/settings show` — everything at a glance: which features are on, the music and LFG channels, the LFG ping role and
   whether auto-mod is on.
-- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls or reminders on or off. Turning music off
-  stops what's playing. Things already underway still finish: LFG posts can be cancelled, polls ended, and reminders
-  are delivered.
+- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls, reminders or voice commands on or off.
+  Everything starts on except voice commands. Turning music off stops what's playing, and turning voice commands off
+  stops listening. Things already underway still finish: LFG posts can be cancelled, polls ended, and reminders are
+  delivered.
 - `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.
   Channels are saved by ID, so renaming one doesn't break it.
 - `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
@@ -379,6 +388,7 @@ What you need:
   - **Music:** Java 17+ and [Lavalink](lavalink/README.md).
   - **AI chat:** [Ollama](https://ollama.com) with any model, on your machine or Ollama's cloud.
   - **Image moderation:** a [Sightengine](https://sightengine.com) account.
+  - **Voice commands:** a one-time download ([voice/README.md](voice/README.md)), and the chatbot turned on.
 
 **Ollama is optional.** Every feature works through slash commands without it: moderation, auto-mod, music, LFG,
 polls, reminders, news, `/settings`. The model only powers:
@@ -395,7 +405,7 @@ your own model, music server, and API keys. Turn it on only if anyone with the i
 
 Every server starts on safe defaults:
 - auto-mod off,
-- every feature on, with no channel locks,
+- every feature on except voice commands, with no channel locks,
 - news posted silently.
 
 Server admins set it up with `/settings`, `/automod`, `/news` and `/chat personality`. Then follow steps 1–8:
@@ -477,6 +487,9 @@ exemption) is controlled per-server via `/automod`.
 
 Music needs Java and the Lavalink server. Follow [lavalink/README.md](lavalink/README.md) once, then start Lavalink
 (`java -jar Lavalink.jar` in the `lavalink/` folder) whenever you run the bot.
+
+Voice commands need a one-time download of Discord's voice libraries and a speech-to-text model:
+`powershell -File voice/setup.ps1`, then rebuild. See [voice/README.md](voice/README.md).
 
 ### 6. (Optional) Set up AI chat
 
