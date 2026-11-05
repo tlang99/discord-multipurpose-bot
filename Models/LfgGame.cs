@@ -42,6 +42,9 @@ public record LfgChoice(LfgPlaylistOption? Playlist, LfgRankOption? Rank, string
 /// </summary>
 public class LfgGameProfile
 {
+    /// <summary>The game's name ("Call of Duty: MW4"), shown on LFG cards and pings; empty = no name shown.</summary>
+    public string Name { get; set => field = value?.Trim() ?? string.Empty; } = string.Empty;
+
     /// <summary>In order: the first one a chat message names wins.</summary>
     public List<LfgPlaylistOption> Playlists { get; set => field = value?.Where(p => p is not null).ToList() ?? []; } = [];
 
@@ -50,7 +53,7 @@ public class LfgGameProfile
 
     public static LfgGameProfile Empty => new();
 
-    public bool IsEmpty => Playlists.Count == 0 && Ranks.Count == 0;
+    public bool IsEmpty => Name.Length == 0 && Playlists.Count == 0 && Ranks.Count == 0;
 
     /// <summary>Whether ranks belong to particular playlists. If no playlist is marked ranked, a rank goes with any.</summary>
     public bool HasRankedPlaylists => Playlists.Any(p => p.Ranked);

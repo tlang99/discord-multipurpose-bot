@@ -1,4 +1,5 @@
 using Discord;
+using ModBot.Common;
 using ModBot.Models;
 
 namespace ModBot.Modules.Lfg;
@@ -26,13 +27,19 @@ public static class LfgMessages
         _ => "Crossplay",
     };
 
-    /// <summary>The playlist the post is for ("Ranked Play"), or "LFG" when any goes. Playlist names are the server's
-    /// own (/settings lfg-game), so they're escaped for Discord formatting.</summary>
-    private static string Heading(LfgPost post) => post.Details.Playlist is { } playlist ? Format.Sanitize(playlist) : "LFG";
+    /// <summary>The game and playlist the post is for ("Call of Duty: MW4 · Ranked Play"), either one alone, or "LFG"
+    /// when neither is set. Both names are the server's own (/settings lfg-game), so they're escaped for Discord
+    /// formatting.</summary>
+    public static string Heading(LfgDetails details)
+    {
+        var parts = new[] { details.Game, details.Playlist }.OfType<string>().Select(TextTools.Escape).ToList();
+        return parts.Count == 0 ? "LFG" : string.Join(" · ", parts);
+    }
 
-    /// <summary>"Ranked Play squad", or just "squad".</summary>
-    private static string Squad(LfgPost post)
-        => post.Details.Playlist is { } playlist ? $"{Format.Sanitize(playlist)} squad" : "squad";
+    /// <summary>"Ranked Play squad in Call of Duty: MW4", "Ranked Play squad", or just "squad".</summary>
+    public static string Squad(LfgDetails details)
+        => (details.Playlist is { } playlist ? $"{TextTools.Escape(playlist)} squad" : "squad") +
+           (details.Game is { } game ? $" in {TextTools.Escape(game)}" : "");
 
     /// <summary>"🏆 Gold+ · 🎧 Mic required · 🖥️ PC only" - only the details the host actually set. The game's top
     /// rank has no "+" ("🏆 Top 250"): there's nothing above it.</summary>
@@ -41,7 +48,7 @@ public static class LfgMessages
         var tags = new List<string>();
         if (details.MinRank is { } rank)
         {
-            tags.Add(details.MinRankIsTop ? $"🏆 {Format.Sanitize(rank)}" : $"🏆 {Format.Sanitize(rank)}+");
+            tags.Add(details.MinRankIsTop ? $"🏆 {TextTools.Escape(rank)}" : $"🏆 {TextTools.Escape(rank)}+");
         }
 
         if (details.MicRequired is { } mic)
@@ -60,7 +67,7 @@ public static class LfgMessages
     public static Embed OpenEmbed(LfgPost post)
     {
         var spots = post.OpenSpots == 1 ? "1 more player" : $"{post.OpenSpots} more players";
-        return Base(post, OpenColor, $"🎮 {Heading(post)} — looking for {spots}")
+        return Base(post, OpenColor, $"🎮 {Heading(post.Details)} — looking for {spots}")
             .AddField("Expires", TimestampTag.FormatFromDateTimeOffset(post.ExpiresAt, TimestampTagStyles.Relative),
                 inline: true)
             .Build();
@@ -74,28 +81,28 @@ public static class LfgMessages
         .Build();
 
     public static Embed ReadyEmbed(LfgPost post, bool full)
-        => Base(post, ClosedColor, $"✅ {Heading(post)} — squad {(full ? "full" : "started")}").Build();
+        => Base(post, ClosedColor, $"✅ {Heading(post.Details)} — squad {(full ? "full" : "started")}").Build();
 
     public static Embed CancelledEmbed(LfgPost post, bool byModerator)
-        => Base(post, ClosedColor, $"❌ {Heading(post)} — {(byModerator ? "removed by a moderator" : "cancelled")}")
+        => Base(post, ClosedColor, $"❌ {Heading(post.Details)} — {(byModerator ? "removed by a moderator" : "cancelled")}")
             .Build();
 
     public static Embed ExpiredEmbed(LfgPost post)
-        => Base(post, ClosedColor, $"⌛ {Heading(post)} — expired").Build();
+        => Base(post, ClosedColor, $"⌛ {Heading(post.Details)} — expired").Build();
 
     /// <summary>The text above a new post that pings the LFG role. Only that role can be mentioned.</summary>
     public static (string Text, AllowedMentions Mentions) RolePing(LfgPost post, ulong roleId)
     {
         var spots = post.OpenSpots == 1 ? "1 spot" : $"{post.OpenSpots} spots";
         return ($"{MentionUtils.MentionRole(roleId)} {MentionUtils.MentionUser(post.HostId)} is looking for a " +
-                $"{Squad(post)} ({spots} open).",
+                $"{Squad(post.Details)} ({spots} open).",
             new AllowedMentions(AllowedMentionTypes.None) { RoleIds = [roleId] });
     }
 
     public static Embed RolePanelEmbed(string roleName) => new EmbedBuilder()
         .WithColor(OpenColor)
         .WithTitle("🔔 LFG pings")
-        .WithDescription($"Want a ping whenever someone posts an LFG here? Grab the **@{Format.Sanitize(roleName)}** " +
+        .WithDescription($"Want a ping whenever someone posts an LFG here? Grab the **@{TextTools.Escape(roleName)}** " +
                          "role below. You can turn it off again any time.")
         .Build();
 
@@ -115,7 +122,7 @@ public static class LfgMessages
     public static (string Text, AllowedMentions Mentions) ReadyPing(LfgPost post, bool full)
     {
         var mentions = string.Join(" ", post.Members.Select(MentionUtils.MentionUser));
-        var text = $"{mentions}\n🎮 Your {Squad(post)} is {(full ? "full" : "ready")} " +
+        var text = $"{mentions}\n🎮 Your {Squad(post.Details)} is {(full ? "full" : "ready")} " +
                    $"({post.Members.Count}/{post.Size}) — hop in voice and get on!";
         return (text, new AllowedMentions(AllowedMentionTypes.None) { UserIds = [.. post.Members] });
     }
@@ -134,7 +141,7 @@ public static class LfgMessages
         var description = string.Join("\n", new[]
         {
             Tags(post.Details),
-            string.IsNullOrWhiteSpace(post.Note) ? null : Format.Sanitize(post.Note),
+            string.IsNullOrWhiteSpace(post.Note) ? null : TextTools.Escape(post.Note),
         }.Where(line => line is not null));
 
         if (description.Length > 0)

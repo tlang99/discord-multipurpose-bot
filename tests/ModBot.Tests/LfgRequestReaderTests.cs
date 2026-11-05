@@ -264,6 +264,8 @@ public class LfgGameRobustnessTests
         Assert.True(ModBot.Modules.Settings.LfgGameModal.PlaylistsLabel.Length <= 45);
         Assert.True(ModBot.Modules.Settings.LfgGameModal.RanksLabel.Length <= 45);
         Assert.True(ModBot.Modules.Settings.LfgGameModal.ModalTitle.Length <= 45);
+        Assert.True(ModBot.Modules.Settings.LfgGameModal.NameLabel.Length <= 45);
+        Assert.True(ModBot.Modules.Settings.LfgGameModal.NamePlaceholder.Length <= 100);
     }
 }
 
