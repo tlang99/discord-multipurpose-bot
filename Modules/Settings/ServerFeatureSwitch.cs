@@ -68,7 +68,7 @@ public class ServerFeatureSwitch
             {
                 await player.StopAsync();
                 await player.DisposeAsync(); // leaves voice; the queue is kept for if music comes back on
-                note = " I stopped the music and left voice; the queue's kept.";
+                note += " I stopped the music and left voice; the queue's kept.";
             }
             catch (Exception ex)
             {
@@ -80,21 +80,21 @@ public class ServerFeatureSwitch
         if (!on && feature is ServerFeature.VoiceCommands or ServerFeature.Chat && _voice.IsListening(guild.Id))
         {
             await _voice.StopAsync(guild.Id);
-            note = " I stopped listening and left voice.";
+            note += " I stopped listening and left voice.";
         }
 
         // Only the listening it started by itself: someone who asked for it can still have it.
         if (!on && feature == ServerFeature.VoiceAutoJoin && _voice.IsAutoListening(guild.Id))
         {
             await _voice.StopAsync(guild.Id);
-            note = " I stopped listening and left voice. `/voice listen` still works.";
+            note += " I stopped listening and left voice. `/voice listen` still works.";
         }
 
         var server = await _settings.GetAsync(guild.Id);
         if (on && feature == ServerFeature.VoiceCommands)
         {
             // On, but the bot itself may not be able to: tell the admin now rather than at the first "listen".
-            note = _voice.SetupProblem is { } problem
+            note += _voice.SetupProblem is { } problem
                 ? $" But voice commands aren't set up on this bot yet - for whoever runs it: {problem}"
                 : server.IsEnabled(ServerFeature.VoiceAutoJoin)
                     ? " I'll join voice by myself when people are in a voice channel (turn that off with the " +
@@ -104,7 +104,7 @@ public class ServerFeatureSwitch
 
         if (on && feature == ServerFeature.VoiceAutoJoin && !server.IsEnabled(ServerFeature.VoiceCommands))
         {
-            note = " It does nothing until **Voice commands** is on too.";
+            note += " It does nothing until **Voice commands** is on too.";
         }
 
         if (on && feature is ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin or ServerFeature.Chat)

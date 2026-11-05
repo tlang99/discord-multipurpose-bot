@@ -157,8 +157,7 @@ public sealed class VoiceListener
                        "Stop the music first, or ask me again when it's over.";
             }
 
-            var permissions = guild.CurrentUser.GetPermissions(channel);
-            if (!permissions.ViewChannel || !permissions.Connect)
+            if (!ChannelAccess.CanListenIn(guild.CurrentUser, channel))
             {
                 return $"I need **View Channel** and **Connect** in {channel.Mention} to listen there.";
             }
@@ -219,7 +218,7 @@ public sealed class VoiceListener
                         }
                     });
                 }, LogLevel.Debug, "A timed-out voice join failed in guild {GuildId}.", guild.Id);
-                _failedJoins[guild.Id] = DateTimeOffset.UtcNow;
+                NoteFailedJoin(guild.Id, startedBy);
                 return $"Joining {channel.Mention} timed out - try again in a moment.";
             }
 
@@ -230,7 +229,7 @@ public sealed class VoiceListener
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Couldn't join voice channel {ChannelId} to listen.", channel.Id);
-            _failedJoins[guild.Id] = DateTimeOffset.UtcNow;
+            NoteFailedJoin(guild.Id, startedBy);
             await LeaveAsync(channel);
             return $"I couldn't join {channel.Mention} - try again in a moment.";
         }
@@ -335,9 +334,15 @@ public sealed class VoiceListener
     private async Task AutoJoinHoldingLockAsync(ulong guildId)
     {
         if (_client.GetGuild(guildId) is not { } guild || _sessions.ContainsKey(guildId) || SetupProblem is not null ||
-            !_chatOptions.IsEnabled || MusicIsPlaying(guildId) ||
-            _failedJoins.TryGetValue(guildId, out var failed) && DateTimeOffset.UtcNow - failed < AfterFailedJoin)
+            !_chatOptions.IsEnabled || MusicIsPlaying(guildId))
         {
+            return;
+        }
+
+        if (_failedJoins.TryGetValue(guildId, out var failed) && DateTimeOffset.UtcNow - failed < AfterFailedJoin)
+        {
+            _logger.LogDebug("Not joining voice by itself in guild {GuildId}: the last try failed {Ago} ago.", guildId,
+                DateTimeOffset.UtcNow - failed);
             return;
         }
 
@@ -363,6 +368,16 @@ public sealed class VoiceListener
         await JoinHoldingLockAsync(guild, channel, channel, startedBy: null);
     }
 
+    /// <summary>A join by itself failed: it waits a while before trying again in that server. A failed join someone
+    /// asked for doesn't count; they were told and can try again.</summary>
+    private void NoteFailedJoin(ulong guildId, SocketGuildUser? startedBy)
+    {
+        if (startedBy is null)
+        {
+            _failedJoins[guildId] = DateTimeOffset.UtcNow;
+        }
+    }
+
     private static bool AutoJoins(ServerSettings server)
         => server.IsEnabled(ServerFeature.Chat) && server.IsEnabled(ServerFeature.VoiceCommands) &&
            server.IsEnabled(ServerFeature.VoiceAutoJoin);
@@ -371,10 +386,9 @@ public sealed class VoiceListener
     /// replies go).</summary>
     private static bool CanJoinByItself(SocketGuildUser me, SocketVoiceChannel channel)
     {
-        var permissions = me.GetPermissions(channel);
-        return permissions.ViewChannel && permissions.Connect && ChannelAccess.CanPost(me, channel) &&
+        return ChannelAccess.CanListenAndReplyIn(me, channel) &&
                (channel.UserLimit is not > 0 || channel.ConnectedUsers.Count < channel.UserLimit ||
-                permissions.MoveMembers);
+                me.GetPermissions(channel).MoveMembers);
     }
 
     /// <summary>Listening because it joined by itself (not because someone asked).</summary>
@@ -422,7 +436,7 @@ public sealed class VoiceListener
         }
 
         session.Stopping.Cancel();
-        session.StopChiming();
+        await session.StopChimingAsync();
         if (leave)
         {
             await LeaveAsync(session.Channel);
@@ -576,7 +590,13 @@ public sealed class VoiceListener
         var request = WakeWord.FindRequest(text, [name, _client.CurrentUser.Username]);
         if (request is not null)
         {
-            Chime(session); // heard its name (not again for the request that follows a lone "hey ModBot")
+            // Heard its name (not again for the request that follows a lone "hey ModBot"). Only for someone whose
+            // requests can be answered: a request is only run where its speaker could have typed it (ChatHandler).
+            if (session.Guild.GetUser(userId) is { IsBot: false } caller &&
+                ChannelAccess.CanPost(caller, session.ReplyChannel))
+            {
+                Chime(session);
+            }
         }
         else
         {
@@ -671,6 +691,11 @@ public sealed class VoiceListener
 
             try
             {
+                if (!CanChime || Stopping.IsCancellationRequested)
+                {
+                    return; // the session ended while this one waited
+                }
+
                 // One stream for the whole session: Discord.Net sends silence and the speaking flag around each sound.
                 // A short buffer, because Discord.Net sends nothing until the buffer has filled once: at its default
                 // (a second), a quarter-second chime would just sit there. And never waits long for it to go out.
@@ -686,16 +711,24 @@ public sealed class VoiceListener
             }
         }
 
-        public void StopChiming()
+        /// <summary>Ends the chime stream. Call after <see cref="Stopping"/> is cancelled, which cuts short a chime
+        /// that's playing, so this only waits a moment for it.</summary>
+        public async Task StopChimingAsync()
         {
             CanChime = false;
+            await _chiming.WaitAsync();
             try
             {
                 _sound?.Dispose();
+                _sound = null;
             }
             catch (Exception)
             {
                 // Already gone with the connection.
+            }
+            finally
+            {
+                _chiming.Release();
             }
         }
         private readonly ConcurrentDictionary<ulong, DateTimeOffset> _wakeWords = new();

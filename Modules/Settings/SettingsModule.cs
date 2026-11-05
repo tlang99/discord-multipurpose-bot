@@ -210,12 +210,16 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         [ChannelTypes(ChannelType.Voice)]
         IVoiceChannel? channel = null)
     {
-        // The listening notice and the replies go in the voice channel's own chat.
+        if (channel is IStageChannel)
+        {
+            await RespondAsync("Pick a normal voice channel: I don't listen in stage channels.", ephemeral: true);
+            return;
+        }
+
+        // The replies go in the voice channel's own chat.
         if (channel is not null)
         {
-            var me = Context.Guild.CurrentUser;
-            var permissions = me.GetPermissions(channel);
-            if (!permissions.ViewChannel || !permissions.Connect || !ChannelAccess.CanPost(me, channel))
+            if (!ChannelAccess.CanListenAndReplyIn(Context.Guild.CurrentUser, channel))
             {
                 await RespondAsync($"I need **View Channel**, **Connect** and **Send Messages** in {channel.Mention} " +
                                    "to listen there (my replies go in its chat).", ephemeral: true,
@@ -251,7 +255,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             : Context.Guild.GetVoiceChannel(id)?.Mention ??
               "(the chosen voice channel was deleted - pick another with `/settings voice-channel`)";
 
-    [SlashCommand("lfg-pings","Sets the role LFG posts ping. Leave both options out to go back to the default.")]
+    [SlashCommand("lfg-pings", "Sets the role LFG posts ping. Leave both options out to go back to the default.")]
     public async Task LfgPingsAsync(
         [Summary("role", "Ping this role")] IRole? role = null,
         [Summary("off", "True: no pings")] bool? off = null)

@@ -26,7 +26,7 @@ public static partial class SettingsRequestReader
 
         // Whitespace-normalised, so "chat  bot" is "chat bot"; the regex only lets these names through.
         var name = WhitespaceRegex().Replace(match.Groups["feature"].Value.ToLowerInvariant(), " ");
-        ServerFeature? feature = name.Contains("auto") ? ServerFeature.VoiceAutoJoin : name switch
+        ServerFeature? feature = AutoJoinRegex().IsMatch(name) ? ServerFeature.VoiceAutoJoin : name switch
         {
             "chat actions" or "actions" => ServerFeature.ChatActions,
             "chatbot" or "chat bot" or "the bot chat" or "ai chat" or "chat" => ServerFeature.Chat,
@@ -62,6 +62,10 @@ public static partial class SettingsRequestReader
         @"|(?<verb>turn|switch)\s+(?:the\s+)?" + Feature + @"\s+(?<state>on|off)\s+" + Here + @")" +
         @"(?:[\s,]+(?:now|please|pls))*[\s.!]*$", RegexOptions.IgnoreCase)]
     private static partial Regex RequestRegex();
+
+    /// <summary>The ways of naming voice auto-join ("voice auto-join", "auto joining", "auto-join voice"...), whole.</summary>
+    [GeneratedRegex(@"^(?:voice )?auto[ -]?join(?:ing)?(?: voice)?$")]
+    private static partial Regex AutoJoinRegex();
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();

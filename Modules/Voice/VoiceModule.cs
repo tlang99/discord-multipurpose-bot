@@ -49,7 +49,6 @@ public class VoiceModule : InteractionModuleBase<SocketInteractionContext>
 
         await DeferAsync(ephemeral: true);
         var answer = await _voice.StopForAsync(user);
-        await FollowupAsync(answer, ephemeral: true,
-            allowedMentions: AllowedMentions.None);
+        await FollowupAsync(answer, ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 }

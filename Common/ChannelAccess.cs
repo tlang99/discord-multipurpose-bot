@@ -19,6 +19,15 @@ public static class ChannelAccess
         return permissions.ViewChannel && canSend;
     }
 
+    /// <summary>True if <paramref name="bot"/> can join <paramref name="channel"/> to listen for voice commands.</summary>
+    public static bool CanListenIn(IGuildUser bot, IGuildChannel channel)
+        => bot.GetPermissions(channel) is { ViewChannel: true, Connect: true };
+
+    /// <summary>True if <paramref name="bot"/> can listen in <paramref name="channel"/> and reply in its own chat, as
+    /// it does when it joins by itself (voice auto-join).</summary>
+    public static bool CanListenAndReplyIn(IGuildUser bot, IGuildChannel channel)
+        => CanListenIn(bot, channel) && CanPost(bot, channel);
+
     /// <summary>Why the bot can't post embeds in <paramref name="channel"/>, or null if it can.</summary>
     /// <param name="what">What it would post, e.g. "LFGs" or "news".</param>
     public static string? WhyBotCantPostEmbeds(IGuildUser bot, IGuildChannel channel, string what)
