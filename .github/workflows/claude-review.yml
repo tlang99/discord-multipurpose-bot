@@ -86,6 +86,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SINCE: ${{ steps.start.outputs.at }}
         run: |
+          # The review action skips any PR whose copy of this workflow differs from the default branch's (so a PR
+          # can't change its own reviewer). Re-running can't help then, so say why instead of failing.
+          main=$(gh api "repos/${{ github.repository }}/contents/.github/workflows/claude-review.yml?ref=${{ github.event.repository.default_branch }}" \
+            --jq .content | base64 -d)
+          if [ "$main" != "$(cat .github/workflows/claude-review.yml)" ]; then
+            echo "::warning::No review: this PR changes the review workflow, which the review action won't run. Reviews resume on the next PR after it's merged."
+            exit 0
+          fi
+
           posted=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments?since=$SINCE" \
             --jq "[.[] | select(.user.login == \"claude[bot]\" and .created_at >= \"$SINCE\")] | length")
           if [ "$posted" -eq 0 ]; then
