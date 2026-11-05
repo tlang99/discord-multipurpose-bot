@@ -113,8 +113,8 @@ public class ServerFeatureSwitch
             server.AutoJoinsVoice && guild is Discord.WebSocket.SocketGuild { CurrentUser.GuildPermissions: var mine } &&
             !mine.SetVoiceChannelStatus)
         {
-            note += " Give me **Set Voice Channel Status** too, so the channel shows I'm listening to anyone who " +
-                    "joins later.";
+            note += " But I need **Set Voice Channel Status** to join voice by myself (it's how people joining later " +
+                    "see I'm listening). Until then, use `/voice listen`.";
         }
 
         if (on && feature is (ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin or ServerFeature.Chat))

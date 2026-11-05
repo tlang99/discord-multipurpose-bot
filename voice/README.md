@@ -13,10 +13,12 @@ sees what it acted on, and anything it misheard) and replies to that.
   voice auto-join"): the bot joins a voice channel by itself a few seconds after someone does, so "hey ModBot" is all
   it takes. With several channels in use, it joins the busiest one (one voice connection per server).
   `/settings voice-channel` limits it to one channel.
-- Each time it joins, it posts one short line in the voice channel's chat ("🎙️ Listening for "hey ModBot"...") and
-  how to send it away. While it's there, the channel's status (shown under its name in the channel list) reads
-  "🎙️ Listening for "hey ModBot"", so anyone joining later sees it too; the old status comes back when it leaves.
-  This needs **Set Voice Channel Status**; without it the status is just left alone. No "stopped" notices.
+- Each time it joins, it posts one line in the voice channel's chat: that it's listening for "hey ModBot", that speech
+  is turned into text on the bot's own computer and no audio is kept, and how to send it away. While it's there, the
+  channel's status (shown under its name in the channel list) reads "🎙️ Listening for "hey ModBot"", so anyone
+  joining later sees it too; the old status comes back when it leaves. No "stopped" notices.
+- **Voice auto-join needs Set Voice Channel Status**, since the status is how people joining later know it's
+  listening: without it, the bot doesn't join by itself (`/voice listen` still works, without the status).
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
   off for every server with `Voice:Chime`).
 - Speech is turned into text **on the machine running the bot** (Whisper). Nothing is sent to any other service.

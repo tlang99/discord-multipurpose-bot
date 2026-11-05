@@ -282,3 +282,18 @@ public class HeardTextTests
     [InlineData("🎙️ Listening for voice commands in <#1>")]
     public void Ignores_the_bots_other_posts(string content) => Assert.Null(EventHandlers.ChatHandler.ReadHeardText(content));
 }
+
+/// <summary>The one line the bot posts on joining voice.</summary>
+public class ListeningLineTests
+{
+    [Fact]
+    public void Says_its_listening_what_happens_to_speech_and_how_to_stop_it()
+    {
+        var line = Modules.Voice.VoiceListener.ListeningLine("ModBot");
+
+        Assert.Contains("hey ModBot", line);
+        Assert.Contains("no audio is kept", line);
+        Assert.Contains("stop listening", line);
+        Assert.True(line.Length <= Discord.DiscordConfig.MaxMessageSize);
+    }
+}

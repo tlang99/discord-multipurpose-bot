@@ -87,7 +87,10 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
                     ? " (but not set up on this bot yet)"
                     : feature == ServerFeature.VoiceAutoJoin && on && !server.IsEnabled(ServerFeature.VoiceCommands)
                         ? " (once voice commands are on)"
-                        : "";
+                        : feature == ServerFeature.VoiceAutoJoin && on &&
+                          !Context.Guild.CurrentUser.GuildPermissions.SetVoiceChannelStatus
+                            ? " (needs Set Voice Channel Status)"
+                            : "";
             features.AppendLine($"{(on ? "✅" : "🚫")} {ServerSettingsService.NameOf(feature)}{note}");
         }
 
@@ -219,12 +222,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        // The replies go in the voice channel's own chat.
-        if (channel is not null && !ChannelAccess.CanListenAndReplyIn(Context.Guild.CurrentUser, channel))
+        // The replies go in the voice channel's own chat, and its status is how people joining later see it listening.
+        if (channel is not null && !ChannelAccess.CanJoinByItselfIn(Context.Guild.CurrentUser, channel))
         {
-            await RespondAsync($"I need **View Channel**, **Connect** and **Send Messages** in {channel.Mention} " +
-                               "to listen there (my replies go in its chat).", ephemeral: true,
-                allowedMentions: AllowedMentions.None);
+            await RespondAsync($"I need {ChannelAccess.JoinByItselfPermissions} in {channel.Mention} to join it by " +
+                               "myself (my replies go in its chat, and its status shows I'm listening).",
+                ephemeral: true, allowedMentions: AllowedMentions.None);
             return;
         }
 

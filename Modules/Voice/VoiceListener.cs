@@ -314,8 +314,7 @@ public sealed class VoiceListener
         var name = guild.CurrentUser.DisplayName;
         try
         {
-            await replyChannel.SendMessageAsync($"🎙️ Listening for \"hey {name}\". Say \"hey {name}, stop listening\" " +
-                                                "to send me away.", allowedMentions: AllowedMentions.None);
+            await replyChannel.SendMessageAsync(ListeningLine(name), allowedMentions: AllowedMentions.None);
         }
         catch (Exception ex)
         {
@@ -325,6 +324,12 @@ public sealed class VoiceListener
         await SetListeningStatusAsync(session);
         return null;
     }
+
+    /// <summary>The one line it posts on joining: that it's listening, what happens to what's said, and how to stop
+    /// it.</summary>
+    public static string ListeningLine(string name)
+        => $"🎙️ Listening for \"hey {name}\". Speech is turned into text on the bot's own computer, only what's said " +
+           $"after my name is used, and no audio is kept. \"Hey {name}, stop listening\" sends me away.";
 
     /// <summary>The voice channel status while it listens: shown under the channel's name in the channel list, so
     /// anyone joining later sees it without a post or a ping.</summary>
@@ -483,11 +488,11 @@ public sealed class VoiceListener
         }
     }
 
-    /// <summary>A channel it may join by itself: allowed in, not full, and able to post in its chat (where the
-    /// replies go).</summary>
+    /// <summary>A channel it may join by itself: allowed in, not full, able to post in its chat (where the replies go)
+    /// and to set its status (how people joining later see it's listening).</summary>
     private static bool CanJoinByItself(SocketGuildUser me, SocketVoiceChannel channel)
     {
-        return ChannelAccess.CanListenAndReplyIn(me, channel) &&
+        return ChannelAccess.CanJoinByItselfIn(me, channel) &&
                (channel.UserLimit is not > 0 || channel.ConnectedUsers.Count < channel.UserLimit ||
                 me.GetPermissions(channel).MoveMembers);
     }
