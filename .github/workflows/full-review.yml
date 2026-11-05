@@ -2,7 +2,8 @@ name: Full Repo Review
 
 # The same review agent as the PR review, but over the whole repo, one area at a time. Started by hand from the
 # Actions tab (Run workflow), for all areas or just one. Each area's findings go into its own GitHub issue, labelled
-# "review" and titled "Full review: <area>"; running it again updates that issue instead of opening another.
+# "review" and titled "Full review: <area>"; running it again updates that issue (while it's open) instead of
+# opening another.
 # It's about five PR reviews' worth of usage on the same token, so it isn't run on every push.
 on:
   workflow_dispatch:
@@ -89,9 +90,10 @@ jobs:
     runs-on: ubuntu-latest
     # A hung review shouldn't burn the token's usage for the 6-hour default.
     timeout-minutes: 45
+    # No issues permission here: this job runs the reviewer, which reads untrusted repo text. The "post" job below
+    # posts what it wrote. (id-token is only for the review action to sign in.)
     permissions:
       contents: read
-      issues: write
       id-token: write
     strategy:
       # One area failing (or timing out) shouldn't cancel the others.
@@ -200,7 +202,6 @@ jobs:
           claude_args: |
             --allowedTools "Read,Glob,Grep,Write(./full-review.md),Edit(./full-review.md)"
 
-      # Fails visibly if the reviewer wrote nothing, so it's clear to re-run.
       - name: Check the review was written
         run: |
           if [ ! -s full-review.md ]; then
@@ -209,35 +210,69 @@ jobs:
           fi
           echo "Review written ($(wc -c < full-review.md) bytes)."
 
-      - name: Make sure the review label exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if ! gh label list --repo "${{ github.repository }}" --search review --json name --jq '.[].name' \
-            | grep -qx review; then
-            gh label create review --repo "${{ github.repository }}" --color 5319e7 \
-              --description "Findings from the full repo review"
-          fi
+      # Handed to the post job, which has the permission to post it.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: full-review-${{ matrix.id }}
+          path: full-review.md
+          retention-days: 7
 
-      # Updates this area's open issue from an earlier run, or opens one.
+  # Posts each area's review as its issue. Separate from the review job so the job running the reviewer never holds
+  # a token that can write issues. Runs even if some reviews failed, posting the ones that worked.
+  post:
+    needs: [areas, review]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      # One at a time, so two areas never race to create the label or an issue.
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.areas.outputs.matrix) }}
+    name: post (${{ matrix.name }})
+    steps:
+      - uses: actions/download-artifact@v4
+        id: download
+        continue-on-error: true
+        with:
+          name: full-review-${{ matrix.id }}
+
       - name: Post the review
+        if: steps.download.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           TITLE: "Full review: ${{ matrix.name }}"
         run: |
-          # GitHub's limit for an issue body.
+          # --force: fine if it already exists.
+          gh label create review --repo "$REPO" --color 5319e7 --force \
+            --description "Findings from the full repo review"
+
+          # GitHub's limit for an issue body is 65,536 characters. Over it, cut at the last whole line that fits (so
+          # no character is split), and close a code block left open by the cut.
           if [ "$(wc -c < full-review.md)" -gt 65000 ]; then
-            head -c 64000 full-review.md > body.md
+            head -c 64000 full-review.md | sed '$d' > body.md
+            if [ $(( $(grep -c '^```' body.md) % 2 )) -eq 1 ]; then
+              printf '\n```\n' >> body.md
+            fi
             printf '\n\n_(Cut short: the review was longer than GitHub allows in one issue.)_\n' >> body.md
           else
             cp full-review.md body.md
           fi
 
-          number=$(gh issue list --repo "${{ github.repository }}" --label review --state open --limit 100 \
+          # The area's open issue from an earlier run is updated. If it was closed, a new one is opened.
+          number=$(gh issue list --repo "$REPO" --label review --state open --limit 100 \
             --json number,title --jq '.[] | select(.title == env.TITLE) | .number' | head -n 1)
           if [ -n "$number" ]; then
-            gh issue edit "$number" --repo "${{ github.repository }}" --body-file body.md
+            gh issue edit "$number" --repo "$REPO" --body-file body.md
             echo "Updated issue #$number."
           else
-            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --label review --body-file body.md
+            gh issue create --repo "$REPO" --title "$TITLE" --label review --body-file body.md
           fi
+
+      - name: Note a missing review
+        if: steps.download.outcome != 'success'
+        run: echo "::warning::No review for ${{ matrix.name }} (its review job failed), so nothing was posted."
