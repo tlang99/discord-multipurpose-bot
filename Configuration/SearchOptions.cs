@@ -22,7 +22,13 @@ public class SearchOptions
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>Where Ollama's web search API lives. Must be https, since the key goes with every search.</summary>
-    public string Url { get; set; } = DefaultUrl;
+    public string Url
+    {
+        get => _url;
+        set => _url = string.IsNullOrWhiteSpace(value) ? DefaultUrl : value.Trim(); // blank or null in config: the default
+    }
+
+    private string _url = DefaultUrl;
 
     /// <summary>How many results to read for each search (Ollama allows 1-10).</summary>
     public int MaxResults { get; set; } = 5;

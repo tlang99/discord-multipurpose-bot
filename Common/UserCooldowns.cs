@@ -14,6 +14,7 @@ public sealed class UserCooldowns
 
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _last = new();
     private readonly TimeSpan _cooldown;
+    private DateTimeOffset _lastPrune;
 
     public UserCooldowns(int seconds) => _cooldown = TimeSpan.FromSeconds(Math.Max(0, seconds));
 
@@ -21,8 +22,10 @@ public sealed class UserCooldowns
     public bool TryClaim(ulong guildId, ulong userId, out TimeSpan wait)
     {
         var now = DateTimeOffset.UtcNow;
-        if (_last.Count > PruneAbove)
+        // At most once per cooldown, so a busy bot doesn't scan everyone on every claim.
+        if (_last.Count > PruneAbove && now - _lastPrune >= _cooldown)
         {
+            _lastPrune = now;
             Prune(now);
         }
 

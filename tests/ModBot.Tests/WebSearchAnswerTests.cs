@@ -155,11 +155,20 @@ public class WebSearchAnswererTests
         Assert.Equal(0, search.Calls);
     }
 
+    [Fact]
+    public void Needs_an_https_address() // or the key would go over plain http
+        => Assert.Contains("https", new SearchOptions { ApiKey = "key", Url = "http://ollama.com/" }.SetupProblem);
+
     [Theory]
-    [InlineData("http://ollama.com/")] // the key would go over plain http
-    [InlineData("")]
-    public void Needs_an_https_address(string url)
-        => Assert.Contains("https", new SearchOptions { ApiKey = "key", Url = url }.SetupProblem);
+    [InlineData(null)]
+    [InlineData("  ")]
+    public void A_blank_address_means_ollamas_own(string? url)
+    {
+        var options = new SearchOptions { ApiKey = "key", Url = url! };
+
+        Assert.True(options.UsesDefaultUrl);
+        Assert.Null(options.SetupProblem);
+    }
 
     [Fact]
     public void Is_ready_with_a_key_and_the_default_address()
