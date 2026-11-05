@@ -33,6 +33,7 @@ public static partial class SettingsRequestReader
             "lfg" or "lfgs" or "looking for group" => ServerFeature.Lfg,
             "poll" or "polls" => ServerFeature.Polls,
             "reminder" or "reminders" => ServerFeature.Reminders,
+            "voice commands" or "voice command" or "voice control" => ServerFeature.VoiceCommands,
             _ => null,
         };
 
@@ -48,7 +49,7 @@ public static partial class SettingsRequestReader
     }
 
     private const string Feature =
-        @"(?<feature>chat\s*bot|the\s+bot\s+chat|ai\s+chat|chat\s+actions|actions|chat|music|lfgs?|looking\s+for\s+group|polls?|reminders?)";
+        @"(?<feature>chat\s*bot|the\s+bot\s+chat|ai\s+chat|chat\s+actions|actions|chat|music|lfgs?|looking\s+for\s+group|polls?|reminders?|voice\s+commands?|voice\s+control)";
 
     private const string Here = @"(?:for\s+(?:this|the)\s+server|on\s+this\s+server|server[\s-]?wide|here|feature)";
 

@@ -18,6 +18,11 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # Discord.Net 3.20.2 plus the readable voice fix in discord-net-patch/pr3288.patch, built from the official
+      # source at a pinned commit (see build.ps1). Built here rather than committed, so every binary is reviewable.
+      - name: Build patched Discord.Net
+        run: pwsh -File discord-net-patch/build.ps1
+
       - name: Build
         run: dotnet build ModBot.csproj --configuration Release
 

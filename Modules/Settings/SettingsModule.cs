@@ -7,6 +7,7 @@ using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Modules.Lfg;
+using ModBot.Modules.Voice;
 using ModBot.Services.Chat;
 using ModBot.Services.Lfg;
 using ModBot.Services.Settings;
@@ -30,10 +31,11 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     private readonly IGuildSettingsStore _moderation;
     private readonly ChatOptions _chat;
     private readonly ChatPersonality _personality;
+    private readonly VoiceListener _voice;
     private readonly ILogger<SettingsModule> _logger;
 
     public SettingsModule(ServerSettingsService settings, ServerFeatureSwitch featureSwitch,
-        IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ChatPersonality personality,
+        IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ChatPersonality personality, VoiceListener voice,
         ILogger<SettingsModule> logger)
     {
         _settings = settings;
@@ -41,6 +43,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         _moderation = moderation;
         _chat = chat.Value;
         _personality = personality;
+        _voice = voice;
         _logger = logger;
     }
 
@@ -54,6 +57,8 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("LFG")] Lfg = ServerFeature.Lfg,
         [ChoiceDisplay("Polls")] Polls = ServerFeature.Polls,
         [ChoiceDisplay("Reminders")] Reminders = ServerFeature.Reminders,
+        [ChoiceDisplay("Voice commands (say my name in voice; off by default)")]
+        VoiceCommands = ServerFeature.VoiceCommands,
     }
 
     /// <summary>The features with their own channel.</summary>
@@ -76,7 +81,9 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             var on = server.IsEnabled(feature);
             var note = feature is ServerFeature.Chat or ServerFeature.ChatActions && !_chat.IsEnabled
                 ? " (but the chatbot is off for every server in the bot's own settings)"
-                : "";
+                : feature == ServerFeature.VoiceCommands && on && _voice.SetupProblem is not null
+                    ? " (but not set up on this bot yet)"
+                    : "";
             features.AppendLine($"{(on ? "✅" : "🚫")} {ServerSettingsService.NameOf(feature)}{note}");
         }
 

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModBot.Common;
 using ModBot.Configuration;
+using ModBot.Modules.Voice;
 
 namespace ModBot.Modules.Music;
 
@@ -39,20 +40,26 @@ public class MusicService
     private readonly IAudioService _audioService;
     private readonly MusicPlayerEvents _events;
     private readonly MusicOptions _options;
+    private readonly VoiceListener _voice;
     private readonly ILogger<MusicService> _logger;
 
     public MusicService(IAudioService audioService, MusicPlayerEvents events, IOptions<MusicOptions> options,
-        ILogger<MusicService> logger)
+        VoiceListener voice, ILogger<MusicService> logger)
     {
         _audioService = audioService;
         _events = events;
+        _voice = voice;
         _options = options.Value;
         _logger = logger;
     }
 
     /// <summary>The server's live player, or null if the bot isn't in voice there.</summary>
-    public MusicPlayer? GetPlayer(ulong guildId)
-        => _audioService.Players.TryGetPlayer<MusicPlayer>(guildId, out var player) &&
+    public MusicPlayer? GetPlayer(ulong guildId) => GetPlayer(_audioService, guildId);
+
+    /// <summary>The same, for code that can't depend on MusicService itself (VoiceListener, which MusicService uses):
+    /// the one definition of "music has the voice connection".</summary>
+    public static MusicPlayer? GetPlayer(IAudioService audioService, ulong guildId)
+        => audioService.Players.TryGetPlayer<MusicPlayer>(guildId, out var player) &&
            player is not null && player.State != PlayerState.Destroyed
             ? player
             : null;
@@ -165,6 +172,16 @@ public class MusicService
             SelfDeaf = true,
             ClearQueueOnStop = true,
         };
+
+        // Listening for voice commands holds the server's one voice connection, which music needs to play. Music wins:
+        // stop listening and give Discord a moment to see the bot leave before Lavalink joins.
+        if (GetPlayer(user.Guild.Id) is null && _voice.IsListening(user.Guild.Id))
+        {
+            await _voice.StopAsync(user.Guild.Id,
+                "🎶 Music's starting, so I've stopped listening for voice commands - I can't do both at once. Ask me " +
+                "to listen again once the music's done.");
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
 
         try
         {

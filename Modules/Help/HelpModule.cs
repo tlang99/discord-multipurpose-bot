@@ -132,6 +132,16 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 $"Mention {Context.Guild.CurrentUser.Mention} in a message, or reply to one of mine, and I'll answer. " +
                 "I read the last few messages in the channel for context." +
                 (canAct ? $"\nYou can also just ask: {string.Join(", ", examples)}." : ""));
+
+            if (server.IsEnabled(ServerFeature.VoiceCommands))
+            {
+                var name = Context.Guild.CurrentUser.DisplayName;
+                builder.AddField("🎙️ Voice commands",
+                    $"In a voice channel, `/voice listen` (or ask me to \"listen in voice\"), then say \"hey {name}\" " +
+                    $"and what you want: \"hey {name}, make an LFG for ranked\". I do it as if you'd typed it, and " +
+                    "post what I heard. Speech is turned into text on the bot's own computer and no audio is kept. " +
+                    $"`/voice stop` or \"hey {name}, stop listening\" to stop. Not while music's playing.");
+            }
         }
 
         return builder.AddField("ℹ️ Help", "`/help` - show this list").Build();

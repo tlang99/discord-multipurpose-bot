@@ -1,0 +1,2 @@
+# The Discord.Net patch applies to source checked out with LF endings (discord-net-patch/build.ps1), on every OS.
+discord-net-patch/*.patch text eol=lf
