@@ -8,13 +8,11 @@
     <Nullable>enable</Nullable>
     <!-- The bot's own user secrets, so the token is found wherever the bot keeps it. -->
     <UserSecretsId>7e2b6c6f-3b0f-4b9a-9b9e-modbot-secrets</UserSecretsId>
-    <!-- vendor/ holds the Discord.Net source the patched packages are built from; not part of this tool. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);vendor/**;packages/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Patched for a voice-encryption bug (see build-discord-net.ps1); back to Discord.Net once a release has the fix. -->
-    <PackageReference Include="Discord.Net.WebSocket" Version="3.20.2-dave.1" />
+    <!-- 3.20.2 plus an unreleased voice-encryption fix, from discord-net-patch/ (as the bot uses). -->
+    <PackageReference Include="Discord.Net.WebSocket" Version="3.20.2.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.14" />
