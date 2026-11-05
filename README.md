@@ -136,11 +136,14 @@ Every option is optional:
 
 **LFG game** — no game is built in. A new server's `/lfg` has no playlist or rank options. Everything else works
 (squad size, mic, platform, note, Join/Leave/Start/Cancel), and the card just says "LFG". An admin (Manage Server)
-sets the server's game with `/settings lfg-game`, a pop-up with two boxes:
+sets the server's game with `/settings lfg-game`, a pop-up with three boxes:
+- **Game name** (optional, up to 50 characters), e.g. "Call of Duty: MW4". New LFG cards show it before the
+  playlist ("🎮 Call of Duty: MW4 · Hardpoint — looking for 3 more"), and pings say "a Hardpoint squad in Call of Duty:
+  MW4". Without a name, cards show just the playlist, or "LFG".
 - **Playlists / modes:** one per line, as `Name : other names`. A `*` after the name marks a ranked playlist, the one
   a minimum rank belongs to. If none is marked, ranks go with any mode.
 - **Ranks:** lowest first, also `Name : other names`. The last one is the top rank, shown without a "+".
-- **Limits:** up to 25 lines each. Empty both boxes to go back to blank. Names need at least 2 characters and can't
+- **Limits:** up to 25 lines each. Empty all three boxes to go back to blank. Names need at least 2 characters and can't
   be plain numbers or words chat already uses ("more", "mic", "pc"...), since chat looks for them in any message.
 - **Per server:** each server has its own game. The "other names" are what chat understands ("@bot make an lfg for
   hp, need 2 more") and what `/lfg` accepts as typed.
@@ -239,7 +242,7 @@ saved in `data/server-settings.json`:
   Channels are saved by ID, so renaming one doesn't break it.
 - `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
   pings off, or leave both out for the default.
-- `/settings lfg-game` — the playlists/modes and ranks `/lfg` offers (blank until set; see *LFG game* above).
+- `/settings lfg-game` — the game name, playlists/modes and ranks `/lfg` offers (blank until set; see *LFG game* above).
 - Moderation is per server too: `/automod` (auto-mod is **off** in a new server until it runs `/automod enable`) and `/modlog`. So is the
   chatbot's personality (`/chat personality`). Auto-mod on or off only decides whether members' messages are
   scanned and removed: what the bot itself posts (chatbot replies, news write-ups, polls, reminders, song titles) always

@@ -7,6 +7,7 @@ using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Modules.Lfg;
+using ModBot.Services.Chat;
 using ModBot.Services.Lfg;
 using ModBot.Services.Settings;
 using ModBot.Services.Storage;
@@ -28,15 +29,18 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     private readonly ServerFeatureSwitch _switch;
     private readonly IGuildSettingsStore _moderation;
     private readonly ChatOptions _chat;
+    private readonly ChatPersonality _personality;
     private readonly ILogger<SettingsModule> _logger;
 
     public SettingsModule(ServerSettingsService settings, ServerFeatureSwitch featureSwitch,
-        IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ILogger<SettingsModule> logger)
+        IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ChatPersonality personality,
+        ILogger<SettingsModule> logger)
     {
         _settings = settings;
         _switch = featureSwitch;
         _moderation = moderation;
         _chat = chat.Value;
+        _personality = personality;
         _logger = logger;
     }
 
@@ -64,6 +68,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     {
         var server = await _settings.GetAsync(Context.Guild.Id);
         var moderation = await _moderation.GetAsync(Context.Guild.Id);
+        var personality = await _personality.GetWithSourceAsync(Context.Guild.Id);
 
         var features = new StringBuilder();
         foreach (var feature in Enum.GetValues<ServerFeature>())
@@ -90,9 +95,11 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
                 $"LFG: {await DescribeAsync(ChannelFeature.Lfg)}")
             .AddField("LFG pings", $"{pingText}{(server.LfgPingRoleId is null && !server.LfgPingsOff ? " (default)" : "")}")
             .AddField("LFG game", server.LfgGame is { IsEmpty: false } game
-                ? $"{TextTools.Count(game.Playlists.Count, "playlist")}, {TextTools.Count(game.Ranks.Count, "rank")} " +
+                ? (game.Name.Length > 0 ? $"**{TextTools.Escape(game.Name)}** - " : "no name - ") +
+                  $"{TextTools.Count(game.Playlists.Count, "playlist")}, {TextTools.Count(game.Ranks.Count, "rank")} " +
                   "(change with `/settings lfg-game`)"
                 : "not set up: `/lfg` has no playlist or rank options yet (`/settings lfg-game`)")
+            .AddField("Chatbot personality", PersonalityField(personality.Text, personality.IsCustom))
             .AddField("Auto-mod",
                 $"{(moderation.AutoModEnabled ? "✅ On" : "🚫 Off")} - change it and the filters with `/automod`, and " +
                 "the log channel with `/modlog`.")
@@ -104,13 +111,17 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
 
     private const string LfgGameModalId = "settings-lfg-game";
 
-    [SlashCommand("lfg-game", "Sets the playlists/modes and ranks /lfg offers here, in a pop-up. Blank until set.")]
+    [SlashCommand("lfg-game", "Sets this server's LFG game: its name, modes and ranks, in a pop-up. Blank until set.")]
     public async Task LfgGameAsync()
     {
-        var (playlists, ranks) = LfgGameProfileText.Format(await _settings.LfgGameAsync(Context.Guild.Id));
+        var current = await _settings.LfgGameAsync(Context.Guild.Id);
+        var (playlists, ranks) = LfgGameProfileText.Format(current);
         var modal = new ModalBuilder()
             .WithTitle(LfgGameModal.ModalTitle)
             .WithCustomId(LfgGameModalId)
+            .AddTextInput(LfgGameModal.NameLabel, LfgGameModal.NameId, TextInputStyle.Short,
+                placeholder: LfgGameModal.NamePlaceholder, maxLength: LfgGameProfileText.MaxGameNameLength,
+                required: false, value: current.Name)
             .AddTextInput(LfgGameModal.PlaylistsLabel, LfgGameModal.PlaylistsId, TextInputStyle.Paragraph,
                 placeholder: LfgGameModal.PlaylistsPlaceholder, maxLength: LfgGameProfileText.MaxBoxLength,
                 required: false, value: playlists)
@@ -125,7 +136,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     [ModalInteraction(LfgGameModalId, ignoreGroupNames: true)]
     public async Task OnLfgGameSubmittedAsync(LfgGameModal modal)
     {
-        var (game, problem) = LfgGameProfileText.Parse(modal.Playlists, modal.Ranks);
+        var (game, problem) = LfgGameProfileText.Parse(modal.Playlists, modal.Ranks, modal.Name);
         if (game is null)
         {
             await RespondAsync($"{problem}\nNothing was changed - run `/settings lfg-game` again to fix it.",
@@ -134,12 +145,16 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         await _settings.UpdateAsync(Context.Guild.Id, s => s.LfgGame = game.IsEmpty ? null : game);
-        _logger.LogInformation("LFG game set to {Playlists} playlist(s), {Ranks} rank(s) by {User} ({UserId}).",
-            game.Playlists.Count, game.Ranks.Count, Context.User.Username, Context.User.Id);
+        _logger.LogInformation(
+            "LFG game set to {Named}, {Playlists} playlist(s), {Ranks} rank(s) by {User} ({UserId}).",
+            game.Name.Length > 0 ? "a name" : "no name", game.Playlists.Count, game.Ranks.Count, Context.User.Username,
+            Context.User.Id);
 
         await RespondAsync(game.IsEmpty
             ? "Cleared: `/lfg` here has no playlist or rank options now (squad size, mic, platform and notes still work)."
-            : $"Saved: {TextTools.Count(game.Playlists.Count, "playlist")} and {TextTools.Count(game.Ranks.Count, "rank")}. " +
+            : (game.Name.Length > 0 ? $"Saved **{TextTools.Escape(game.Name)}**: " : "Saved: ") +
+              $"{TextTools.Count(game.Playlists.Count, "playlist")} and {TextTools.Count(game.Ranks.Count, "rank")}. " +
+              (game.Name.Length > 0 ? "New LFG posts show the game's name. " : "") +
               "`/lfg` suggests them as you type, and chat understands them (\"make an lfg for …\").",
             ephemeral: true, allowedMentions: AllowedMentions.None);
     }
@@ -212,6 +227,17 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         await RespondAsync($"LFG pings: {now}.", ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 
+    /// <summary>The "Chatbot personality" field of /settings show: the text as a quote, shown as typed (admins write
+    /// it, so "# Pirate" mustn't become a heading or a [link](url) a link), then a note saying where it comes from.
+    /// Cut to fit Discord's limit for a field; the note always fits.</summary>
+    public static string PersonalityField(string text, bool isCustom)
+    {
+        var note = "\n-# " + (isCustom
+            ? "This server's own - change it with `/chat personality set`, or `reset` for the default."
+            : "The default - give this server its own with `/chat personality set`.");
+        return TextTools.QuoteAsTyped(text, EmbedFieldBuilder.MaxFieldValueLength - note.Length) + note;
+    }
+
     private static string NameOf(ChannelFeature feature) => feature == ChannelFeature.Music ? "Music" : "LFG";
 
     private async Task<string> DescribeAsync(ChannelFeature feature)
@@ -229,17 +255,24 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
 public class LfgGameModal : IModal
 {
     public const string ModalTitle = "LFG game for this server";
+    public const string NameId = "name";
     public const string PlaylistsId = "playlists";
     public const string RanksId = "ranks";
 
     // Discord's limits: labels 45 characters, placeholders 100. Over that, the pop-up refuses to open at all, so a test
     // checks these. The format hint lives in the label, where it always shows.
+    public const string NameLabel = "Game name (shown on LFG posts)";
+    public const string NamePlaceholder = "Call of Duty: MW4";
     public const string PlaylistsLabel = "Modes, one per line (* = ranked)";
     public const string PlaylistsPlaceholder = "Ranked Play* : ranked, comp\nHardpoint : hp\nSearch & Destroy : snd";
     public const string RanksLabel = "Ranks, lowest first, one per line";
     public const string RanksPlaceholder = "Bronze\nSilver\nGold\nPlatinum : plat";
 
     public string Title => ModalTitle;
+
+    [InputLabel(NameLabel)]
+    [ModalTextInput(NameId, TextInputStyle.Short, maxLength: LfgGameProfileText.MaxGameNameLength)]
+    public string? Name { get; set; }
 
     [InputLabel(PlaylistsLabel)]
     [ModalTextInput(PlaylistsId, TextInputStyle.Paragraph, maxLength: LfgGameProfileText.MaxBoxLength)]

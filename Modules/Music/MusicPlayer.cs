@@ -5,6 +5,7 @@ using Lavalink4NET.Protocol.Payloads.Events;
 using Lavalink4NET.Rest.Entities.Tracks;
 using Lavalink4NET.Tracks;
 using Microsoft.Extensions.Logging;
+using ModBot.Common;
 using ModBot.Models;
 
 namespace ModBot.Modules.Music;
@@ -75,7 +76,7 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
         }
 
         await SendAsync(MusicFormatting.NowPlayingEmbed(track.Track!, this,
-            track is QueueTrackItem item ? $"Now playing - {Format.Sanitize(item.Song.PickerName)}'s pick" : "Now playing"));
+            track is QueueTrackItem item ? $"Now playing - {TextTools.Escape(item.Song.PickerName)}'s pick" : "Now playing"));
     }
 
     protected override async ValueTask NotifyTrackEndedAsync(ITrackQueueItem queueItem, TrackEndReason endReason,

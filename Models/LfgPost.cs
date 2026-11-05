@@ -17,17 +17,20 @@ public enum LfgPlatform
 /// <param name="MinRank">A rank name from the server's game; null = any. See <see cref="LfgGameProfile.Combine"/>.</param>
 /// <param name="MinRankIsTop">The rank is the game's top one, shown as "Top 250" rather than "Top 250+".</param>
 /// <param name="MicRequired">null = not specified.</param>
+/// <param name="Game">The server's game name when the post was made (<see cref="LfgGameProfile.Name"/>); null = none.</param>
 public record LfgDetails(
     string? Playlist = null,
     string? MinRank = null,
     bool? MicRequired = null,
     LfgPlatform Platform = LfgPlatform.Crossplay,
-    bool MinRankIsTop = false)
+    bool MinRankIsTop = false,
+    string? Game = null)
 {
-    /// <summary>The details for a playlist and rank resolved with <see cref="LfgGameProfile.Combine"/>.</summary>
+    /// <summary>The details for a playlist and rank resolved with <see cref="LfgGameProfile.Combine"/>. The game name
+    /// is copied in, so renaming the game later doesn't change posts already up.</summary>
     public static LfgDetails From(LfgGameProfile game, LfgChoice choice, bool? mic, LfgPlatform platform)
         => new(choice.Playlist?.Name, choice.Rank?.Name, mic, platform,
-            choice.Rank is { } rank && game.IsTopRank(rank));
+            choice.Rank is { } rank && game.IsTopRank(rank), game.Name.Length > 0 ? game.Name : null);
 }
 
 /// <summary>

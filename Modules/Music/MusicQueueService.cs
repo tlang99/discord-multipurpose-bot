@@ -161,7 +161,7 @@ public class MusicQueueService : IHostedService
         }
 
         var what = lookup.IsPlaylist
-            ? $"**{added.Count}** songs from **{Format.Sanitize(playlistName!)}**" +
+            ? $"**{added.Count}** songs from **{TextTools.Escape(playlistName!)}**" +
               (added.Count < songs.Count ? $" (the most you can have waiting is {SongsPerPerson})" : "") +
               (filtered > 0 ? $" (skipped {filtered} whose titles break the word filter)" : "")
             : $"{MusicFormatting.SongLink(added[0])} ({MusicFormatting.SongLength(added[0])})";

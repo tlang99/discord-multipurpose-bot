@@ -27,10 +27,23 @@ public static class LfgGameProfileText
     /// saved text is checked against it too (see <see cref="Parse"/>).</summary>
     public const int MaxBoxLength = 4000;
 
-    /// <summary>The profile the two boxes describe, or what's wrong with them (naming the line). Both empty is the
-    /// blank profile.</summary>
-    public static (LfgGameProfile? Profile, string? Problem) Parse(string? playlists, string? ranks)
+    /// <summary>Longest game name ("Call of Duty: Modern Warfare 4" is 30). It goes in LFG card titles.</summary>
+    public const int MaxGameNameLength = 50;
+
+    /// <summary>The profile the boxes describe, or what's wrong with them (naming the line). All empty is the blank
+    /// profile. The game name is only shown, never matched in chat, so it doesn't follow the playlist/rank name rules.
+    /// </summary>
+    public static (LfgGameProfile? Profile, string? Problem) Parse(string? playlists, string? ranks,
+        string? gameName = null)
     {
+        // One line: it's a title. Line breaks pasted into the box become spaces.
+        var name = string.Join(" ", (gameName ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Trim())).Trim();
+        if (name.Length > MaxGameNameLength)
+        {
+            return (null, $"Game name: at most {MaxGameNameLength} characters.");
+        }
+
         // One set of taken names across both boxes: chat reads both lists from the same message, so a playlist and a
         // rank both called "Diamond" would make "diamond" set both.
         var taken = new Dictionary<string, string>();
@@ -49,6 +62,7 @@ public static class LfgGameProfileText
 
         var game = new LfgGameProfile
         {
+            Name = name,
             Playlists = playlistEntries.Select(e => new LfgPlaylistOption
             {
                 Name = e.Name, Aliases = e.Aliases, Ranked = e.Ranked,
