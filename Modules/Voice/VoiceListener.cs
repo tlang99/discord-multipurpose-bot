@@ -102,6 +102,8 @@ public sealed class VoiceListener
         // On connecting (and reconnecting), join anyone already sitting in voice.
         _client.GuildAvailable += guild =>
         {
+            Background.Run(_logger, () => ClearLeftoverStatusesAsync(guild), LogLevel.Debug,
+                "Couldn't clear leftover voice statuses in guild {GuildId}.", guild.Id);
             ScheduleAutoJoin(guild.Id, AfterLeavingDelay);
             return Task.CompletedTask;
         };
@@ -314,7 +316,76 @@ public sealed class VoiceListener
             _logger.LogDebug(ex, "Couldn't post the listening line in channel {ChannelId}.", replyChannel.Id);
         }
 
+        await SetListeningStatusAsync(session);
         return null;
+    }
+
+    /// <summary>The voice channel status while it listens: shown under the channel's name in the channel list, so
+    /// anyone joining later sees it without a post or a ping.</summary>
+    private static string ListeningStatus(string name) => $"🎙️ Listening for \"hey {name}\"";
+
+    /// <summary>Sets the channel's status to <see cref="ListeningStatus"/>, keeping what it was to put back after.
+    /// Needs Set Voice Channel Status; without it, it's just skipped.</summary>
+    private async Task SetListeningStatusAsync(Session session)
+    {
+        var channel = session.Channel;
+        if (!session.Guild.CurrentUser.GetPermissions(channel).SetVoiceChannelStatus)
+        {
+            return;
+        }
+
+        var ours = ListeningStatus(session.Guild.CurrentUser.DisplayName);
+        // A status that's already ours was left by a bot that stopped without clearing it: nothing to put back.
+        session.StatusBefore = channel.Status == ours ? "" : channel.Status ?? "";
+        try
+        {
+            await channel.SetStatusAsync(ours);
+            session.OurStatus = ours;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Couldn't set the status of voice channel {ChannelId}.", channel.Id);
+        }
+    }
+
+    /// <summary>Puts the channel's status back to what it was before it started listening, unless someone changed it
+    /// meanwhile (then theirs stays).</summary>
+    private async Task RestoreStatusAsync(Session session)
+    {
+        var channel = session.Channel;
+        // The cached status can lag behind Discord's, so ours, the old one or none all count as "not changed since".
+        if (session.OurStatus is not { } ours ||
+            channel.Status is { Length: > 0 } now && now != ours && now != session.StatusBefore)
+        {
+            return;
+        }
+
+        try
+        {
+            await channel.SetStatusAsync(session.StatusBefore);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Couldn't put back the status of voice channel {ChannelId}.", channel.Id);
+        }
+    }
+
+    /// <summary>On connecting: clears a listening status left on a channel by a bot that stopped without clearing it
+    /// (a crash, a power cut).</summary>
+    private async Task ClearLeftoverStatusesAsync(SocketGuild guild)
+    {
+        var ours = ListeningStatus(guild.CurrentUser.DisplayName);
+        foreach (var channel in guild.VoiceChannels.Where(c => c.Status == ours && !_sessions.ContainsKey(guild.Id)))
+        {
+            try
+            {
+                await channel.SetStatusAsync("");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Couldn't clear the leftover status of voice channel {ChannelId}.", channel.Id);
+            }
+        }
     }
 
     /// <summary>Looks for people to join in <paramref name="guildId"/> after <paramref name="delay"/>, if the server
@@ -463,6 +534,7 @@ public sealed class VoiceListener
 
         session.Stopping.Cancel();
         await session.StopChimingAsync();
+        await RestoreStatusAsync(session); // while still in the channel, which setting it needs
         if (leave)
         {
             await LeaveAsync(session.Channel);
@@ -706,6 +778,11 @@ public sealed class VoiceListener
 
         /// <summary>Set once connected.</summary>
         public IAudioClient? Voice { get; set; }
+
+        /// <summary>The status it set on the channel (null if it didn't), and what the status was before.</summary>
+        public string? OurStatus { get; set; }
+
+        public string StatusBefore { get; set; } = "";
 
         public volatile bool CanChime = canChime;
 
