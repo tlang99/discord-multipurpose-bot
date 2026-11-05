@@ -178,18 +178,18 @@ public class MusicService
         // it comes back once the music's done and the player has left.) Until the player has joined, auto-join keeps
         // off the connection, so it can't grab it back in between.
         var joining = GetPlayer(user.Guild.Id) is null;
-        if (joining)
-        {
-            var wasListening = _voice.IsListening(user.Guild.Id);
-            await _voice.MakeWayForMusicAsync(user.Guild.Id);
-            if (wasListening)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1));
-            }
-        }
-
         try
         {
+            if (joining)
+            {
+                var wasListening = _voice.IsListening(user.Guild.Id);
+                await _voice.MakeWayForMusicAsync(user.Guild.Id); // matched by MusicJoined below, whatever happens
+                if (wasListening)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+                }
+            }
+
             using var timeout = new CancellationTokenSource(ConnectTimeout);
             var result = await _audioService.Players.RetrieveAsync(user.Guild.Id, user.VoiceChannel?.Id,
                 PlayerFactoryInstance, Options.Create(playerOptions),

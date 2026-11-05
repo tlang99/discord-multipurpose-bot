@@ -271,7 +271,8 @@ public class DiscordBotService : BackgroundService
         }
 
         // Leaving voice cancels the voice connection's own tasks, and Discord.Net reports that as a warning with no
-        // message, every time the bot leaves (music starting, everyone gone). Expected, so not a warning.
+        // message, every time the bot leaves (music starting, everyone gone). Expected, so not a warning. (Seen on
+        // Discord.Net 3.20.2 as "[Audio #N] (null)" with a TaskCanceledException; recheck when upgrading.)
         if (level == LogLevel.Warning && message.Source?.StartsWith("Audio", StringComparison.Ordinal) == true &&
             message.Message is null && message.Exception is OperationCanceledException)
         {

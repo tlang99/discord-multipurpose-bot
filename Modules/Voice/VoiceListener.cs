@@ -83,11 +83,12 @@ public sealed class VoiceListener
     /// join that one by itself until everyone's left it.</summary>
     private readonly ConcurrentDictionary<ulong, ulong> _stayOut = new();
 
-    private readonly ConcurrentDictionary<ulong, bool> _autoJoinPending = new();
+    private readonly ConcurrentDictionary<(ulong GuildId, TimeSpan Delay), bool> _autoJoinPending = new();
     private readonly ConcurrentDictionary<ulong, DateTimeOffset> _failedJoins = new();
 
-    /// <summary>Servers where music is joining voice right now: auto-join keeps off the connection until it has.</summary>
-    private readonly ConcurrentDictionary<ulong, bool> _musicStarting = new();
+    /// <summary>Per server, how many music joins are under way (two /play at once is two): auto-join keeps off the
+    /// connection while any are.</summary>
+    private readonly ConcurrentDictionary<ulong, int> _musicStarting = new();
 
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, IAudioService audio, Lazy<ChatHandler> chat,
         ServerSettingsService settings, IOptions<ChatOptions> chatOptions, IOptions<VoiceOptions> options,
@@ -408,7 +409,10 @@ public sealed class VoiceListener
     /// has voice auto-join on. Several calls while one's waiting make just the one look.</summary>
     public void ScheduleAutoJoin(ulong guildId, TimeSpan delay)
     {
-        if (!_autoJoinPending.TryAdd(guildId, true))
+        // Same server and same wait: one look. A different wait gets its own, so a quick look (music done, a setting
+        // changed) isn't swallowed by a slow one waiting (the retry after a failed join). Each look is cheap.
+        var key = (guildId, delay);
+        if (!_autoJoinPending.TryAdd(key, true))
         {
             return;
         }
@@ -421,7 +425,7 @@ public sealed class VoiceListener
             }
             finally
             {
-                _autoJoinPending.TryRemove(guildId, out _);
+                _autoJoinPending.TryRemove(key, out _);
             }
 
             await _startStop.RunAsync(guildId, () => AutoJoinHoldingLockAsync(guildId));
@@ -500,19 +504,24 @@ public sealed class VoiceListener
     /// <summary>
     /// Music is about to take the voice connection: stops any listening, and keeps voice auto-join off it until
     /// <see cref="MusicJoined"/>. Otherwise a slow music join could lose the connection to the bot rejoining to listen
-    /// (its own leave sets auto-join looking, a few seconds later).
+    /// (its own leave sets auto-join looking, a few seconds later). Every call must be matched by one to
+    /// <see cref="MusicJoined"/>, even if this throws.
     /// </summary>
     public async Task MakeWayForMusicAsync(ulong guildId)
     {
-        _musicStarting[guildId] = true;
+        _musicStarting.AddOrUpdate(guildId, 1, (_, n) => n + 1);
         await StopAsync(guildId);
     }
 
-    /// <summary>Music has joined, or failed to. If it failed, auto-join can have the connection back.</summary>
+    /// <summary>A music join has finished, or failed. Once none are under way, auto-join can have the connection back
+    /// (it does nothing while music has it).</summary>
     public void MusicJoined(ulong guildId)
     {
-        _musicStarting.TryRemove(guildId, out _);
-        ScheduleAutoJoin(guildId, AfterLeavingDelay); // nothing happens while music has the connection
+        if (_musicStarting.AddOrUpdate(guildId, 0, (_, n) => Math.Max(0, n - 1)) == 0)
+        {
+            _musicStarting.TryRemove(new KeyValuePair<ulong, int>(guildId, 0));
+            ScheduleAutoJoin(guildId, AfterLeavingDelay);
+        }
     }
 
     /// <summary>Listening because it joined by itself (not because someone asked).</summary>
@@ -534,7 +543,7 @@ public sealed class VoiceListener
 
         // Staying out, or voice auto-join would bring it straight back.
         var autoJoins = (await _settings.GetAsync(user.Guild.Id)).AutoJoinsVoice;
-        if (!await StopAsync(user.Guild.Id, stayOut: true))
+        if (!await StopAsync(user.Guild.Id, stayOut: autoJoins))
         {
             return "I'm not listening anywhere right now.";
         }
