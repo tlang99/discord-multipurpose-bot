@@ -24,12 +24,45 @@ jobs:
         id: start
         run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
+      # The files the PR changes, handed to the reviewer up front. Only the PR's latest commit is checked out, with no
+      # history, so every file in it looks new: without this list the reviewer sometimes decided the PR "adds the
+      # whole bot" and reviewed code the PR never touched.
+      - name: List the changed files
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --name-only > "$RUNNER_TEMP/files.txt"
+          end="FILES_$(openssl rand -hex 8)"
+          {
+            echo "list<<$end"
+            head -n 300 "$RUNNER_TEMP/files.txt"
+            echo "$end"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
+
+            THE FILES THIS PR CHANGES (these, and only these, are what you review):
+            ${{ steps.files.outputs.list }}
+
+            How to read the changes:
+            - The working directory has only the PR's latest commit, with no git history, so every
+              file in it looks new. It isn't: the PR changes only the files listed above. Never
+              review the rest of the repo as if this PR added it.
+            - Get the changes with ONE plain command: `gh pr diff ${{ github.event.pull_request.number }}`.
+              Don't add pipes (`| head`), `2>&1`, `&&`, redirects or other commands: those are
+              blocked, and a blocked command gets you nothing.
+            - A long diff's output can be cut short. If it is, read the listed files with Read
+              and work from the part of the diff you did get. Don't re-run the diff another way.
+            - Read other files only for context (callers, existing helpers for the DRY check).
+              Every finding must be about lines this PR changes.
+            - Start the overall comment with one line saying how many changed files you reviewed,
+              e.g. "Reviewed 12 changed files." If you couldn't get the diff, say so there instead.
 
             Review this pull request, focusing on:
             - Correctness and potential bugs
