@@ -13,8 +13,8 @@ sees what it acted on, and anything it misheard) and replies to that.
   connection per server). `/settings voice-channel` limits it to one channel. Turn it off with `/settings feature` →
   Voice auto-join (or "@ModBot disable voice auto-join"). Then someone starts it by hand with `/voice listen`, or by
   asking the chatbot ("@ModBot listen in voice").
-- When it starts, it posts a notice in the voice channel's chat saying it's listening and how to stop it, and tells
-  anyone who joins the channel later the same.
+- It doesn't post "listening" or "stopped" notices in chat: the bot showing in the voice channel is the sign it's
+  listening. `/help` explains voice commands to anyone who asks.
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
   off for every server with `Voice:Chime`).
 - Speech is turned into text **on the machine running the bot** (Whisper). Nothing is sent to any other service.

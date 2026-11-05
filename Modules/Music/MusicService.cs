@@ -178,7 +178,7 @@ public class MusicService
         // it comes back once the music's done and the player has left.)
         if (GetPlayer(user.Guild.Id) is null && _voice.IsListening(user.Guild.Id))
         {
-            await _voice.StopForMusicAsync(user.Guild.Id);
+            await _voice.StopAsync(user.Guild.Id);
             await Task.Delay(TimeSpan.FromSeconds(1));
         }
 

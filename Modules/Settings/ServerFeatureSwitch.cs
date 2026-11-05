@@ -79,14 +79,14 @@ public class ServerFeatureSwitch
         // Voice requests go through the chatbot, so switching either off stops the listening.
         if (!on && feature is ServerFeature.VoiceCommands or ServerFeature.Chat && _voice.IsListening(guild.Id))
         {
-            await _voice.StopAsync(guild.Id, null);
+            await _voice.StopAsync(guild.Id);
             note = " I stopped listening and left voice.";
         }
 
         // Only the listening it started by itself: someone who asked for it can still have it.
         if (!on && feature == ServerFeature.VoiceAutoJoin && _voice.IsAutoListening(guild.Id))
         {
-            await _voice.StopAsync(guild.Id, null);
+            await _voice.StopAsync(guild.Id);
             note = " I stopped listening and left voice. `/voice listen` still works.";
         }
 

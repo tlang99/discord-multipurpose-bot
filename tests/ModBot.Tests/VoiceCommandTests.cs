@@ -118,7 +118,7 @@ public class VoiceAudioTests
         var left = Enumerable.Range(0, chime.Length / 4).Select(i => BitConverter.ToInt16(chime, i * 4)).ToArray();
         var right = Enumerable.Range(0, chime.Length / 4).Select(i => BitConverter.ToInt16(chime, i * 4 + 2)).ToArray();
 
-        Assert.Equal(0, chime.Length % 4); // whole stereo sample pairs
+        Assert.Equal(0, chime.Length % VoiceAudio.FrameBytes); // whole 20 ms frames, so none of it is held back
         Assert.InRange(VoiceAudio.DurationOf(chime.Length).TotalSeconds, 0.15, 0.4);
         Assert.Equal(left, right);
         Assert.InRange(left.Max(s => Math.Abs((int)s)), 1000, VoiceAudio.ChimeVolume * short.MaxValue + 1);

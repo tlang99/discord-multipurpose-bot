@@ -34,6 +34,9 @@ public static class VoiceAudio
     /// <summary>How long <paramref name="bytes"/> of Discord audio lasts.</summary>
     public static TimeSpan DurationOf(long bytes) => TimeSpan.FromSeconds((double)bytes / DiscordBytesPerSecond);
 
+    /// <summary>One 20 ms frame of Discord audio, the unit it's encoded and sent in.</summary>
+    public const int FrameBytes = DiscordBytesPerSecond / 50;
+
     /// <summary>The loudest the chime gets, as a share of full volume: soft, so it doesn't make anyone jump.</summary>
     public const double ChimeVolume = 0.2;
 
@@ -58,7 +61,9 @@ public static class VoiceAudio
             }
         }
 
-        var pcm = new byte[samples.Count * 4];
+        // Padded with silence to whole 20 ms frames: the audio encoder holds back a part-frame until more comes, which
+        // would cut off the end of the chime.
+        var pcm = new byte[(samples.Count * 4 + FrameBytes - 1) / FrameBytes * FrameBytes];
         for (var i = 0; i < samples.Count; i++)
         {
             // The same sample in both channels.
