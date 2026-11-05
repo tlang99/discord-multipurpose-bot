@@ -17,11 +17,24 @@ public class WakeWordTests
     [InlineData("Okay ModBot, what's playing?", "what's playing?")]
     [InlineData("ModBot, remind me in 20 minutes to check the oven.", "remind me in 20 minutes to check the oven")]
     [InlineData("Um, so, hey ModBot, play Hotel California.", "play Hotel California")]
-    // Exactly what speech-to-text heard in the voice test.
+    // Exactly what speech-to-text heard in the voice test: two requests, and only the first is taken.
     [InlineData("Hey ModBot, make an LFG for three players. Hey ModBot, make an LFG for four players.",
-        "make an LFG for three players. Hey ModBot, make an LFG for four players")]
+        "make an LFG for three players")]
+    [InlineData("ModBot, skip. ModBot, pause.", "skip")]
+    [InlineData("That was a good game. ModBot, show the queue.", "show the queue")] // a new sentence
     public void Finds_the_request_after_the_name(string heard, string request)
         => Assert.Equal(request, WakeWord.FindRequest(heard, Names));
+
+    [Fact]
+    public void A_short_nickname_isnt_a_wake_word()
+    {
+        // "ok dj, that's enough" is just talk, so a two-letter nickname would go off all the time. The username still
+        // works.
+        string[] names = ["Dj", "ModBot"];
+
+        Assert.Null(WakeWord.FindRequest("ok dj, that's enough", names));
+        Assert.Equal("skip", WakeWord.FindRequest("hey ModBot, skip", names));
+    }
 
     [Theory]
     [InlineData("Hey ModBot.")]

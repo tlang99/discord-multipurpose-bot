@@ -138,9 +138,10 @@ public partial class ChatHandler
             return;
         }
 
-        // Typed, a request during the cooldown gets a ⏳ on it. Said, there'd be nothing to put it on but a fresh post
-        // of what was heard, so it's just dropped: a chatty speaker or a noisy mic can't flood the channel.
-        if (IsCoolingDown(guild.Id, speaker.Id))
+        // The cooldown is checked (and counted) here, before anything's posted: typed, a request during it gets a ⏳,
+        // but said, there'd be nothing to put that on but a fresh post of what was heard. So it's just dropped, and a
+        // chatty speaker or a noisy mic can't flood the channel.
+        if (IsOnCooldown(guild.Id, speaker.Id))
         {
             return;
         }
@@ -156,15 +157,28 @@ public partial class ChatHandler
             return;
         }
 
-        await RespondAsync(allowed, new ChatRequest(channel, heard, speaker, request, request));
+        await RespondAsync(allowed, new ChatRequest(channel, heard, speaker, request, request, Spoken: true));
     }
 
     /// <summary>A request to the chatbot, typed or said.</summary>
     /// <param name="Message">What replies answer: the typed message, or the bot's post of what it heard.</param>
     /// <param name="Words">Just what they wrote (or said), for working out actions.</param>
     /// <param name="Question">What they wrote with a note for attachments, for the chatbot to answer.</param>
+    /// <param name="Spoken">Said in voice: its cooldown was already counted before posting what was heard.</param>
     private sealed record ChatRequest(SocketTextChannel Channel, IUserMessage Message, IUser Author, string Words,
-        string Question);
+        string Question, bool Spoken = false);
+
+    /// <summary>True (after a ⏳ on the message) if the asker has to wait. Counts the request otherwise.</summary>
+    private async Task<bool> MustWaitAsync(ChatRequest request)
+    {
+        if (request.Spoken || !IsOnCooldown(request.Channel.Guild.Id, request.Author.Id))
+        {
+            return false;
+        }
+
+        await ReactAsync(request.Message, "⏳");
+        return true;
+    }
 
     /// <summary>The server's settings, when <paramref name="author"/> gets an answer at all.</summary>
     private sealed record Allowed(GuildSettings Settings, ServerSettings Server, bool IsAdmin);
@@ -188,7 +202,7 @@ public partial class ChatHandler
 
     private async Task RespondAsync(Allowed allowed, ChatRequest request)
     {
-        var (channel, message, asker, words, question) = request;
+        var (channel, message, asker, words, question, _) = request;
         var (settings, server, isAdmin) = allowed;
         var guild = channel.Guild;
         var bot = guild.CurrentUser;
@@ -199,9 +213,17 @@ public partial class ChatHandler
         var newsNotify = change is null ? await _newsNotifications.ReadForGuildAsync(guild.Id, words) : null;
         if (asker is SocketGuildUser member && (change is not null || newsNotify is not null))
         {
-            if (IsOnCooldown(guild.Id, member.Id))
+            if (await MustWaitAsync(request))
             {
-                await ReactAsync(message, "⏳");
+                return;
+            }
+
+            if (request.Spoken)
+            {
+                // Said, it would run as whoever's mic picked it up: a friend in the room, a soundboard, or a
+                // mishearing ("enable" for "disable") could change the server's settings as an admin.
+                await ReplyAsync(message, "Server settings can only be changed by typing, so nobody can change them " +
+                                          "by talking near an admin's mic. Type it, or use `/settings`.");
             }
             else if (!isAdmin)
             {
@@ -230,9 +252,8 @@ public partial class ChatHandler
         if (VoiceRequestReader.Read(words) is { } voiceRequest && asker is SocketGuildUser voiceAsker &&
             (voiceRequest == VoiceRequest.Listen || _voice.IsListening(guild.Id)))
         {
-            if (IsOnCooldown(guild.Id, voiceAsker.Id))
+            if (await MustWaitAsync(request))
             {
-                await ReactAsync(message, "⏳");
                 return;
             }
 
@@ -258,9 +279,8 @@ public partial class ChatHandler
             return;
         }
 
-        if (IsOnCooldown(guild.Id, asker.Id))
+        if (await MustWaitAsync(request))
         {
-            await ReactAsync(message, "⏳");
             return;
         }
 
@@ -572,11 +592,6 @@ public partial class ChatHandler
             : string.Join("\n", new[] { embed.Title, embed.Description, embed.Footer?.Text }
                 .Concat(embed.Fields.SelectMany(f => new[] { f.Name, f.Value }))
                 .Where(s => !string.IsNullOrEmpty(s)));
-
-    /// <summary>True if the person would have to wait, without counting this as a question.</summary>
-    private bool IsCoolingDown(ulong guildId, ulong userId)
-        => _lastQuestion.TryGetValue((guildId, userId), out var last) &&
-           DateTimeOffset.UtcNow - last < TimeSpan.FromSeconds(Math.Max(0, _options.CooldownSeconds));
 
     /// <summary>Records the question if the person is allowed to ask now; true if they have to wait.</summary>
     private bool IsOnCooldown(ulong guildId, ulong userId)

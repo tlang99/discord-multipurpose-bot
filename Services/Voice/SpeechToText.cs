@@ -34,7 +34,10 @@ public sealed class SpeechToText : IDisposable
     }
 
     /// <summary>Why voice commands can't work on this bot (for the admin running it), or null if they can.</summary>
-    public string? Problem => _problem.Value;
+    public string? Problem => _loadProblem ?? _problem.Value;
+
+    /// <summary>Set when the model was there but wouldn't load (e.g. a damaged download).</summary>
+    private string? _loadProblem;
 
     /// <summary>What was said, or "" if nothing could be made out.</summary>
     /// <param name="samples">16 kHz mono (see <see cref="VoiceAudio.ToWhisperSamples"/>).</param>
@@ -49,7 +52,21 @@ public sealed class SpeechToText : IDisposable
         await _one.WaitAsync(cancellationToken);
         try
         {
-            _factory ??= WhisperFactory.FromPath(_modelPath);
+            if (_factory is null)
+            {
+                try
+                {
+                    _factory = WhisperFactory.FromPath(_modelPath);
+                }
+                catch (Exception ex)
+                {
+                    // Reported like a missing model, through Problem, rather than failing every sentence.
+                    _logger.LogWarning(ex, "Couldn't load the speech-to-text model at {Path}.", _modelPath);
+                    _loadProblem = $"The speech-to-text model at {_options.ModelPath} wouldn't load: run " +
+                                   "voice/setup.ps1 again (it replaces a damaged download).";
+                    return "";
+                }
+            }
             await using var processor = _factory.CreateBuilder()
                 .WithLanguage("en")
                 .WithPrompt(expect)

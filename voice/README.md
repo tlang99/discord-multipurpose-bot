@@ -9,10 +9,15 @@ sees what it acted on, and anything it misheard) and replies to that.
 
 - Each server has to turn it on: `/settings feature` → Voice commands (off by default). Then someone in a voice
   channel starts it with `/voice listen`, or by asking the chatbot ("@ModBot listen in voice").
-- When it starts, it posts a notice in the voice channel's chat saying it's listening and how to stop it.
+- When it starts, it posts a notice in the voice channel's chat saying it's listening and how to stop it, and tells
+  anyone who joins the channel later the same.
 - Speech is turned into text **on the machine running the bot** (Whisper). Nothing is sent to any other service.
-- No audio is kept: each sentence is turned into text, checked for the bot's name, and thrown away. Only what's said
-  after the name is acted on and posted. The log notes that a voice request happened, never what was said.
+- No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
+  the bot's name, and thrown away. Only what's said after the name is acted on and posted. The log notes that a voice
+  request happened, never what was said.
+- Server settings (turning features on or off, news notifications) can't be changed by voice, only by typing: a
+  friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
+- It only listens while the chatbot is on, since every request goes through it.
 - It stops when anyone in the channel says "hey ModBot, stop listening" or uses `/voice stop`, when everyone leaves,
   after `Voice:MaxListenMinutes` (3 hours by default), or when music starts.
 

@@ -9,7 +9,9 @@ using Microsoft.Extensions.Options;
 using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.EventHandlers;
+using ModBot.Models;
 using ModBot.Services.Moderation;
+using ModBot.Services.Settings;
 using ModBot.Services.Voice;
 
 namespace ModBot.Modules.Voice;
@@ -46,6 +48,8 @@ public sealed class VoiceListener
     private readonly SpeechToText _speech;
     private readonly IAudioService _audio;
     private readonly Lazy<ChatHandler> _chat;
+    private readonly ServerSettingsService _settings;
+    private readonly ChatOptions _chatOptions;
     private readonly VoiceOptions _options;
     private readonly ILogger<VoiceListener> _logger;
     private readonly ConcurrentDictionary<ulong, Session> _sessions = new();
@@ -53,12 +57,15 @@ public sealed class VoiceListener
     private readonly KeyedLock<ulong> _startStop = new();
 
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, IAudioService audio, Lazy<ChatHandler> chat,
-        IOptions<VoiceOptions> options, ILogger<VoiceListener> logger)
+        ServerSettingsService settings, IOptions<ChatOptions> chatOptions, IOptions<VoiceOptions> options,
+        ILogger<VoiceListener> logger)
     {
         _client = client;
         _speech = speech;
         _audio = audio;
         _chat = chat;
+        _settings = settings;
+        _chatOptions = chatOptions.Value;
         _options = options.Value;
         _logger = logger;
         _client.UserVoiceStateUpdated += OnVoiceStateUpdatedAsync;
@@ -84,6 +91,18 @@ public sealed class VoiceListener
             if (SetupProblem is { } problem)
             {
                 return $"Voice commands aren't set up on this bot yet. For whoever runs it: {problem}";
+            }
+
+            // Every voice request goes through the chatbot, so without it the bot would listen and do nothing.
+            if (!_chatOptions.IsEnabled)
+            {
+                return "Voice commands go through the chatbot, which is turned off in the bot's own settings.";
+            }
+
+            if (!await _settings.IsEnabledAsync(guild.Id, ServerFeature.Chat))
+            {
+                return "Voice commands go through the chatbot, which is off on this server. A server admin can turn " +
+                       "it on with `/settings feature`.";
             }
 
             if (user.VoiceChannel is not { } channel)
@@ -127,6 +146,19 @@ public sealed class VoiceListener
                 if (await Task.WhenAny(connecting, Task.Delay(ConnectTimeout)) != connecting)
                 {
                     await LeaveAsync(channel);
+                    // The join can still finish later: leave then too, or the bot would sit there without listening.
+                    Background.Run(_logger, async () =>
+                    {
+                        await connecting;
+                        await _startStop.RunAsync(guild.Id, async () =>
+                        {
+                            // Not if music has taken the connection meanwhile: leaving would stop it.
+                            if (!_sessions.ContainsKey(guild.Id) && !MusicIsPlaying(guild.Id))
+                            {
+                                await LeaveAsync(channel);
+                            }
+                        });
+                    }, LogLevel.Debug, "A timed-out voice join failed in guild {GuildId}.", guild.Id);
                     return $"Joining {channel.Mention} timed out - try again in a moment.";
                 }
 
@@ -160,7 +192,15 @@ public sealed class VoiceListener
                 // or moved is seen sooner, in OnVoiceStateUpdatedAsync.)
                 Background.Run(_logger, async () =>
                 {
-                    await Task.Delay(ReconnectGrace, session.Stopping.Token);
+                    try
+                    {
+                        await Task.Delay(ReconnectGrace, session.Stopping.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return; // stopped listening anyway
+                    }
+
                     if (voice.ConnectionState != ConnectionState.Connected)
                     {
                         await EndAsync(guild.Id, session,
@@ -171,6 +211,7 @@ public sealed class VoiceListener
             };
             foreach (var member in channel.ConnectedUsers)
             {
+                session.TryMarkToldListening(member.Id); // the notice below tells everyone already here
                 Listen(session, member.Id, member.AudioStream);
             }
 
@@ -272,6 +313,18 @@ public sealed class VoiceListener
             }
 
             return Task.CompletedTask;
+        }
+
+        // Someone joining after the notice: tell them too (once per session), so nobody's listened to unawares.
+        if (after.VoiceChannel?.Id == session.Channel.Id && before.VoiceChannel?.Id != session.Channel.Id &&
+            !member.IsBot && session.TryMarkToldListening(member.Id))
+        {
+            var name = member.Guild.CurrentUser.DisplayName;
+            Background.Run(_logger, () => PostAsync(session.ReplyChannel,
+                    $"🎙️ {member.Mention}, heads up: I'm listening in {session.Channel.Mention} for \"hey {name}\" " +
+                    "requests. Speech is turned into text on the bot's own computer and no audio is kept. " +
+                    $"\"Hey {name}, stop listening\" or `/voice stop` to stop."),
+                LogLevel.Debug, "Couldn't post a listening reminder in guild {GuildId}.", member.Guild.Id);
         }
 
         if (before.VoiceChannel?.Id == session.Channel.Id && after.VoiceChannel?.Id != session.Channel.Id)
@@ -434,6 +487,10 @@ public sealed class VoiceListener
     {
         private readonly ConcurrentDictionary<ulong, CancellationTokenSource> _readers = new();
         private readonly ConcurrentDictionary<ulong, DateTimeOffset> _wakeWords = new();
+        private readonly ConcurrentDictionary<ulong, bool> _toldListening = new();
+
+        /// <summary>True the first time for each person: they haven't been told yet that it's listening.</summary>
+        public bool TryMarkToldListening(ulong userId) => _toldListening.TryAdd(userId, true);
 
         public SocketGuild Guild { get; } = guild;
         public SocketVoiceChannel Channel { get; } = channel;

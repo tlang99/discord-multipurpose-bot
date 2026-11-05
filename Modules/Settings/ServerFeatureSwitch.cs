@@ -76,7 +76,8 @@ public class ServerFeatureSwitch
             }
         }
 
-        if (!on && feature == ServerFeature.VoiceCommands && _voice.IsListening(guild.Id))
+        // Voice requests go through the chatbot, so switching either off stops the listening.
+        if (!on && feature is ServerFeature.VoiceCommands or ServerFeature.Chat && _voice.IsListening(guild.Id))
         {
             await _voice.StopAsync(guild.Id, null);
             note = " I stopped listening and left voice.";
