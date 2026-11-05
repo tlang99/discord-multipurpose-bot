@@ -35,19 +35,44 @@ public static class TextTools
     public static string QuoteAsTyped(string value, int max)
     {
         var quoted = string.Join("\n", value.Trim().Split('\n').Select(line => "> " + EscapeLineStart(Escape(line.TrimEnd('\r')))));
-        var cut = Truncate(quoted, max);
-        if (cut.Length == quoted.Length)
+        return TruncateEscaped(quoted, max);
+    }
+
+    /// <summary><see cref="Truncate"/> for text that's already escaped: the cut never falls between a backslash and
+    /// the character it escapes. (Otherwise the backslash would escape the "…" and show as a stray "\".)</summary>
+    public static string TruncateEscaped(string escaped, int max)
+    {
+        var cut = Truncate(escaped, max);
+        if (cut.Length == escaped.Length)
         {
             return cut;
         }
 
-        // An odd number of backslashes right before the "…" means the cut fell between a backslash and the character
-        // it escaped, so the last one would escape the "…" and show as a stray "\".
+        // An odd number of backslashes right before the "…" means the last one was escaping a character that got cut.
         var body = cut[..^1];
         var backslashes = body.Length - body.TrimEnd('\\').Length;
         return backslashes % 2 == 1 ? body[..^1] + "…" : cut;
     }
 
+    /// <summary>What someone typed, shown in a code span exactly as typed (`like this`). Inside a code span escaping
+    /// doesn't work - a backslash shows as a backslash - so a backtick in the text is handled by the delimiters
+    /// instead: Discord's double-backtick span (`` a`b ``) can hold single backticks. Text with a double backtick
+    /// can't be shown that way, so its backticks become ˋ, which looks the same.</summary>
+    public static string Code(string value)
+    {
+        var text = value.Trim();
+        if (text.Contains("``"))
+        {
+            text = text.Replace('`', 'ˋ');
+        }
+
+        return text.Contains('`') ? $"`` {text} ``" : $"`{text}`";
+    }
+
+    /// <summary>Escapes markdown that only works at the start of a line, on a line <see cref="Escape"/> already ran
+    /// on. Format.Sanitize normally escapes "#" and ">" itself, so in practice only "-" (lists, "-#" small text) is
+    /// changed here; all three are checked so a Discord.Net update that stops escaping one doesn't open it up.
+    /// TextToolsTests pins the result either way.</summary>
     private static string EscapeLineStart(string escapedLine)
     {
         var start = escapedLine.TrimStart();

@@ -29,12 +29,16 @@ public static class LfgMessages
 
     /// <summary>The game and playlist the post is for ("Call of Duty: MW4 · Ranked Play"), either one alone, or "LFG"
     /// when neither is set. Both names are the server's own (/settings lfg-game), so they're escaped for Discord
-    /// formatting.</summary>
+    /// formatting. Escaping can double their length, so it's cut to leave room in the card's title (Discord refuses a
+    /// title over 256 characters) for the rest of it ("🎮 … — looking for 5 more players").</summary>
     public static string Heading(LfgDetails details)
     {
         var parts = new[] { details.Game, details.Playlist }.OfType<string>().Select(TextTools.Escape).ToList();
-        return parts.Count == 0 ? "LFG" : string.Join(" · ", parts);
+        return parts.Count == 0 ? "LFG" : TextTools.TruncateEscaped(string.Join(" · ", parts), MaxHeadingLength);
     }
+
+    /// <summary>The longest <see cref="Heading"/>: a title's limit, less room for the longest text around it.</summary>
+    public const int MaxHeadingLength = EmbedBuilder.MaxTitleLength - 64;
 
     /// <summary>"Ranked Play squad in Call of Duty: MW4", "Ranked Play squad", or just "squad".</summary>
     public static string Squad(LfgDetails details)

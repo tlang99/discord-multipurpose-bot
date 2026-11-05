@@ -112,7 +112,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         return list.Count == 0
             ? $"This server hasn't set up any {what}s for LFG yet - a server admin can add them with " +
               "`/settings lfg-game`. Leave it empty to post without one."
-            : $"`{typed.Trim().Replace("`", "")}` isn't one of this server's {what}s. Pick one of: " +
+            : $"{TextTools.Code(typed)} isn't one of this server's {what}s. Pick one of: " +
               $"{string.Join(", ", list.Select(n => $"**{TextTools.Escape(n)}**"))}.";
     }
 

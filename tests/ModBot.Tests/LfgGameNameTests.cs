@@ -72,6 +72,26 @@ public class LfgGameNameTests
         => Assert.Equal(@"\*\*Big\*\* \[game\]", LfgMessages.Heading(new LfgDetails(Game: "**Big** [game]")));
 }
 
+public class LfgCardTitleTests
+{
+    [Fact]
+    public void Longest_names_full_of_markdown_still_fit_the_title()
+    {
+        // Every character escaped, so both names double in length.
+        var name = new string('*', LfgGameProfileText.MaxGameNameLength);
+        var post = new LfgPost
+        {
+            HostId = 1, Size = 6, Members = [1], Details = new LfgDetails(Playlist: name, Game: name),
+        };
+
+        // Building the embed throws if the title is over Discord's limit.
+        var title = LfgMessages.OpenEmbed(post).Title;
+
+        Assert.True(title.Length <= Discord.EmbedBuilder.MaxTitleLength, $"{title.Length} characters");
+        Assert.True(LfgMessages.Heading(post.Details).Length <= LfgMessages.MaxHeadingLength);
+    }
+}
+
 /// <summary>What members type into an LFG post ends up in an embed, where [text](url) would be a link.</summary>
 public class LfgNoteEscapingTests
 {

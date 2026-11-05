@@ -88,7 +88,7 @@ public class DiscordReminderSender : IReminderSender
 
             var server = _client.GetGuild(reminder.GuildId)?.Name ?? "a server";
             var dm = await user.CreateDMChannelAsync();
-            await dm.SendMessageAsync($"⏰ Reminder you set in **{Format.Sanitize(server)}** (I couldn't post it there): " +
+            await dm.SendMessageAsync($"⏰ Reminder you set in **{TextTools.Escape(server)}** (I couldn't post it there): " +
                                       $"{reminder.Text}{lateNote}", allowedMentions: AllowedMentions.None,
                 flags: MessageFlags.SuppressEmbeds);
             return true;

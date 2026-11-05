@@ -65,6 +65,27 @@ public class TextToolsTests
     /// markdown, so it's left alone.
     /// </summary>
     [Theory]
+    [InlineData("Hardpoint", "`Hardpoint`")]
+    [InlineData("  hp  ", "`hp`")]
+    [InlineData("a`b", "`` a`b ``")]
+    [InlineData("a``b", "`aˋˋb`")]
+    public void Code_shows_text_as_typed_even_with_backticks(string typed, string expected)
+        => Assert.Equal(expected, TextTools.Code(typed));
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public void TruncateEscaped_never_leaves_a_stray_backslash(int max)
+    {
+        var cut = TextTools.TruncateEscaped(TextTools.Escape("[[[[[[[[[["), max);
+
+        Assert.True(cut.Length <= max);
+        var body = cut[..^1];
+        Assert.Equal(0, (body.Length - body.TrimEnd('\\').Length) % 2);
+    }
+
+    [Theory]
     [InlineData("* a list", @"> \* a list")]
     [InlineData("- a list", @"> \- a list")]
     [InlineData("# heading", @"> \# heading")]
