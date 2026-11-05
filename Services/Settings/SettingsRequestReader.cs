@@ -35,6 +35,7 @@ public static partial class SettingsRequestReader
             "poll" or "polls" => ServerFeature.Polls,
             "reminder" or "reminders" => ServerFeature.Reminders,
             "voice commands" or "voice command" or "voice control" => ServerFeature.VoiceCommands,
+            "web search" or "web searches" or "searching" or "search" => ServerFeature.WebSearch,
             _ => null,
         };
 
@@ -54,7 +55,7 @@ public static partial class SettingsRequestReader
     private const string AutoJoinName = @"(?:voice\s+)?auto[\s-]?join(?:ing)?(?:\s+voice)?";
 
     private const string Feature =
-        @"(?<feature>" + AutoJoinName + @"|chat\s*bot|the\s+bot\s+chat|ai\s+chat|chat\s+actions|actions|chat|music|lfgs?|looking\s+for\s+group|polls?|reminders?|voice\s+commands?|voice\s+control)";
+        @"(?<feature>" + AutoJoinName + @"|chat\s*bot|the\s+bot\s+chat|ai\s+chat|chat\s+actions|actions|chat|music|lfgs?|looking\s+for\s+group|polls?|reminders?|voice\s+commands?|voice\s+control|web\s+search(?:es)?|searching|search)";
 
     private const string Here = @"(?:for\s+(?:this|the)\s+server|on\s+this\s+server|server[\s-]?wide|here|feature)";
 

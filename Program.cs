@@ -16,6 +16,7 @@ using ModBot.Services.ContentModeration;
 using ModBot.Services.Lfg;
 using ModBot.Services.Moderation;
 using ModBot.Services.News;
+using ModBot.Services.Search;
 using ModBot.Services.Storage;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -50,6 +51,7 @@ foreach (var (variable, key) in new[]
     ("SIGHTENGINE_API_SECRET", $"{SightengineOptions.SectionName}:ApiSecret"),
     ("LAVALINK_PASSWORD", $"{MusicOptions.SectionName}:LavalinkPassword"),
     ("OLLAMA_API_KEY", $"{ChatOptions.SectionName}:ApiKey"),
+    ("OLLAMA_SEARCH_API_KEY", $"{SearchOptions.SectionName}:ApiKey"),
 })
 {
     if (Environment.GetEnvironmentVariable(variable) is { } value && !string.IsNullOrWhiteSpace(value))
@@ -73,6 +75,21 @@ BindOptions<LfgOptions>(LfgOptions.SectionName);
 BindOptions<ReminderOptions>(ReminderOptions.SectionName);
 BindOptions<PollOptions>(PollOptions.SectionName);
 BindOptions<VoiceOptions>(VoiceOptions.SectionName);
+
+// Web search uses an Ollama account key, the same kind the chatbot uses for ollama.com, so one key does both.
+var searchOptions = BindOptions<SearchOptions>(SearchOptions.SectionName);
+if (string.IsNullOrWhiteSpace(searchOptions.ApiKey))
+{
+    searchOptions.ApiKey = chatOptions.ApiKey;
+}
+
+builder.Services.PostConfigure<SearchOptions>(options =>
+{
+    if (string.IsNullOrWhiteSpace(options.ApiKey))
+    {
+        options.ApiKey = chatOptions.ApiKey;
+    }
+});
 
 builder.Services.AddSingleton(new DiscordSocketConfig
 {
@@ -191,6 +208,23 @@ builder.Services.AddSingleton<AutoModerationHandler>();
 builder.Services.AddSingleton<ChatRequestLimiter>();
 builder.Services.AddSingleton<ChatPersonality>();
 builder.Services.AddSingleton<ChatActionParser>();
+
+// Web search: Ollama's web search API (only the search words are sent), with the chatbot writing the answer.
+builder.Services.AddHttpClient<IWebSearch, OllamaWebSearch>(client =>
+{
+    if (Uri.TryCreate(searchOptions.Url.TrimEnd('/') + "/", UriKind.Absolute, out var searchUri))
+    {
+        client.BaseAddress = searchUri;
+    }
+
+    // The answerer applies its own, shorter limit; this is only a backstop.
+    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(searchOptions.TimeoutSeconds, 5, 120) + 10);
+    if (!string.IsNullOrWhiteSpace(searchOptions.ApiKey))
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", searchOptions.ApiKey);
+    }
+});
+builder.Services.AddSingleton<WebSearchAnswerer>();
 builder.Services.AddSingleton<INewsWriter, NewsWriter>();
 builder.Services.AddSingleton<ChatHandler>();
 
@@ -237,6 +271,13 @@ if (host.Services.GetRequiredService<ModBot.Services.Voice.SpeechToText>().Probl
 {
     host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Voice")
         .LogInformation("Voice commands aren't available: {Problem}", voiceProblem);
+}
+
+// Web search is optional too: without a key, /search and "search for" just say it isn't set up.
+if (host.Services.GetRequiredService<WebSearchAnswerer>().SetupProblem is { } searchProblem)
+{
+    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Search")
+        .LogInformation("Web search isn't available: {Problem}", searchProblem);
 }
 
 if (missingAppSettings)

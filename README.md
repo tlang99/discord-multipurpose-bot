@@ -126,6 +126,18 @@ note.
 > SoundCloud is currently unsupported: Lavalink can't play its audio format yet, so `/play` explains that for
 > SoundCloud links.
 
+**Web search** — `/search question: …`, "@bot search for …" / "look up …" / "google …", or the same said in voice
+("hey ModBot, look up …"). The bot searches the web through [Ollama's web search](https://docs.ollama.com/capabilities/web-search),
+then the chatbot writes a short answer from the results in the server's personality, with the sources as links in an
+embed underneath, like a news post. Only searches when asked in so many words; for anything else that needs current
+information, the chatbot says so and suggests a search. Answers to voice requests go in the voice channel's chat.
+- **Privacy:** only the search words are sent to ollama.com. The answer is written by the chatbot's own model (on
+  this machine, unless `Chat:OllamaUrl` points at ollama.com), and the log notes that a search happened, never what
+  for.
+- **Limits:** one search per person every 30 seconds (`Search:CooldownSeconds`), and each server can turn it off with
+  `/settings feature`. If the chatbot can't be reached, the results themselves are shown instead of an answer.
+- Needs a free Ollama account key, see [setup step 6](#6-optional-set-up-ai-chat).
+
 **Voice commands** — off until a server turns them on (`/settings feature`). Then `/voice listen` (or "@bot listen in
 voice") has the bot join your voice channel, or with **Voice auto-join** also turned on it joins by itself when people
 are there (`/settings voice-channel` limits that to one channel). It posts a one-line "listening" note on joining and
@@ -246,9 +258,9 @@ Server). appsettings.json only holds the defaults for servers that haven't chang
 saved in `data/server-settings.json`:
 - `/settings show` — everything at a glance: which features are on, the music and LFG channels, the LFG ping role and
   whether auto-mod is on.
-- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls, reminders, voice commands or voice
-  auto-join on or off. Everything starts on except voice commands and voice auto-join (which also needs voice
-  commands on).
+- `/settings feature` — turn the chatbot, chatbot actions, music, LFG, polls, reminders, web search, voice commands
+  or voice auto-join on or off. Everything starts on except voice commands and voice auto-join (which also needs
+  voice commands on).
   Turning music off stops what's playing, and turning voice commands off stops listening. Things already underway
   still finish: LFG posts can be cancelled, polls ended, and reminders are delivered.
 - `/settings voice-channel` — voice auto-join only joins this voice channel; leave it out for whichever one is
@@ -350,6 +362,8 @@ Services/
   Polls/           PollRules (Discord's poll limits) and PollRequestReader (poll requests in chat)
   Settings/        ServerSettingsService (each server's /settings, with the defaults) and SettingsRequestReader
   Chat/            IChatService - gets a chatbot reply from a model, implemented against Ollama's chat API
+  Search/          IWebSearch (Ollama's web search API), SearchRequestReader ("search for …" in chat) and the
+                   answerer that writes the answer and builds the sources embed
 EventHandlers/     Gateway event handlers (AutoModerationHandler and ChatHandler, both on MessageReceived)
 Modules/           Slash-command modules, grouped by feature folder (auto-discovered at startup)
   Music/           Music commands, the standing queue (turns, vote skip, the pinned menu) and the Lavalink player that
@@ -517,6 +531,12 @@ first (`Chat:TimeoutSeconds`, default 120, allows for that).
 `dotnet user-secrets set "Chat:ApiKey" "<api-key>"` or the `OLLAMA_API_KEY` environment variable. Without a key the
 bot logs a warning at startup.
 
+**Web search (optional):** `/search` and "search for …" use Ollama's web search, which needs a free Ollama account
+key even if the chatbot runs locally. Create one at [ollama.com/settings/keys](https://ollama.com/settings/keys) and
+set it with `dotnet user-secrets set "Search:ApiKey" "<api-key>"` or the `OLLAMA_SEARCH_API_KEY` environment
+variable. If you already set `Chat:ApiKey` / `OLLAMA_API_KEY` for Ollama's cloud, search uses that one. Without a key,
+`/search` says it isn't set up and everything else works as before.
+
 ### 7. Run it
 
 The first time only, build the patched Discord.Net the bot uses (Discord.Net 3.20.2 plus an unreleased voice fix,
@@ -581,6 +601,7 @@ somewhere else.
 | AI chat (mention the bot) | — | Send Messages; Read Message History for context; Add Reactions for the ⏳ cooldown hint |
 | `/remind`, `/reminders list`, `/reminders cancel` | — (you can only see and cancel your own) | Send Messages in the channel it's set in |
 | `/settings` | Manage Server | Embed Links in a channel picked with `/settings channel` |
+| `/search` | — | Send Messages, Embed Links (for the sources) |
 | `/poll`, **End poll** | Send Messages and Create Polls in the channel (ending someone else's poll: Move Members or Manage Messages) | Send Messages, Create Polls; Read Message History for "end my poll" in chat |
 
 `/kick`, `/ban`, `/timeout` and `/untimeout` also follow Discord's role order: you can only use them on members whose

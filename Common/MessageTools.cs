@@ -11,6 +11,14 @@ public static class MessageTools
     public static string Link(ulong guildId, ulong channelId, ulong messageId)
         => $"https://discord.com/channels/{guildId}/{channelId}/{messageId}";
 
+    /// <summary>All the text in an embed (title, description, fields, footer), for the word filter.</summary>
+    public static string EmbedText(Embed? embed)
+        => embed is null
+            ? ""
+            : string.Join("\n", new[] { embed.Title, embed.Description, embed.Footer?.Text }
+                .Concat(embed.Fields.SelectMany(f => new[] { f.Name, f.Value }))
+                .Where(s => !string.IsNullOrEmpty(s)));
+
     /// <summary>Pins <paramref name="message"/>; false (and logged) if Discord refuses, e.g. without Pin
     /// Messages.</summary>
     /// <param name="what">For the log, e.g. "the music menu".</param>

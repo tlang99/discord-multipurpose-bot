@@ -107,6 +107,7 @@ public class ServerSettingsService
         ServerFeature.Lfg => "LFG",
         ServerFeature.Polls => "Polls",
         ServerFeature.Reminders => "Reminders",
+        ServerFeature.WebSearch => "Web search",
         ServerFeature.VoiceCommands => "Voice commands",
         ServerFeature.VoiceAutoJoin => "Voice auto-join",
         _ => feature.ToString(),

@@ -16,6 +16,7 @@ using ModBot.Services.Moderation;
 using ModBot.Services.News;
 using ModBot.Services.Polls;
 using ModBot.Services.Reminders;
+using ModBot.Services.Search;
 using ModBot.Services.Settings;
 using ModBot.Services.Storage;
 using ModBot.Services.Voice;
@@ -45,7 +46,9 @@ public partial class ChatHandler
         "ended a poll: those requests are handled separately, so if someone asks how, tell them to ask you directly " +
         "(e.g. \"play <song>\", \"add <song> to the queue\", \"skip this\", \"show the queue\", \"start the music\", " +
         "\"make an LFG for ranked\", \"remind me in 20 minutes to check the oven\" - reminders need a time - \"make a " +
-        "poll: what should we play? ranked, casual or zombies\" or \"end my poll\") or see /help. How the " +
+        "poll: what should we play? ranked, casual or zombies\" or \"end my poll\") or see /help. You can't look " +
+        "things up online by yourself: for anything that needs current information (news, patch notes, prices, " +
+        "scores), say you don't know for sure and tell them to ask you to \"search for <topic>\" or use /search. How the " +
         "music works: there's one standing queue anyone can add to any time, even when nothing's playing; songs play " +
         "in turns, one from each person; skipping a song takes votes from more than half the listeners, unless you " +
         "picked it; and there's a pinned music menu with buttons in the music channel.";
@@ -63,6 +66,7 @@ public partial class ChatHandler
     private readonly NewsNotifications _newsNotifications;
     private readonly ChatPersonality _personality;
     private readonly VoiceListener _voice;
+    private readonly WebSearchAnswerer _search;
     private readonly ChatOptions _options;
     private readonly ILogger<ChatHandler> _logger;
     private readonly ConcurrentDictionary<(ulong GuildId, ulong UserId), DateTimeOffset> _lastQuestion = new();
@@ -72,8 +76,10 @@ public partial class ChatHandler
         ReminderService reminders, PollPoster polls,
         IGuildSettingsStore settingsStore, ServerSettingsService serverSettings, ServerFeatureSwitch featureSwitch,
         NewsNotifications newsNotifications,
-        ChatPersonality personality, VoiceListener voice, IOptions<ChatOptions> options, ILogger<ChatHandler> logger)
+        ChatPersonality personality, VoiceListener voice, WebSearchAnswerer search, IOptions<ChatOptions> options,
+        ILogger<ChatHandler> logger)
     {
+        _search = search;
         _chat = chat;
         _actionParser = actionParser;
         _musicControls = musicControls;
@@ -366,6 +372,13 @@ public partial class ChatHandler
                         var music = await RunMusicControlAsync(action, (SocketGuildUser)asker, channel);
                         (text, suppressEmbeds, embed) = (music.Text ?? "", music.SuppressEmbeds, music.Embed);
                     }
+                    else if (action is WebSearchAction search)
+                    {
+                        // The answer in the server's personality, its sources in an embed under it.
+                        var found = await _search.AnswerAsync(guild.Id, guild.Name, bot.DisplayName, asker.Id,
+                            search.Query);
+                        (text, embed) = (found.Text, found.Embed);
+                    }
                     else
                     {
                         (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)asker, channel,
@@ -392,8 +405,9 @@ public partial class ChatHandler
                     return;
                 }
 
-                // Song and playlist titles are third-party text, so action replies follow the word rules too.
-                if (TextFilter.FindViolation(text + "\n" + EmbedText(embed), settings) is not null)
+                // Song and playlist titles, and search results and answers, are third-party text, so action replies
+                // follow the word rules too.
+                if (TextFilter.FindViolation(text + "\n" + MessageTools.EmbedText(embed), settings) is not null)
                 {
                     text = action is PlayMusicAction or MusicControlAction
                         ? "My reply named a song whose title breaks this server's word filter, so I won't repeat it " +
@@ -530,6 +544,7 @@ public partial class ChatHandler
         CreateLfgAction => ServerFeature.Lfg,
         SetReminderAction => ServerFeature.Reminders,
         CreatePollAction or UnclearPollAction => ServerFeature.Polls,
+        WebSearchAction => ServerFeature.WebSearch,
         _ => null,
     };
 
@@ -613,14 +628,6 @@ public partial class ChatHandler
                 return MusicReply.Fail("I'm not sure how to do that yet.");
         }
     }
-
-    /// <summary>All the text in an embed, for the word filter.</summary>
-    private static string EmbedText(Embed? embed)
-        => embed is null
-            ? ""
-            : string.Join("\n", new[] { embed.Title, embed.Description, embed.Footer?.Text }
-                .Concat(embed.Fields.SelectMany(f => new[] { f.Name, f.Value }))
-                .Where(s => !string.IsNullOrEmpty(s)));
 
     /// <summary>Records the question if the person is allowed to ask now; true if they have to wait.</summary>
     private bool IsOnCooldown(ulong guildId, ulong userId)

@@ -14,6 +14,10 @@ public enum ServerFeature
     Polls,
     Reminders,
 
+    /// <summary>Looking things up on the web (/search, "@bot search for …"). Only the search words are sent off the
+    /// machine, to Ollama's web search; works once whoever runs the bot sets a key.</summary>
+    WebSearch,
+
     /// <summary>Listening in voice for "hey ModBot". Off until a server turns it on (<see cref="ServerSettings.IsOptIn"/>),
     /// since it means the bot hearing the voice channel.</summary>
     VoiceCommands,

@@ -10,6 +10,7 @@ using ModBot.Modules.Lfg;
 using ModBot.Modules.Voice;
 using ModBot.Services.Chat;
 using ModBot.Services.Lfg;
+using ModBot.Services.Search;
 using ModBot.Services.Settings;
 using ModBot.Services.Storage;
 
@@ -32,10 +33,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     private readonly ChatOptions _chat;
     private readonly ChatPersonality _personality;
     private readonly VoiceListener _voice;
+    private readonly WebSearchAnswerer _search;
     private readonly ILogger<SettingsModule> _logger;
 
     public SettingsModule(ServerSettingsService settings, ServerFeatureSwitch featureSwitch,
         IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ChatPersonality personality, VoiceListener voice,
+        WebSearchAnswerer search,
         ILogger<SettingsModule> logger)
     {
         _settings = settings;
@@ -44,6 +47,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         _chat = chat.Value;
         _personality = personality;
         _voice = voice;
+        _search = search;
         _logger = logger;
     }
 
@@ -57,6 +61,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("LFG")] Lfg = ServerFeature.Lfg,
         [ChoiceDisplay("Polls")] Polls = ServerFeature.Polls,
         [ChoiceDisplay("Reminders")] Reminders = ServerFeature.Reminders,
+        [ChoiceDisplay("Web search (/search, \"search for...\")")] WebSearch = ServerFeature.WebSearch,
         [ChoiceDisplay("Voice commands (say my name in voice; off by default)")]
         VoiceCommands = ServerFeature.VoiceCommands,
         [ChoiceDisplay("Voice auto-join (joins voice by itself; off by default)")]
@@ -83,7 +88,8 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             var on = server.IsEnabled(feature);
             var note = feature is ServerFeature.Chat or ServerFeature.ChatActions && !_chat.IsEnabled
                 ? " (but the chatbot is off for every server in the bot's own settings)"
-                : feature == ServerFeature.VoiceCommands && on && _voice.SetupProblem is not null
+                : feature is ServerFeature.VoiceCommands && on && _voice.SetupProblem is not null ||
+                  feature is ServerFeature.WebSearch && on && _search.SetupProblem is not null
                     ? " (but not set up on this bot yet)"
                     : feature == ServerFeature.VoiceAutoJoin && on && !server.IsEnabled(ServerFeature.VoiceCommands)
                         ? " (once voice commands are on)"
