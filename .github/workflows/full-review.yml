@@ -61,8 +61,15 @@ jobs:
           # Every tracked file outside these (tests, docs, the upstream Discord.Net patch, git settings) must be in
           # exactly one area.
           echo "$all" | jq -r '.[].paths' | tr ' ' '\n' | sed '/^$/d' | while read -r path; do
+            # A path matching nothing (a renamed or deleted folder) would quietly shrink an area.
+            if [ -z "$(git ls-files -- "$path")" ]; then
+              echo "::error::Review area path \"$path\" matches no file (renamed or deleted?). Fix it in full-review.yml." >&2
+              exit 1
+            fi
             git ls-files -- "$path"
           done | sort > covered.txt
+          # The loop above runs in a pipe, so its exit doesn't stop the step: check it here.
+          if [ "${PIPESTATUS[4]}" -ne 0 ]; then exit 1; fi
           git ls-files | grep -vE '^(tests/|README\.md$|LICENSE\.md$|discord-net-patch/pr3288\.patch$|\.git(attributes|ignore)$)' \
             | sort > tracked.txt
           missing=$(comm -23 tracked.txt <(sort -u covered.txt))
@@ -253,11 +260,16 @@ jobs:
           # The review is model output from reading repo text, and this issue is public. Refuse anything that looks
           # like a token or key (in case text in the repo talked the reviewer into copying one), and defuse every @
           # with an invisible character after it, so nothing in the review can ping a real account.
-          if grep -qE '(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY)' full-review.md; then
+          # GitHub, Anthropic and Discord bot tokens, and private keys.
+          secrets='gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}'
+          secrets="$secrets|[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}|-----BEGIN [A-Z ]*PRIVATE KEY"
+          if grep -qE "($secrets)" full-review.md; then
             echo "::error::The review contains something that looks like a token or key, so it wasn't posted. Check the artifact."
             exit 1
           fi
           sed -i 's/@/@\xe2\x80\x8b/g' full-review.md
+          # Images become plain links, so the review can't load anything (a tracking pixel) when the issue is viewed.
+          sed -i 's/!\[/[/g' full-review.md
 
           # --force: fine if it already exists.
           gh label create review --repo "$REPO" --color 5319e7 --force \
