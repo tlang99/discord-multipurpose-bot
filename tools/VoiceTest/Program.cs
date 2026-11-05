@@ -52,11 +52,16 @@ var client = new DiscordSocketClient(new DiscordSocketConfig
     GatewayIntents = GatewayIntents.Guilds | GatewayIntents.GuildVoiceStates | GatewayIntents.GuildMembers,
     AlwaysDownloadUsers = true,
     EnableVoiceDaveEncryption = true,
-    LogLevel = LogSeverity.Warning,
+    LogLevel = LogSeverity.Debug,
 });
 client.Log += m =>
 {
-    Console.WriteLine($"[discord] {m.Severity}: {m.Message} {m.Exception?.Message}");
+    // Everything from the voice connection (that's what's being tested), and only problems from the rest.
+    if (m.Source.StartsWith("Audio", StringComparison.OrdinalIgnoreCase) || m.Severity <= LogSeverity.Warning)
+    {
+        Log($"[{m.Source}] {m.Severity}: {m.Message} {m.Exception?.Message}");
+    }
+
     return Task.CompletedTask;
 };
 
@@ -64,6 +69,28 @@ var audio = new ConcurrentDictionary<ulong, MemoryStream>(); // per speaker: 48 
 var names = new ConcurrentDictionary<ulong, string>();
 var done = new TaskCompletionSource<bool>();
 var started = 0;
+SocketVoiceChannel? joined = null;
+
+// However the tool ends (Ctrl+C, closing the window), leave the channel and close the session properly. A killed
+// session keeps the bot showing in the channel until Discord times it out.
+async Task ShutDownAsync()
+{
+    if (Interlocked.Exchange(ref joined, null) is { } channel)
+    {
+        Log("Leaving the channel...");
+        await Task.WhenAny(channel.DisconnectAsync(), Task.Delay(TimeSpan.FromSeconds(5)));
+    }
+
+    await Task.WhenAny(client.StopAsync(), Task.Delay(TimeSpan.FromSeconds(5)));
+}
+
+Console.CancelKeyPress += (_, e) =>
+{
+    e.Cancel = true;
+    Log("Stopping...");
+    done.TrySetResult(false);
+};
+AppDomain.CurrentDomain.ProcessExit += (_, _) => ShutDownAsync().Wait(TimeSpan.FromSeconds(10));
 
 client.Ready += () =>
 {
@@ -78,7 +105,7 @@ client.Ready += () =>
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed: {ex}");
+                Log($"Failed: {ex}");
                 done.TrySetResult(false);
             }
         });
@@ -87,10 +114,19 @@ client.Ready += () =>
     return Task.CompletedTask;
 };
 
+Log("Logging in...");
 await client.LoginAsync(TokenType.Bot, token);
 await client.StartAsync();
-var ok = await done.Task;
-await client.StopAsync();
+
+// A hard limit, in case something hangs: never stay in the channel much longer than asked.
+var finished = await Task.WhenAny(done.Task, Task.Delay(TimeSpan.FromSeconds(seconds + 60)));
+var ok = finished == done.Task && done.Task.Result;
+if (finished != done.Task)
+{
+    Log("Took far too long - giving up.");
+}
+
+await ShutDownAsync();
 await client.LogoutAsync();
 
 if (!ok)
@@ -106,23 +142,33 @@ async Task<bool> ListenAsync()
     var guild = client.GetGuild(guildId);
     if (guild?.GetVoiceChannel(channelId) is not { } channel)
     {
-        Console.WriteLine("The bot isn't in that server, or that isn't a voice channel.");
+        Log("The bot isn't in that server, or that isn't a voice channel.");
         return false;
     }
 
     if (guild.CurrentUser.VoiceChannel is not null)
     {
         // Lavalink would lose its connection (it's the same bot), so don't take over a channel music is using.
-        Console.WriteLine($"The bot is already in voice in {guild.Name} (#{guild.CurrentUser.VoiceChannel.Name}). " +
-                          "Stop the music there first.");
+        Log($"The bot is already in voice in {guild.Name} (#{guild.CurrentUser.VoiceChannel.Name}). " +
+            "Stop the music there, or disconnect it, first.");
         return false;
     }
 
-    Console.WriteLine($"Joining #{channel.Name} in {guild.Name}...");
+    Log($"Joining #{channel.Name} in {guild.Name}...");
+    joined = channel;
     // Muted (it never talks) but not deafened, or Discord sends it nothing.
-    var voice = await channel.ConnectAsync(selfDeaf: false, selfMute: true);
+    var connecting = channel.ConnectAsync(selfDeaf: false, selfMute: true);
+    if (await Task.WhenAny(connecting, Task.Delay(TimeSpan.FromSeconds(20))) != connecting)
+    {
+        Log("Joining never finished (20 seconds). The voice log lines above show how far it got.");
+        return false;
+    }
+
+    var voice = await connecting;
+    Log("Joined.");
     var stop = new CancellationTokenSource();
     var readers = new ConcurrentBag<Task>();
+    var frames = new ConcurrentDictionary<ulong, int>();
 
     void Listen(ulong userId, AudioInStream? stream)
     {
@@ -132,6 +178,7 @@ async Task<bool> ListenAsync()
         }
 
         names[userId] = user.DisplayName;
+        Log($"Listening to {user.DisplayName}.");
         readers.Add(Task.Run(async () =>
         {
             var buffer = audio.GetOrAdd(userId, _ => new MemoryStream());
@@ -140,6 +187,7 @@ async Task<bool> ListenAsync()
                 while (!stop.IsCancellationRequested)
                 {
                     var frame = await stream.ReadFrameAsync(stop.Token);
+                    frames.AddOrUpdate(userId, 1, (_, n) => n + 1);
                     lock (buffer)
                     {
                         buffer.Write(frame.Payload);
@@ -157,18 +205,29 @@ async Task<bool> ListenAsync()
         Listen(userId, stream);
         return Task.CompletedTask;
     };
+    voice.SpeakingUpdated += (userId, speaking) =>
+    {
+        Log($"{guild.GetUser(userId)?.DisplayName ?? userId.ToString()} {(speaking ? "started" : "stopped")} talking.");
+        return Task.CompletedTask;
+    };
     foreach (var user in channel.ConnectedUsers)
     {
         Listen(user.Id, user.AudioStream);
     }
 
-    Console.WriteLine($"Listening for {seconds} seconds - say something! (e.g. \"hey {guild.CurrentUser.DisplayName}, " +
-                      "make an LFG for ranked\")");
-    await Task.Delay(TimeSpan.FromSeconds(seconds));
+    Log($"Listening for {seconds} seconds - say something! (e.g. \"hey {guild.CurrentUser.DisplayName}, make an " +
+        "LFG for ranked\")");
+    for (var waited = 0; waited < seconds && !done.Task.IsCompleted; waited += 5)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(Math.Min(5, seconds - waited)));
+        // Audio arrives as 20 ms frames, so 50 a second while someone talks.
+        Log("Audio so far: " + (frames.IsEmpty
+            ? "none"
+            : string.Join(", ", frames.Select(f => $"{names.GetValueOrDefault(f.Key, "?")} {f.Value / 50.0:0.0}s"))));
+    }
+
     stop.Cancel();
-    await Task.WhenAll(readers);
-    await channel.DisconnectAsync();
-    Console.WriteLine("Left the channel.");
+    await Task.WhenAny(Task.WhenAll(readers), Task.Delay(TimeSpan.FromSeconds(3)));
     return true;
 }
 
@@ -233,7 +292,7 @@ static async Task<string> EnsureModelAsync()
     if (!File.Exists(path))
     {
         Directory.CreateDirectory(dir);
-        Console.WriteLine("Downloading the speech-to-text model (once, ~140 MB)...");
+        Log("Downloading the speech-to-text model (once, ~140 MB)...");
         await using var model = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(GgmlType.BaseEn);
         await using var file = File.Create(path);
         await model.CopyToAsync(file);
@@ -241,3 +300,5 @@ static async Task<string> EnsureModelAsync()
 
     return path;
 }
+
+static void Log(string message) => Console.WriteLine($"{DateTime.Now:HH:mm:ss} {message}");
