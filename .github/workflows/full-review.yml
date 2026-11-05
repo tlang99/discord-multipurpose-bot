@@ -107,9 +107,11 @@ jobs:
       cancel-in-progress: false
     name: review (${{ matrix.name }})
     steps:
+      # No token left in .git/config: the reviewer reads the checkout, and what it writes is posted publicly.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       # The area's files, listed up front so the reviewer reads exactly these (and every one of them).
       - name: List the area's files
@@ -200,7 +202,7 @@ jobs:
             output: the workflow posts it as this area's issue. Don't print the review as a message
             instead, and don't write any other file.
           claude_args: |
-            --allowedTools "Read,Glob,Grep,Write(./full-review.md),Edit(./full-review.md)"
+            --allowedTools "Read(./**),Glob,Grep,Write(./full-review.md),Edit(./full-review.md)"
 
       - name: Check the review was written
         run: |
@@ -221,7 +223,8 @@ jobs:
   # a token that can write issues. Runs even if some reviews failed, posting the ones that worked.
   post:
     needs: [areas, review]
-    if: ${{ !cancelled() }}
+    # Not if the areas job failed (e.g. a file in no area): there's no matrix to post for then.
+    if: ${{ !cancelled() && needs.areas.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -247,6 +250,15 @@ jobs:
           REPO: ${{ github.repository }}
           TITLE: "Full review: ${{ matrix.name }}"
         run: |
+          # The review is model output from reading repo text, and this issue is public. Refuse anything that looks
+          # like a token or key (in case text in the repo talked the reviewer into copying one), and defuse every @
+          # with an invisible character after it, so nothing in the review can ping a real account.
+          if grep -qE '(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY)' full-review.md; then
+            echo "::error::The review contains something that looks like a token or key, so it wasn't posted. Check the artifact."
+            exit 1
+          fi
+          sed -i 's/@/@\xe2\x80\x8b/g' full-review.md
+
           # --force: fine if it already exists.
           gh label create review --repo "$REPO" --color 5319e7 --force \
             --description "Findings from the full repo review"
