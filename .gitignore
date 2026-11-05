@@ -28,5 +28,6 @@ lavalink/secrets.yml
 ## Voice commands: native libraries and the speech model (downloaded by voice/setup.ps1)
 voice/natives/
 voice/models/
+voice/piper/
 discord-net-patch/vendor/
 discord-net-patch/packages/

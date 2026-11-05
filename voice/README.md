@@ -21,7 +21,12 @@ sees what it acted on, and anything it misheard) and replies to that.
   listening: without it, the bot doesn't join by itself (`/voice listen` still works, without the status).
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
   off for every server with `Voice:Chime`).
-- Speech is turned into text **on the machine running the bot** (Whisper). Nothing is sent to any other service.
+- It reads the first few sentences of its answer aloud (the whole answer is in chat too), without links, emoji or
+  formatting. Typed requests are only answered in chat. While it's talking, and for a moment after, it ignores what it
+  hears, so its own voice coming back through someone's mic isn't taken for a request. Needs **Speak**; turn it off
+  for every server with `Voice:SpokenReplies`.
+- Speech is turned into text, and answers into speech, **on the machine running the bot** (Whisper and Piper).
+  Nothing is sent to any other service. (A web search sends only the search words to Ollama, as typed searches do.)
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
   the bot's name, and thrown away. Only what's said after the name is acted on and posted. The log notes that a voice
   request happened, never what was said.
@@ -46,7 +51,8 @@ or straight after `/stop`).
 powershell -ExecutionPolicy Bypass -File voice/setup.ps1
 ```
 
-This downloads, into `voice/natives/` and `voice/models/` (neither is committed):
+This downloads, into `voice/natives/`, `voice/models/` and `voice/piper/` (none of them committed), each pinned to
+an exact version and checked against its SHA-256:
 
 | File | What | From |
 | --- | --- | --- |
@@ -54,11 +60,15 @@ This downloads, into `voice/natives/` and `voice/models/` (neither is committed)
 | `libsodium.dll` | The voice connection's encryption | [libsodium on NuGet](https://www.nuget.org/packages/libsodium) |
 | `opus.dll` | The Opus audio codec | [OpusSharp.Natives](https://github.com/AvionBlock/OpusSharp/tree/master/OpusSharp.Natives/runtimes/win-x64/native) (the build Discord.Net's own audio sample uses) |
 | `ggml-base.en.bin` | Whisper's small English speech-to-text model, ~140 MB | [whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp) |
+| `piper/` | Piper, the text-to-speech program for spoken replies, ~22 MB | [rhasspy/piper releases](https://github.com/rhasspy/piper/releases/tag/2023.11.14-2) |
+| `en_US-lessac-medium.onnx` (+ `.onnx.json`) | Piper's "lessac" US English voice, ~63 MB | [piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/medium) |
 
 Then rebuild or restart the bot (`dotnet run` copies the libraries next to it). The log says at startup if anything is
 missing ("Voice commands aren't available: ..."), and so does `/voice listen`.
 
-Speech-to-text takes about a second of CPU per sentence; no graphics card is needed.
+Speech-to-text takes about a second of CPU per sentence, and speaking an answer about as long; no graphics card is
+needed. Without Piper, voice commands still work and answer in chat only (the startup log says "Spoken replies aren't
+available").
 
 ## Settings (`Voice` in appsettings.json)
 
@@ -69,7 +79,11 @@ Speech-to-text takes about a second of CPU per sentence; no graphics card is nee
 | `PauseMilliseconds` | `800` | How long a pause ends a sentence. |
 | `MaxSpeechSeconds` | `15` | Longest stretch turned into text at once. |
 | `MaxListenMinutes` | `180` | Stop listening after this long (`0` = never). Only when started by hand: joined by itself, it stays until everyone's left. |
-| `Chime` | `true` | Play a short chime on hearing the bot's name. Needs **Speak**; the bot shows as unmuted while it can chime. |
+| `Chime` | `true` | Play a short chime on hearing the bot's name. Needs **Speak**; the bot shows as unmuted while it can make sounds. |
+| `SpokenReplies` | `true` | Read answers to spoken requests aloud. Needs **Speak** and Piper. |
+| `PiperPath` | `voice/piper/piper.exe` | Piper's program. |
+| `SpeakingVoicePath` | `voice/models/en_US-lessac-medium.onnx` | The voice it speaks with; any [Piper voice](https://huggingface.co/rhasspy/piper-voices) works (keep its `.onnx.json` next to it). |
+| `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest is only in chat. |
 
 ## Patched Discord.Net
 

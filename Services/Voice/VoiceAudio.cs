@@ -53,13 +53,48 @@ public static class VoiceAudio
         var samples = Note(784.0, 0.16, decay: 0.06, overtones).Concat(Note(1046.5, 0.32, decay: 0.10, overtones))
             .ToArray();
         var peak = samples.Max(Math.Abs);
+        return ToDiscord(samples, ChimeVolume / peak);
+    }
 
-        // Padded with silence to whole 20 ms frames: the audio encoder holds back a part-frame until more comes, which
-        // would cut off the end of the chime.
-        var pcm = new byte[(samples.Length * 4 + FrameBytes - 1) / FrameBytes * FrameBytes];
-        for (var i = 0; i < samples.Length; i++)
+    /// <summary>The share of full volume spoken replies are played at: a little under, so they don't clip or blare.</summary>
+    public const double SpeechVolume = 0.8;
+
+    /// <summary>
+    /// Speech from text-to-speech (16-bit mono at <paramref name="sampleRate"/>, Piper's raw output) in Discord's
+    /// format, resampled to 48 kHz by straight-line interpolation between samples, which is plenty for a voice.
+    /// </summary>
+    public static byte[] FromSpeech(ReadOnlySpan<byte> mono16, int sampleRate)
+    {
+        var count = mono16.Length / 2;
+        if (count == 0 || sampleRate <= 0)
         {
-            var sample = (short)(samples[i] / peak * ChimeVolume * short.MaxValue);
+            return [];
+        }
+
+        var output = new double[(int)((long)count * 48_000 / sampleRate)];
+        var step = (double)sampleRate / 48_000;
+        for (var i = 0; i < output.Length; i++)
+        {
+            var at = i * step;
+            var before = (int)at;
+            var after = Math.Min(before + 1, count - 1);
+            var weight = at - before;
+            output[i] = BitConverter.ToInt16(mono16[(before * 2)..]) * (1 - weight) +
+                        BitConverter.ToInt16(mono16[(after * 2)..]) * weight;
+        }
+
+        return ToDiscord(output, SpeechVolume / short.MaxValue);
+    }
+
+    /// <summary>48 kHz mono <paramref name="samples"/>, times <paramref name="gain"/> to make full volume 1, as
+    /// Discord's 48 kHz stereo 16-bit, padded with silence to whole 20 ms frames: the audio encoder holds back a
+    /// part-frame until more comes, which would cut off the end of the sound.</summary>
+    private static byte[] ToDiscord(IReadOnlyList<double> samples, double gain)
+    {
+        var pcm = new byte[(samples.Count * 4 + FrameBytes - 1) / FrameBytes * FrameBytes];
+        for (var i = 0; i < samples.Count; i++)
+        {
+            var sample = (short)Math.Clamp(samples[i] * gain * short.MaxValue, short.MinValue, short.MaxValue);
             // The same sample in both channels.
             BitConverter.TryWriteBytes(pcm.AsSpan(i * 4), sample);
             BitConverter.TryWriteBytes(pcm.AsSpan(i * 4 + 2), sample);

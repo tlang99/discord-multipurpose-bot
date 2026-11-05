@@ -154,6 +154,7 @@ builder.Services.AddSingleton<ModBot.Modules.Music.MusicControls>();
 // Voice commands: listening in a voice channel for "hey ModBot", with speech-to-text on this machine (voice/README.md).
 // The listener hands requests to the chatbot, which in turn can start and stop it, so it gets the chatbot lazily.
 builder.Services.AddSingleton<ModBot.Services.Voice.SpeechToText>();
+builder.Services.AddSingleton<ModBot.Services.Voice.TextToSpeech>();
 builder.Services.AddSingleton<ModBot.Modules.Voice.VoiceListener>();
 builder.Services.AddSingleton(sp => new Lazy<ChatHandler>(sp.GetRequiredService<ChatHandler>));
 
@@ -280,6 +281,12 @@ if (host.Services.GetRequiredService<ModBot.Services.Voice.SpeechToText>().Probl
 {
     host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Voice")
         .LogInformation("Voice commands aren't available: {Problem}", voiceProblem);
+}
+else if (host.Services.GetRequiredService<ModBot.Services.Voice.TextToSpeech>().Problem is { } speakingProblem)
+{
+    // Voice commands still work, answering in chat only.
+    host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ModBot.Voice")
+        .LogInformation("Spoken replies aren't available: {Problem}", speakingProblem);
 }
 
 // Web search is optional too: without a key, /search and "search for" just say it isn't set up.

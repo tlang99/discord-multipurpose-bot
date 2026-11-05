@@ -18,10 +18,10 @@ using ModBot.Services.Voice;
 namespace ModBot.Modules.Voice;
 
 /// <summary>
-/// Voice commands: sits in a voice channel (muted), turns what people say into text on this machine, and hands
+/// Voice commands: sits in a voice channel, turns what people say into text on this machine, and hands
 /// anything said after its name ("hey ModBot, skip this song") to the chatbot as that person's request, so it's done
-/// exactly like the same words typed as an @mention. Everything else is thrown away as soon as it's checked, and no
-/// audio is ever kept.
+/// exactly like the same words typed as an @mention, and reads the answer aloud (Piper). Everything else is thrown
+/// away as soon as it's checked, and no audio is ever kept.
 /// </summary>
 /// <remarks>
 /// <para>One voice connection per server is all Discord allows, and music (Lavalink) needs it to play, so the bot
@@ -67,8 +67,13 @@ public sealed class VoiceListener
     /// <summary>Made on first use, so a problem making it can only ever break the chime, never the listener.</summary>
     private static readonly Lazy<byte[]> ChimeSound = new(VoiceAudio.Chime);
 
+    /// <summary>After the bot stops talking, it goes on ignoring what it hears for this long: its own voice can still be
+    /// coming back through someone's mic.</summary>
+    private static readonly TimeSpan EchoTail = TimeSpan.FromMilliseconds(500);
+
     private readonly DiscordSocketClient _client;
     private readonly SpeechToText _speech;
+    private readonly TextToSpeech _voiceOut;
     private readonly IAudioService _audio;
     private readonly Lazy<ChatHandler> _chat;
     private readonly ServerSettingsService _settings;
@@ -90,12 +95,13 @@ public sealed class VoiceListener
     /// connection while any are.</summary>
     private readonly ConcurrentDictionary<ulong, int> _musicStarting = new();
 
-    public VoiceListener(DiscordSocketClient client, SpeechToText speech, IAudioService audio, Lazy<ChatHandler> chat,
-        ServerSettingsService settings, IOptions<ChatOptions> chatOptions, IOptions<VoiceOptions> options,
-        ILogger<VoiceListener> logger)
+    public VoiceListener(DiscordSocketClient client, SpeechToText speech, TextToSpeech voiceOut, IAudioService audio,
+        Lazy<ChatHandler> chat, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
+        IOptions<VoiceOptions> options, ILogger<VoiceListener> logger)
     {
         _client = client;
         _speech = speech;
+        _voiceOut = voiceOut;
         _audio = audio;
         _chat = chat;
         _settings = settings;
@@ -202,14 +208,15 @@ public sealed class VoiceListener
         SocketTextChannel replyChannel, SocketGuildUser? startedBy)
     {
         IAudioClient voice;
-        // The chime needs the Speak permission, and an unmuted bot: muted, it sends no sound at all.
-        var canChime = _options.Chime && guild.CurrentUser.GetPermissions(channel).Speak;
-        var session = new Session(guild, channel, replyChannel, autoJoined: startedBy is null, canChime);
+        // The chime and spoken replies need the Speak permission, and an unmuted bot: muted, it sends no sound at all.
+        var canPlay = (_options.Chime || _voiceOut.Problem is null) && guild.CurrentUser.GetPermissions(channel).Speak;
+        var session = new Session(guild, channel, replyChannel, autoJoined: startedBy is null, canPlay);
         _joining[guild.Id] = true;
         try
         {
-            // Muted unless it chimes (it never talks), but not deafened: a deafened bot is sent no audio.
-            var connecting = channel.ConnectAsync(selfDeaf: false, selfMute: !canChime);
+            // Muted unless it makes a sound (the chime, spoken replies), but not deafened: a deafened bot is sent no
+            // audio.
+            var connecting = channel.ConnectAsync(selfDeaf: false, selfMute: !canPlay);
             if (await Task.WhenAny(connecting, Task.Delay(ConnectTimeout)) != connecting)
             {
                 await LeaveAsync(channel);
@@ -585,7 +592,7 @@ public sealed class VoiceListener
         }
 
         session.Stopping.Cancel();
-        await session.StopChimingAsync();
+        await session.StopSoundAsync();
         await RestoreStatusAsync(session); // while still in the channel, which setting it needs
         if (leave)
         {
@@ -686,6 +693,13 @@ public sealed class VoiceListener
                 if (stream.AvailableFrames > 0)
                 {
                     var frame = await stream.ReadFrameAsync(reading);
+                    // While the bot's talking, what comes in may be its own voice through someone's mic.
+                    if (session.IsTalking)
+                    {
+                        speech.SetLength(0);
+                        continue;
+                    }
+
                     speech.Write(frame.Payload);
                     lastHeard = DateTime.UtcNow;
                     if (speech.Length < longest)
@@ -783,31 +797,60 @@ public sealed class VoiceListener
         // Not what was said: the chatbot posts that in the channel, and the log stays free of it.
         _logger.LogInformation("Voice request from {User} ({UserId}) in {Channel}.", speaker.Username, speaker.Id,
             session.Channel.Name);
-        await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request);
+        var answer = await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request);
+        Speak(session, answer);
     }
 
-    /// <summary>Plays the chime in the channel, if this session can. Doesn't wait for it, and a failure just turns the
-    /// chime off for the rest of the session: it's a nicety, never a reason for a request to go unanswered.</summary>
+    /// <summary>Plays the chime in the channel, if this session can (another sound playing, it's skipped).</summary>
     private void Chime(Session session)
     {
-        if (!session.CanChime)
+        if (_options.Chime)
+        {
+            Play(session, _ => Task.FromResult<byte[]?>(ChimeSound.Value), speech: false);
+        }
+    }
+
+    /// <summary>Reads <paramref name="answer"/> aloud (its first few sentences, as speech), if spoken replies work
+    /// here; after any sound already playing.</summary>
+    private void Speak(Session session, string? answer)
+    {
+        if (_voiceOut.Problem is not null ||
+            SpokenText.From(answer, _options.MaxSpokenCharacters) is not { Length: > 0 } text)
+        {
+            return;
+        }
+
+        Play(session, token => _voiceOut.SpeakAsync(text, token), speech: true);
+    }
+
+    /// <summary>Makes a sound (<paramref name="sound"/>, in Discord's format) and plays it in the channel, without
+    /// waiting for it. A failure to play turns sound off for the rest of the session: the chime and spoken replies are
+    /// niceties, never a reason for a request to go unanswered (it's in chat too).</summary>
+    private void Play(Session session, Func<CancellationToken, Task<byte[]?>> sound, bool speech)
+    {
+        if (!session.CanPlay)
         {
             return;
         }
 
         Background.Run(_logger, async () =>
         {
+            if (await sound(session.Stopping.Token) is not { Length: > 0 } pcm)
+            {
+                return;
+            }
+
             try
             {
-                await session.ChimeAsync(ChimeSound.Value);
+                await session.PlayAsync(pcm, speech, EchoTail);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                session.CanChime = false;
-                _logger.LogWarning(ex, "Couldn't play the chime in guild {GuildId}; no more chimes until I rejoin.",
+                session.CanPlay = false;
+                _logger.LogWarning(ex, "Couldn't play sound in guild {GuildId}; no more sounds until I rejoin.",
                     session.Guild.Id);
             }
-        }, LogLevel.Debug, "The chime stopped in guild {GuildId}.", session.Guild.Id);
+        }, LogLevel.Debug, "A sound stopped in guild {GuildId}.", session.Guild.Id);
     }
 
     private bool MusicIsPlaying(ulong guildId) => MusicService.GetPlayer(_audio, guildId) is not null;
@@ -826,11 +869,12 @@ public sealed class VoiceListener
 
     /// <summary>Listening in one server's voice channel.</summary>
     private sealed class Session(SocketGuild guild, SocketVoiceChannel channel, SocketTextChannel replyChannel,
-        bool autoJoined, bool canChime)
+        bool autoJoined, bool canPlay)
     {
         private readonly ConcurrentDictionary<ulong, CancellationTokenSource> _readers = new();
-        private readonly SemaphoreSlim _chiming = new(1, 1);
+        private readonly SemaphoreSlim _playing = new(1, 1);
         private AudioOutStream? _sound;
+        private long _talkingUntil;
 
         /// <summary>Joined by itself (voice auto-join), not because someone asked.</summary>
         public bool AutoJoined { get; } = autoJoined;
@@ -843,47 +887,70 @@ public sealed class VoiceListener
 
         public string StatusBefore { get; set; } = "";
 
-        public volatile bool CanChime = canChime;
+        /// <summary>Whether it can make sounds here (the chime, spoken replies): Speak permission, and nothing's failed.</summary>
+        public volatile bool CanPlay = canPlay;
 
-        /// <summary>Plays <paramref name="pcm"/> (Discord's format) in the channel. One chime at a time: another heard
-        /// meanwhile is skipped rather than queued behind it.</summary>
-        public async Task ChimeAsync(byte[] pcm)
+        /// <summary>The bot is talking (or just was): what it hears now may be its own voice, through someone's mic.</summary>
+        public bool IsTalking => DateTime.UtcNow.Ticks < Interlocked.Read(ref _talkingUntil);
+
+        /// <summary>
+        /// Plays <paramref name="pcm"/> (Discord's format) in the channel, one sound at a time. Speech waits its turn
+        /// (an answer is worth hearing); a chime with something else playing is skipped instead (it'd be late).
+        /// </summary>
+        /// <param name="speech">Spoken: <see cref="IsTalking"/> holds while it plays, and for
+        /// <paramref name="echoTail"/> after.</param>
+        public async Task PlayAsync(byte[] pcm, bool speech, TimeSpan echoTail)
         {
-            if (Voice is null || !await _chiming.WaitAsync(0))
+            var length = VoiceAudio.DurationOf(pcm.Length);
+            if (Voice is null || !await _playing.WaitAsync(speech ? length + TimeSpan.FromSeconds(30) : TimeSpan.Zero,
+                    Stopping.Token))
             {
                 return;
             }
 
             try
             {
-                if (!CanChime || Stopping.IsCancellationRequested)
+                if (!CanPlay || Stopping.IsCancellationRequested)
                 {
                     return; // the session ended while this one waited
                 }
 
+                if (speech)
+                {
+                    Interlocked.Exchange(ref _talkingUntil, (DateTime.UtcNow + length + echoTail).Ticks);
+                }
+
                 // One stream for the whole session: Discord.Net sends silence and the speaking flag around each sound.
                 // A short buffer, because Discord.Net sends nothing until the buffer has filled once: at its default
-                // (a second), a quarter-second chime would just sit there. And never waits long for it to go out.
+                // (a second), a quarter-second chime would just sit there. And never waits much past the sound's own
+                // length for it to go out.
                 _sound ??= Voice.CreatePCMStream(AudioApplication.Voice, bufferMillis: 100);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Stopping.Token);
-                timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                timeout.CancelAfter(length + TimeSpan.FromSeconds(5));
                 await _sound.WriteAsync(pcm, timeout.Token);
                 await _sound.FlushAsync(timeout.Token);
             }
             finally
             {
-                _chiming.Release();
+                if (speech)
+                {
+                    // Writing can finish before the last of it is heard: keep ignoring a moment longer.
+                    Interlocked.Exchange(ref _talkingUntil,
+                        Math.Max(Interlocked.Read(ref _talkingUntil), (DateTime.UtcNow + echoTail).Ticks));
+                }
+
+                _playing.Release();
             }
         }
 
-        /// <summary>Ends the chime stream. Call after <see cref="Stopping"/> is cancelled, which cuts short a chime
+        /// <summary>Ends the sound stream. Call after <see cref="Stopping"/> is cancelled, which cuts short a sound
         /// that's playing, so this only waits a moment for it.</summary>
-        public async Task StopChimingAsync()
+        public async Task StopSoundAsync()
         {
-            CanChime = false;
-            // A chime that's playing ends at once (Stopping is cancelled first). This runs holding the start/stop lock
+            CanPlay = false;
+            // A sound that's playing ends at once (Stopping is cancelled first). This runs holding the start/stop lock
             // (music waits on it), so it waits only briefly, then closes the stream anyway.
-            var waited = await _chiming.WaitAsync(TimeSpan.FromSeconds(1));
+            var waited = await _playing.WaitAsync(TimeSpan.FromSeconds(1));
             try
             {
                 _sound?.Dispose();
@@ -897,7 +964,7 @@ public sealed class VoiceListener
             {
                 if (waited)
                 {
-                    _chiming.Release();
+                    _playing.Release();
                 }
             }
         }

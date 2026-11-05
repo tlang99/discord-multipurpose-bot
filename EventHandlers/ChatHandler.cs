@@ -129,15 +129,17 @@ public partial class ChatHandler
     /// Something said in voice after the bot's name (<see cref="VoiceListener"/>), handled exactly like the same words
     /// typed as an @mention by <paramref name="speaker"/>: the same switches, word filter, cooldown and actions. What
     /// was heard is posted first, so everyone in the channel sees what the bot acted on (and anything it misheard),
-    /// and the answer replies to that.
+    /// and the answer replies to that. Returns the answer as posted (after the word filter), for reading aloud, or null
+    /// if there was none.
     /// </summary>
-    public async Task HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel, string request)
+    public async Task<string?> HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel,
+        string request)
     {
         var guild = channel.Guild;
         if (!ChannelAccess.CanPost(guild.CurrentUser, channel))
         {
             await StopListeningCantPostAsync(channel);
-            return;
+            return null;
         }
 
         // The speaker has to be able to post where the answer goes themselves: saying it mustn't put a poll or LFG in
@@ -146,7 +148,7 @@ public partial class ChatHandler
             await AllowedAsync(guild, speaker, request) is not { } allowed ||
             !allowed.Server.IsEnabled(ServerFeature.VoiceCommands))
         {
-            return;
+            return null;
         }
 
         // The cooldown is checked (and counted) here, before anything's posted: typed, a request during it gets a ⏳,
@@ -154,7 +156,7 @@ public partial class ChatHandler
         // chatty speaker or a noisy mic can't flood the channel.
         if (IsOnCooldown(guild.Id, speaker.Id))
         {
-            return;
+            return null;
         }
 
         // What was heard is posted in the bot's name, so it follows the rules for the bot's own posts: the server's word
@@ -162,7 +164,7 @@ public partial class ChatHandler
         // reminders). Typed, the member's own message would be up to auto-mod; said, the bot would be the one posting.
         if (TextFilter.AppliesToBotPost(speaker) && TextFilter.FindViolation(request, allowed.Settings) is not null)
         {
-            return;
+            return null;
         }
 
         IUserMessage heard;
@@ -176,10 +178,12 @@ public partial class ChatHandler
         {
             _logger.LogWarning(ex, "Couldn't post a voice request in channel {ChannelId}.", channel.Id);
             await StopListeningCantPostAsync(channel);
-            return;
+            return null;
         }
 
-        await RespondAsync(allowed, new ChatRequest(channel, heard, speaker, request, request, Spoken: true));
+        var said = new ChatRequest(channel, heard, speaker, request, request, Spoken: true);
+        await RespondAsync(allowed, said);
+        return said.Answer;
     }
 
     /// <summary>
@@ -200,7 +204,12 @@ public partial class ChatHandler
     /// <param name="Question">What they wrote with a note for attachments, for the chatbot to answer.</param>
     /// <param name="Spoken">Said in voice: its cooldown was already counted before posting what was heard.</param>
     private sealed record ChatRequest(SocketTextChannel Channel, IUserMessage Message, IUser Author, string Words,
-        string Question, bool Spoken = false);
+        string Question, bool Spoken = false)
+    {
+        /// <summary>The answer as posted: its text, or for an answer that's all in an embed (a web search), the
+        /// embed's. Set by <see cref="ReplyAsync"/>; null if nothing was posted.</summary>
+        public string? Answer { get; set; }
+    }
 
     /// <summary>True (after a ⏳ on the message) if the asker has to wait. Counts the request otherwise.</summary>
     private async Task<bool> MustWaitAsync(ChatRequest request)
@@ -256,19 +265,19 @@ public partial class ChatHandler
             {
                 // Said, it would run as whoever's mic picked it up: a friend in the room, a soundboard, or a
                 // mishearing ("enable" for "disable") could change the server's settings as an admin.
-                await ReplyAsync(message, "Server settings can only be changed by typing, so nobody can change them " +
+                await ReplyAsync(request, "Server settings can only be changed by typing, so nobody can change them " +
                                           "by talking near an admin's mic. Type it, or use `/settings`.");
             }
             else if (!isAdmin)
             {
-                await ReplyAsync(message, change is not null
+                await ReplyAsync(request, change is not null
                     ? "Only server admins (**Manage Server**) can turn features on or off. See `/settings`."
                     : "Only server admins (**Manage Server**) can change news notifications. See `/news notify`.");
             }
             else
             {
                 // Each switch saves, logs who changed it, and words its own reply.
-                await ReplyAsync(message, change is not null
+                await ReplyAsync(request, change is not null
                     ? await _featureSwitch.SetAsync(guild, change.Feature, change.On, member)
                     : await _newsNotifications.SetAsync(guild.Id, newsNotify!.Feed, newsNotify.Silent, member));
             }
@@ -301,7 +310,7 @@ public partial class ChatHandler
                 asker.Username, asker.Id, channel.Name);
             if (answer.Length > 0)
             {
-                await ReplyAsync(message, answer);
+                await ReplyAsync(request, answer);
             }
 
             return;
@@ -309,7 +318,7 @@ public partial class ChatHandler
 
         if (question.Length == 0)
         {
-            await ReplyAsync(message, $"👋 Ask me something after the mention, like \"@{bot.DisplayName} what should " +
+            await ReplyAsync(request, $"👋 Ask me something after the mention, like \"@{bot.DisplayName} what should " +
                                       "we play tonight?\"");
             return;
         }
@@ -421,7 +430,7 @@ public partial class ChatHandler
                     embed = null;
                 }
 
-                await ReplyAsync(message, text, suppressEmbeds, embed);
+                await ReplyAsync(request, text, suppressEmbeds, embed);
                 return;
             }
         }
@@ -441,7 +450,7 @@ public partial class ChatHandler
         // Not what was said, only that it happened: the conversation itself stays out of the log.
         _logger.LogInformation("Chat answered {User} ({UserId}) in #{Channel} ({Length} characters).",
             asker.Username, asker.Id, channel.Name, reply.Length);
-        await ReplyAsync(message, reply);
+        await ReplyAsync(request, reply);
     }
 
     /// <summary>
@@ -792,9 +801,11 @@ public partial class ChatHandler
     private static string DisplayName(IUser user, SocketGuild guild)
         => guild.GetUser(user.Id)?.DisplayName ?? user.GlobalName ?? user.Username;
 
-    private async Task ReplyAsync(IUserMessage message, string text, bool suppressEmbeds = false,
-        Embed? embed = null)
+    /// <summary>Answers <paramref name="request"/>, and notes the answer on it (<see cref="ChatRequest.Answer"/>), so
+    /// a spoken request can be answered aloud with exactly what was posted.</summary>
+    private async Task ReplyAsync(ChatRequest request, string text, bool suppressEmbeds = false, Embed? embed = null)
     {
+        var message = request.Message;
         try
         {
             // Only the asker can be pinged, however the model's text is worded. (Suppressing embeds would hide the
@@ -802,6 +813,7 @@ public partial class ChatHandler
             await message.ReplyAsync(text.Length == 0 ? null : text, embed: embed,
                 allowedMentions: new AllowedMentions(AllowedMentionTypes.None) { MentionRepliedUser = true },
                 flags: suppressEmbeds && embed is null ? MessageFlags.SuppressEmbeds : MessageFlags.None);
+            request.Answer = text.Length > 0 ? text : embed?.Description;
         }
         catch (Exception ex)
         {
