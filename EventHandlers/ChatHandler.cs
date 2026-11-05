@@ -185,7 +185,7 @@ public partial class ChatHandler
     {
         _logger.LogWarning("Stopped listening in guild {GuildId}: can't post voice replies in #{Channel} any more.",
             channel.Guild.Id, channel.Name);
-        await _voice.StopAsync(channel.Guild.Id, notice: null);
+        await _voice.StopAndStayOutAsync(channel.Guild.Id); // or voice auto-join could rejoin and hit the same wall
     }
 
     /// <summary>A request to the chatbot, typed or said.</summary>
@@ -287,7 +287,7 @@ public partial class ChatHandler
 
             // As with /voice: only starting needs the feature on, stopping always works.
             var answer = voiceRequest == VoiceRequest.StopListening
-                ? await _voice.StopForAsync(voiceAsker, channel)
+                ? await _voice.StopForAsync(voiceAsker)
                 : !server.IsEnabled(ServerFeature.VoiceCommands)
                     ? ServerSettingsService.TurnedOff(ServerFeature.VoiceCommands)
                     : await _voice.StartAsync(voiceAsker, channel);

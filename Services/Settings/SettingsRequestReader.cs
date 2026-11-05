@@ -25,7 +25,8 @@ public static partial class SettingsRequestReader
         var on = verb == "enable" || match.Groups["state"].Value.Equals("on", StringComparison.OrdinalIgnoreCase);
 
         // Whitespace-normalised, so "chat  bot" is "chat bot"; the regex only lets these names through.
-        ServerFeature? feature = WhitespaceRegex().Replace(match.Groups["feature"].Value.ToLowerInvariant(), " ") switch
+        var name = WhitespaceRegex().Replace(match.Groups["feature"].Value.ToLowerInvariant(), " ");
+        ServerFeature? feature = AutoJoinRegex().IsMatch(name) ? ServerFeature.VoiceAutoJoin : name switch
         {
             "chat actions" or "actions" => ServerFeature.ChatActions,
             "chatbot" or "chat bot" or "the bot chat" or "ai chat" or "chat" => ServerFeature.Chat,
@@ -48,8 +49,12 @@ public static partial class SettingsRequestReader
         return feature is { } f ? new FeatureSwitchRequest(f, on) : null;
     }
 
+    /// <summary>The ways of naming voice auto-join ("voice auto-join", "auto joining", "auto-join voice"...): one
+    /// pattern, used both to find a feature name in the request and to tell that the name found is this one.</summary>
+    private const string AutoJoinName = @"(?:voice\s+)?auto[\s-]?join(?:ing)?(?:\s+voice)?";
+
     private const string Feature =
-        @"(?<feature>chat\s*bot|the\s+bot\s+chat|ai\s+chat|chat\s+actions|actions|chat|music|lfgs?|looking\s+for\s+group|polls?|reminders?|voice\s+commands?|voice\s+control)";
+        @"(?<feature>" + AutoJoinName + @"|chat\s*bot|the\s+bot\s+chat|ai\s+chat|chat\s+actions|actions|chat|music|lfgs?|looking\s+for\s+group|polls?|reminders?|voice\s+commands?|voice\s+control)";
 
     private const string Here = @"(?:for\s+(?:this|the)\s+server|on\s+this\s+server|server[\s-]?wide|here|feature)";
 
@@ -61,6 +66,10 @@ public static partial class SettingsRequestReader
         @"|(?<verb>turn|switch)\s+(?:the\s+)?" + Feature + @"\s+(?<state>on|off)\s+" + Here + @")" +
         @"(?:[\s,]+(?:now|please|pls))*[\s.!]*$", RegexOptions.IgnoreCase)]
     private static partial Regex RequestRegex();
+
+    /// <summary>A feature name found by <see cref="RequestRegex"/> that is voice auto-join.</summary>
+    [GeneratedRegex("^" + AutoJoinName + "$")]
+    private static partial Regex AutoJoinRegex();
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();

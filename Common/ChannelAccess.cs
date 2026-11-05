@@ -19,6 +19,24 @@ public static class ChannelAccess
         return permissions.ViewChannel && canSend;
     }
 
+    /// <summary>True if <paramref name="bot"/> can join <paramref name="channel"/> to listen for voice commands.</summary>
+    public static bool CanListenIn(IGuildUser bot, IGuildChannel channel)
+        => bot.GetPermissions(channel) is { ViewChannel: true, Connect: true };
+
+    /// <summary>True if <paramref name="bot"/> can listen in <paramref name="channel"/> and reply in its own chat.</summary>
+    public static bool CanListenAndReplyIn(IGuildUser bot, IGuildChannel channel)
+        => CanListenIn(bot, channel) && CanPost(bot, channel);
+
+    /// <summary>True if <paramref name="bot"/> may join <paramref name="channel"/> by itself (voice auto-join): it can
+    /// listen, reply in its chat, and set its status. The status ("Listening for hey ModBot") is how anyone joining
+    /// later sees it's listening, so without it, it only listens when someone asks.</summary>
+    public static bool CanJoinByItselfIn(IGuildUser bot, IGuildChannel channel)
+        => CanListenAndReplyIn(bot, channel) && bot.GetPermissions(channel).SetVoiceChannelStatus;
+
+    /// <summary>The permissions <see cref="CanJoinByItselfIn"/> needs, for telling an admin.</summary>
+    public const string JoinByItselfPermissions = "**View Channel**, **Connect**, **Send Messages** and " +
+                                                  "**Set Voice Channel Status**";
+
     /// <summary>Why the bot can't post embeds in <paramref name="channel"/>, or null if it can.</summary>
     /// <param name="what">What it would post, e.g. "LFGs" or "news".</param>
     public static string? WhyBotCantPostEmbeds(IGuildUser bot, IGuildChannel channel, string what)

@@ -59,6 +59,8 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("Reminders")] Reminders = ServerFeature.Reminders,
         [ChoiceDisplay("Voice commands (say my name in voice; off by default)")]
         VoiceCommands = ServerFeature.VoiceCommands,
+        [ChoiceDisplay("Voice auto-join (joins voice by itself; off by default)")]
+        VoiceAutoJoin = ServerFeature.VoiceAutoJoin,
     }
 
     /// <summary>The features with their own channel.</summary>
@@ -83,7 +85,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
                 ? " (but the chatbot is off for every server in the bot's own settings)"
                 : feature == ServerFeature.VoiceCommands && on && _voice.SetupProblem is not null
                     ? " (but not set up on this bot yet)"
-                    : "";
+                    : feature == ServerFeature.VoiceAutoJoin && on && !server.IsEnabled(ServerFeature.VoiceCommands)
+                        ? " (once voice commands are on)"
+                        : feature == ServerFeature.VoiceAutoJoin && on &&
+                          !Context.Guild.CurrentUser.GuildPermissions.SetVoiceChannelStatus
+                            ? " (needs Set Voice Channel Status)"
+                            : "";
             features.AppendLine($"{(on ? "✅" : "🚫")} {ServerSettingsService.NameOf(feature)}{note}");
         }
 
@@ -99,7 +106,8 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             .AddField("Features", features.ToString())
             .AddField("Channels",
                 $"Music: {await DescribeAsync(ChannelFeature.Music)}\n" +
-                $"LFG: {await DescribeAsync(ChannelFeature.Lfg)}")
+                $"LFG: {await DescribeAsync(ChannelFeature.Lfg)}\n" +
+                $"Voice auto-join: {DescribeAutoJoinChannel(server)}")
             .AddField("LFG pings", $"{pingText}{(server.LfgPingRoleId is null && !server.LfgPingsOff ? " (default)" : "")}")
             .AddField("LFG game", server.LfgGame is { IsEmpty: false } game
                 ? (game.Name.Length > 0 ? $"**{TextTools.Escape(game.Name)}** - " : "no name - ") +
@@ -198,6 +206,61 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             Context.User.Id);
         await RespondAsync($"{NameOf(feature)}: {now}.", ephemeral: true, allowedMentions: AllowedMentions.None);
     }
+
+    [SlashCommand("voice-channel", "Voice auto-join: only join this voice channel. Leave it out for any channel.")]
+    public async Task VoiceChannelAsync(
+        [Summary("channel", "Only this voice channel (leave out: whichever one people are in)")]
+        [ChannelTypes(ChannelType.Voice)]
+        IVoiceChannel? channel = null)
+    {
+        // Auto-join skips the AFK channel (people there are away), so picking it would mean never joining.
+        // ([ChannelTypes(ChannelType.Voice)] already keeps stage channels out.)
+        if (channel is not null && channel.Id == Context.Guild.AFKChannel?.Id)
+        {
+            await RespondAsync("That's the server's AFK channel, which I don't listen in. Pick another one.",
+                ephemeral: true);
+            return;
+        }
+
+        // The replies go in the voice channel's own chat, and its status is how people joining later see it listening.
+        if (channel is not null && !ChannelAccess.CanJoinByItselfIn(Context.Guild.CurrentUser, channel))
+        {
+            await RespondAsync($"I need {ChannelAccess.JoinByItselfPermissions} in {channel.Mention} to join it by " +
+                               "myself (my replies go in its chat, and its status shows I'm listening).",
+                ephemeral: true, allowedMentions: AllowedMentions.None);
+            return;
+        }
+
+        await _settings.UpdateAsync(Context.Guild.Id, s => s.AutoJoinChannel.ChannelId = channel?.Id);
+        _logger.LogInformation("Voice auto-join channel set to {Channel} by {User} ({UserId}).",
+            channel is not null ? $"{channel.Name} ({channel.Id})" : "any channel", Context.User.Username,
+            Context.User.Id);
+
+        var server = await _settings.GetAsync(Context.Guild.Id);
+        var note = !server.IsEnabled(ServerFeature.VoiceCommands)
+            ? " It applies once **Voice commands** is on (`/settings feature`)."
+            : !server.IsEnabled(ServerFeature.VoiceAutoJoin)
+                ? " It applies once **Voice auto-join** is on (`/settings feature`)."
+                : "";
+        if (channel is not null && _voice.IsAutoListening(Context.Guild.Id))
+        {
+            note += " If I'm listening in another channel now, I'll move once it empties.";
+        }
+
+        if (server.AutoJoinsVoice)
+        {
+            _voice.AutoJoinSoon(Context.Guild.Id);
+        }
+
+        await RespondAsync($"Voice auto-join: {DescribeAutoJoinChannel(server)}.{note}", ephemeral: true,
+            allowedMentions: AllowedMentions.None);
+    }
+
+    private string DescribeAutoJoinChannel(ServerSettings server)
+        => server.AutoJoinChannel.ChannelId is not { } id
+            ? "any voice channel (the busiest one; pick one with `/settings voice-channel`)"
+            : Context.Guild.GetVoiceChannel(id)?.Mention ??
+              "(the chosen voice channel was deleted - pick another with `/settings voice-channel`)";
 
     [SlashCommand("lfg-pings", "Sets the role LFG posts ping. Leave both options out to go back to the default.")]
     public async Task LfgPingsAsync(

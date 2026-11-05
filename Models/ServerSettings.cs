@@ -17,6 +17,11 @@ public enum ServerFeature
     /// <summary>Listening in voice for "hey ModBot". Off until a server turns it on (<see cref="ServerSettings.IsOptIn"/>),
     /// since it means the bot hearing the voice channel.</summary>
     VoiceCommands,
+
+    /// <summary>With voice commands on, joining voice by itself when people are in a voice channel, so "hey ModBot" is
+    /// all it takes. Off until a server turns it on as well (<see cref="ServerSettings.IsOptIn"/>): enabling voice
+    /// commands shouldn't also start the bot sitting in every call.</summary>
+    VoiceAutoJoin,
 }
 
 /// <summary>
@@ -39,6 +44,10 @@ public class ServerSettings
 
     public ChannelChoice Lfg { get; set; } = new();
 
+    /// <summary>The one voice channel the bot joins by itself (voice auto-join); null means whichever one people are
+    /// in (/settings voice-channel).</summary>
+    public ChannelChoice AutoJoinChannel { get; set; } = new();
+
     /// <summary>The role new LFG posts ping. Null uses the default (<c>Lfg:PingRoleName</c>, made by /lfg-setup).</summary>
     public ulong? LfgPingRoleId { get; set; }
 
@@ -56,8 +65,16 @@ public class ServerSettings
             ? EnabledFeatures?.Contains(feature.ToString()) == true
             : DisabledFeatures?.Contains(feature.ToString()) != true;
 
-    /// <summary>Features that start off and have to be turned on: voice commands, since they mean the bot listening.</summary>
-    public static bool IsOptIn(ServerFeature feature) => feature == ServerFeature.VoiceCommands;
+    /// <summary>Features that start off and have to be turned on: voice commands and voice auto-join, since they mean
+    /// the bot listening.</summary>
+    public static bool IsOptIn(ServerFeature feature)
+        => feature is ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin;
+
+    /// <summary>The bot joins voice by itself here: voice auto-join is on, and so is everything it needs (voice
+    /// commands, and the chatbot that every voice request goes through).</summary>
+    public bool AutoJoinsVoice
+        => IsEnabled(ServerFeature.Chat) && IsEnabled(ServerFeature.VoiceCommands) &&
+           IsEnabled(ServerFeature.VoiceAutoJoin);
 
     /// <summary>Turns <paramref name="feature"/> on or off, in whichever list it's kept.</summary>
     public void Set(ServerFeature feature, bool on)

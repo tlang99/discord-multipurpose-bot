@@ -228,6 +228,10 @@ foreach (var oldKey in new[] { "Music:ChannelName", "Lfg:ChannelName" })
     }
 }
 
+// Created now, before the bot connects, so voice auto-join sees every server come online and joins anyone already
+// sitting in voice.
+host.Services.GetRequiredService<ModBot.Modules.Voice.VoiceListener>();
+
 // Voice commands are optional (each server opts in), so a bot without them set up only gets a note, not a warning.
 if (host.Services.GetRequiredService<ModBot.Services.Voice.SpeechToText>().Problem is { } voiceProblem)
 {

@@ -110,19 +110,68 @@ public class VoiceAudioTests
     [Fact]
     public void A_second_of_discord_audio_lasts_a_second()
         => Assert.Equal(TimeSpan.FromSeconds(1), VoiceAudio.DurationOf(VoiceAudio.DiscordBytesPerSecond));
+
+    [Fact]
+    public void The_chime_is_short_soft_and_starts_and_ends_quietly()
+    {
+        var chime = VoiceAudio.Chime();
+        var left = Enumerable.Range(0, chime.Length / 4).Select(i => BitConverter.ToInt16(chime, i * 4)).ToArray();
+        var right = Enumerable.Range(0, chime.Length / 4).Select(i => BitConverter.ToInt16(chime, i * 4 + 2)).ToArray();
+
+        Assert.Equal(0, chime.Length % VoiceAudio.FrameBytes); // whole 20 ms frames, so none of it is held back
+        Assert.InRange(VoiceAudio.DurationOf(chime.Length).TotalSeconds, 0.3, 0.6);
+        Assert.Equal(left, right);
+        Assert.InRange(left.Max(s => Math.Abs((int)s)), 1000, VoiceAudio.ChimeVolume * short.MaxValue + 1);
+        // Faded in and out, so it doesn't click.
+        Assert.InRange(Math.Abs((int)left[0]), 0, 50);
+        Assert.InRange(Math.Abs((int)left[^1]), 0, 50);
+    }
+}
+
+/// <summary>Which voice channel the bot joins by itself.</summary>
+public class AutoJoinPickerTests
+{
+    private static readonly AutoJoinPicker.Channel[] Channels =
+    [
+        new(1, People: 0, Position: 0),
+        new(2, People: 2, Position: 1),
+        new(3, People: 4, Position: 2),
+        new(4, People: 4, Position: 3),
+    ];
+
+    [Fact]
+    public void Joins_the_busiest_channel_and_the_higher_one_on_a_tie()
+        => Assert.Equal(3UL, AutoJoinPicker.Pick(Channels, only: null, stayOut: null));
+
+    [Fact]
+    public void Keeps_out_of_a_channel_it_was_told_to_stop_listening_in()
+        => Assert.Equal(4UL, AutoJoinPicker.Pick(Channels, only: null, stayOut: 3));
+
+    [Fact]
+    public void Only_joins_the_chosen_channel_when_the_server_picked_one()
+    {
+        Assert.Equal(2UL, AutoJoinPicker.Pick(Channels, only: 2, stayOut: null));
+        Assert.Null(AutoJoinPicker.Pick(Channels, only: 1, stayOut: null)); // nobody there
+        Assert.Null(AutoJoinPicker.Pick(Channels, only: 2, stayOut: 2));
+        Assert.Null(AutoJoinPicker.Pick(Channels, only: 99, stayOut: null)); // deleted
+    }
+
+    [Fact]
+    public void Joins_nothing_when_voice_is_empty()
+        => Assert.Null(AutoJoinPicker.Pick([new(1, 0, 0)], only: null, stayOut: null));
 }
 
 /// <summary>Voice commands are the one feature that starts off: they mean the bot listening.</summary>
 public class VoiceCommandsSwitchTests
 {
     [Fact]
-    public void Voice_commands_start_off_and_everything_else_on()
+    public void Voice_commands_and_auto_join_start_off_and_everything_else_on()
     {
         var settings = new ServerSettings();
+        ServerFeature[] voice = [ServerFeature.VoiceCommands, ServerFeature.VoiceAutoJoin];
 
-        Assert.False(settings.IsEnabled(ServerFeature.VoiceCommands));
-        Assert.All(Enum.GetValues<ServerFeature>().Where(f => f != ServerFeature.VoiceCommands),
-            f => Assert.True(settings.IsEnabled(f)));
+        Assert.All(voice, f => Assert.False(settings.IsEnabled(f)));
+        Assert.All(Enum.GetValues<ServerFeature>().Except(voice), f => Assert.True(settings.IsEnabled(f)));
     }
 
     [Fact]
@@ -155,6 +204,35 @@ public class VoiceCommandsSwitchTests
     [InlineData("turn voice commands on for this server", true)]
     public void Admins_can_switch_it_from_chat(string message, bool on)
         => Assert.Equal(new FeatureSwitchRequest(ServerFeature.VoiceCommands, on), SettingsRequestReader.Read(message));
+
+    [Fact]
+    public void Auto_join_has_to_be_turned_on_and_needs_voice_commands_and_the_chatbot()
+    {
+        var settings = new ServerSettings();
+        Assert.True(ServerSettings.IsOptIn(ServerFeature.VoiceAutoJoin));
+        Assert.Null(settings.AutoJoinChannel.ChannelId);
+        Assert.False(settings.AutoJoinsVoice);
+
+        settings.Set(ServerFeature.VoiceAutoJoin, true);
+        Assert.Equal(["VoiceAutoJoin"], settings.EnabledFeatures);
+        Assert.False(settings.AutoJoinsVoice); // voice commands still off
+
+        settings.Set(ServerFeature.VoiceCommands, true);
+        Assert.True(settings.AutoJoinsVoice);
+
+        settings.Set(ServerFeature.Chat, false);
+        Assert.False(settings.AutoJoinsVoice); // every voice request goes through the chatbot
+    }
+
+    [Theory]
+    [InlineData("disable voice auto-join", false)]
+    [InlineData("disable auto join", false)]
+    [InlineData("enable auto-joining", true)]
+    [InlineData("turn off voice auto join for this server", false)]
+    [InlineData("turn auto-join voice on here", true)]
+    [InlineData("enable auto joining voice", true)]
+    public void Admins_can_switch_auto_join_from_chat(string message, bool on)
+        => Assert.Equal(new FeatureSwitchRequest(ServerFeature.VoiceAutoJoin, on), SettingsRequestReader.Read(message));
 }
 
 /// <summary>The bot's "🎙️ @name: what they said" posts, read back as that person talking when they're in the
@@ -203,4 +281,19 @@ public class HeardTextTests
     [InlineData("Hey <@42>: not one of mine")]
     [InlineData("🎙️ Listening for voice commands in <#1>")]
     public void Ignores_the_bots_other_posts(string content) => Assert.Null(EventHandlers.ChatHandler.ReadHeardText(content));
+}
+
+/// <summary>The one line the bot posts on joining voice.</summary>
+public class ListeningLineTests
+{
+    [Fact]
+    public void Says_its_listening_what_happens_to_speech_and_how_to_stop_it()
+    {
+        var line = Modules.Voice.VoiceListener.ListeningLine("ModBot");
+
+        Assert.Contains("hey ModBot", line);
+        Assert.Contains("no audio is kept", line);
+        Assert.Contains("stop listening", line);
+        Assert.True(line.Length <= Discord.DiscordConfig.MaxMessageSize);
+    }
 }

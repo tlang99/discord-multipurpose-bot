@@ -48,8 +48,7 @@ public class VoiceModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         await DeferAsync(ephemeral: true);
-        var answer = await _voice.StopForAsync(user, Context.Channel);
-        await FollowupAsync(answer.Length > 0 ? answer : "🎙️ Stopped listening.", ephemeral: true,
-            allowedMentions: AllowedMentions.None);
+        var answer = await _voice.StopForAsync(user);
+        await FollowupAsync(answer, ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 }

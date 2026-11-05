@@ -108,6 +108,7 @@ public class ServerSettingsService
         ServerFeature.Polls => "Polls",
         ServerFeature.Reminders => "Reminders",
         ServerFeature.VoiceCommands => "Voice commands",
+        ServerFeature.VoiceAutoJoin => "Voice auto-join",
         _ => feature.ToString(),
     };
 

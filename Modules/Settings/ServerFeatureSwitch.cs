@@ -68,7 +68,7 @@ public class ServerFeatureSwitch
             {
                 await player.StopAsync();
                 await player.DisposeAsync(); // leaves voice; the queue is kept for if music comes back on
-                note = " I stopped the music and left voice; the queue's kept.";
+                note += " I stopped the music and left voice; the queue's kept.";
             }
             catch (Exception ex)
             {
@@ -77,22 +77,53 @@ public class ServerFeatureSwitch
         }
 
         // Voice requests go through the chatbot, so switching either off stops the listening.
-        if (!on && feature is ServerFeature.VoiceCommands or ServerFeature.Chat && _voice.IsListening(guild.Id))
+        if (!on && feature is (ServerFeature.VoiceCommands or ServerFeature.Chat) && _voice.IsListening(guild.Id))
         {
-            await _voice.StopAsync(guild.Id, null);
-            note = " I stopped listening and left voice.";
+            await _voice.StopAsync(guild.Id);
+            note += " I stopped listening and left voice.";
         }
 
+        // Only the listening it started by itself: someone who asked for it can still have it.
+        if (!on && feature == ServerFeature.VoiceAutoJoin && _voice.IsAutoListening(guild.Id))
+        {
+            await _voice.StopAsync(guild.Id);
+            note += " I stopped listening and left voice. `/voice listen` still works.";
+        }
+
+        var server = await _settings.GetAsync(guild.Id);
         if (on && feature == ServerFeature.VoiceCommands)
         {
             // On, but the bot itself may not be able to: tell the admin now rather than at the first "listen".
-            note = _voice.SetupProblem is { } problem
+            note += _voice.SetupProblem is { } problem
                 ? $" But voice commands aren't set up on this bot yet - for whoever runs it: {problem}"
-                : " Join a voice channel and use `/voice listen` (or ask me to \"listen in voice\") to start.";
+                : server.IsEnabled(ServerFeature.VoiceAutoJoin)
+                    ? " I'll join voice by myself when people are in a voice channel (pick one channel with " +
+                      "`/settings voice-channel`)."
+                    : " Join a voice channel and use `/voice listen` (or ask me to \"listen in voice\") to start, " +
+                      "or turn on **Voice auto-join** so I join by myself.";
+        }
+
+        if (on && feature == ServerFeature.VoiceAutoJoin && !server.IsEnabled(ServerFeature.VoiceCommands))
+        {
+            note += " It does nothing until **Voice commands** is on too.";
+        }
+
+        // The channel status ("Listening for hey ModBot") is how people joining later see it's listening.
+        if (on && feature is (ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin) &&
+            server.AutoJoinsVoice && guild is Discord.WebSocket.SocketGuild { CurrentUser.GuildPermissions: var mine } &&
+            !mine.SetVoiceChannelStatus)
+        {
+            note += " But I need **Set Voice Channel Status** to join voice by myself (it's how people joining later " +
+                    "see I'm listening). Until then, use `/voice listen`.";
+        }
+
+        if (on && feature is (ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin or ServerFeature.Chat))
+        {
+            _voice.AutoJoinSoon(guild.Id); // anyone already in voice
         }
 
         return on
-            ? ServerSettings.IsOptIn(feature) ? $"✅ {name} is on.{note}" : $"✅ {name} is on again."
+            ? ServerSettings.IsOptIn(feature) || note.Length > 0 ? $"✅ {name} is on.{note}" : $"✅ {name} is on again."
             : $"🚫 {name} is off on this server.{note} Turn it back on any time.";
     }
 }

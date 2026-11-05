@@ -7,10 +7,20 @@ sees what it acted on, and anything it misheard) and replies to that.
 
 ## Privacy
 
-- Each server has to turn it on: `/settings feature` → Voice commands (off by default). Then someone in a voice
-  channel starts it with `/voice listen`, or by asking the chatbot ("@ModBot listen in voice").
-- When it starts, it posts a notice in the voice channel's chat saying it's listening and how to stop it, and tells
-  anyone who joins the channel later the same.
+- Each server has to turn it on: `/settings feature` → Voice commands (off by default).
+- Then someone starts it by hand with `/voice listen`, or by asking the chatbot ("@ModBot listen in voice").
+- **Voice auto-join**, also off until a server turns it on (`/settings feature` → Voice auto-join, or "@ModBot enable
+  voice auto-join"): the bot joins a voice channel by itself a few seconds after someone does, so "hey ModBot" is all
+  it takes. With several channels in use, it joins the busiest one (one voice connection per server).
+  `/settings voice-channel` limits it to one channel.
+- Each time it joins, it posts one line in the voice channel's chat: that it's listening for "hey ModBot", that speech
+  is turned into text on the bot's own computer and no audio is kept, and how to send it away. While it's there, the
+  channel's status (shown under its name in the channel list) reads "🎙️ Listening for "hey ModBot"", so anyone
+  joining later sees it too; the old status comes back when it leaves. No "stopped" notices.
+- **Voice auto-join needs Set Voice Channel Status**, since the status is how people joining later know it's
+  listening: without it, the bot doesn't join by itself (`/voice listen` still works, without the status).
+- When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
+  off for every server with `Voice:Chime`).
 - Speech is turned into text **on the machine running the bot** (Whisper). Nothing is sent to any other service.
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
   the bot's name, and thrown away. Only what's said after the name is acted on and posted. The log notes that a voice
@@ -19,12 +29,16 @@ sees what it acted on, and anything it misheard) and replies to that.
   friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
 - It only listens while the chatbot is on, since every request goes through it.
 - It stops when anyone in the channel says "hey ModBot, stop listening" or uses `/voice stop`, when everyone leaves,
-  after `Voice:MaxListenMinutes` (3 hours by default), or when music starts.
+  or when music starts. Started by hand, it also stops after `Voice:MaxListenMinutes` (3 hours by default).
+- Told to stop (or taken out of the channel by a moderator), it won't join that channel by itself again until
+  everyone has left it. Asking it to listen brings it straight back.
 
 ## Music
 
 Discord gives a bot one voice connection per server, and music (Lavalink) needs it to play. So the bot listens only
-while no music is playing: starting music stops the listening, and it won't start listening while music plays.
+while no music is playing: starting music stops the listening, and it won't start listening while music plays. With
+voice auto-join on, it comes back once the music player leaves voice (`Music:IdleTimeoutSeconds` after the last song,
+or straight after `/stop`).
 
 ## Setup (Windows)
 
@@ -54,7 +68,8 @@ Speech-to-text takes about a second of CPU per sentence; no graphics card is nee
 | `ModelPath` | `voice/models/ggml-base.en.bin` | The Whisper model. A bigger one (e.g. `ggml-small.en.bin`) hears better but is slower. |
 | `PauseMilliseconds` | `800` | How long a pause ends a sentence. |
 | `MaxSpeechSeconds` | `15` | Longest stretch turned into text at once. |
-| `MaxListenMinutes` | `180` | Stop listening after this long (`0` = never). |
+| `MaxListenMinutes` | `180` | Stop listening after this long (`0` = never). Only when started by hand: joined by itself, it stays until everyone's left. |
+| `Chime` | `true` | Play a short chime on hearing the bot's name. Needs **Speak**; the bot shows as unmuted while it can chime. |
 
 ## Patched Discord.Net
 
