@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ModBot.Common;
 
 namespace ModBot.Services.Search;
 
@@ -65,8 +66,7 @@ public class OllamaWebSearch : IWebSearch
             // Only results with a real web address: they're shown as links, so nothing else (javascript:, file:)
             // may get through.
             return (payload?.Results ?? [])
-                .Where(r => r is not null && Uri.TryCreate(r.Url, UriKind.Absolute, out var uri) &&
-                            uri.Scheme is "http" or "https")
+                .Where(r => r is not null && WebLinks.TryParse(r.Url, out _))
                 .Select(r => new WebResult((r!.Title ?? "").Trim(), r.Url!.Trim(), (r.Content ?? "").Trim()))
                 .ToList();
         }

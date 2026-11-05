@@ -10,7 +10,7 @@ using ModBot.Services.Storage;
 
 namespace ModBot.Modules.Search;
 
-/// <summary>/search: looks something up on the web and answers in the channel, with the sources in an embed. The same
+/// <summary>/search: looks something up on the web and answers in the channel, like a news post. The same
 /// as asking the chatbot ("@bot search for …", or "hey ModBot, search for …" in voice); the work is
 /// <see cref="WebSearchAnswerer"/>'s.</summary>
 [RequireContext(ContextType.Guild)]
@@ -26,7 +26,7 @@ public class SearchModule : InteractionModuleBase<SocketInteractionContext>
     }
 
     [RequireFeature(ServerFeature.WebSearch)]
-    [SlashCommand("search", "Looks something up on the web and answers here, with links to the sources.")]
+    [SlashCommand("search", "Looks something up on the web and answers here, with a link to the source.")]
     public async Task SearchAsync(
         [Summary("question", "What to look up")] [MaxLength(SearchRequestReader.MaxQueryLength)] string question)
     {
@@ -63,7 +63,8 @@ public class SearchModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        await FollowupAsync($"{user.Mention} asked: {TextTools.Escape(TextTools.Truncate(question, 150))}\n\n{found.Text}",
-            embed: found.Embed, allowedMentions: AllowedMentions.None);
+        // An answer is all in the embed, like a news post (Discord already shows who used /search above it).
+        await FollowupAsync(found.Text.Length > 0 ? found.Text : null, embed: found.Embed,
+            allowedMentions: AllowedMentions.None);
     }
 }

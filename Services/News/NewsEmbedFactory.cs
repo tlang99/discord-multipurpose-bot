@@ -1,11 +1,10 @@
 using Discord;
+using ModBot.Common;
 
 namespace ModBot.Services.News;
 
 public static class NewsEmbedFactory
 {
-    private static readonly Color NewsColor = new(0x2B, 0x8A, 0x3E);
-
     /// <param name="writeUp">The bot's own write-up, used as the description in place of the site's summary.</param>
     /// <param name="showOriginalSummary">With a write-up, also show the site's summary in a field, to check against.</param>
     public static Embed Build(NewsArticle article, string feedLabel, NewsWriteUp? writeUp = null,
@@ -13,10 +12,10 @@ public static class NewsEmbedFactory
     {
         var source = article.SourceName is { Length: > 0 } name ? name : null;
         var builder = new EmbedBuilder()
-            .WithTitle(Truncate(article.Title, EmbedBuilder.MaxTitleLength))
-            .WithColor(NewsColor);
+            .WithTitle(TextTools.Truncate(article.Title, EmbedBuilder.MaxTitleLength))
+            .WithColor(Colors.News);
 
-        if (Uri.TryCreate(article.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+        if (WebLinks.TryParse(article.Url, out var uri))
         {
             builder.WithUrl(uri.ToString());
         }
@@ -28,26 +27,26 @@ public static class NewsEmbedFactory
             {
                 // The source name comes from the feed: an over-long one would make Discord.Net throw, and the article
                 // would then fail on every check.
-                builder.AddField(Truncate($"From {source ?? "the article"}", EmbedFieldBuilder.MaxFieldNameLength),
-                    Truncate(original, 300));
+                builder.AddField(TextTools.Truncate($"From {source ?? "the article"}", EmbedFieldBuilder.MaxFieldNameLength),
+                    TextTools.Truncate(original, 300));
             }
 
             // Says plainly that the description is the bot's take, not the outlet's words.
-            builder.WithFooter(Truncate($"{(source is null ? "" : source + " • ")}{feedLabel} • AI write-up by " +
+            builder.WithFooter(TextTools.Truncate($"{(source is null ? "" : source + " • ")}{feedLabel} • AI write-up by " +
                                         writeUp.WriterName, EmbedFooterBuilder.MaxFooterTextLength));
         }
         else
         {
             if (article.Summary is { Length: > 0 } summary)
             {
-                builder.WithDescription(Truncate(summary, 350));
+                builder.WithDescription(TextTools.Truncate(summary, 350));
             }
 
-            builder.WithFooter(Truncate(source is null ? feedLabel : $"{source} • {feedLabel}",
+            builder.WithFooter(TextTools.Truncate(source is null ? feedLabel : $"{source} • {feedLabel}",
                 EmbedFooterBuilder.MaxFooterTextLength));
         }
 
-        if (Uri.TryCreate(article.ImageUrl, UriKind.Absolute, out var imageUri) && imageUri.Scheme == "https")
+        if (WebLinks.TryParse(article.ImageUrl, out var imageUri, httpsOnly: true))
         {
             builder.WithImageUrl(imageUri.ToString());
         }
@@ -59,7 +58,4 @@ public static class NewsEmbedFactory
 
         return builder.Build();
     }
-
-    private static string Truncate(string value, int max)
-        => value.Length <= max ? value : value[..(max - 1)].TrimEnd() + "…";
 }

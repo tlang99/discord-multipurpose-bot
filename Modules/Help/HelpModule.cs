@@ -111,7 +111,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
         if (server.IsEnabled(ServerFeature.WebSearch) && _search.SetupProblem is null)
         {
             builder.AddField("🔎 Web search",
-                "`/search question: …` - I look it up and answer, with links to the sources. Also \"@" +
+                "`/search question: …` - I look it up and answer, with a link to the source. Also \"@" +
                 $"{Context.Guild.CurrentUser.DisplayName} search for …\", or say \"hey " +
                 $"{Context.Guild.CurrentUser.DisplayName}, look up …\" in voice. Only the search words are sent to " +
                 "the web search.");

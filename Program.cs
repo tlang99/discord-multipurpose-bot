@@ -224,6 +224,14 @@ builder.Services.AddHttpClient<IWebSearch, OllamaWebSearch>(client =>
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", searchOptions.ApiKey);
     }
 });
+// The top result's preview image for the answer's picture: pages come from search results, so only the public
+// internet, like news feeds.
+builder.Services.AddHttpClient<PageImageFinder>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ModBot/1.0 (Discord bot link preview)");
+})
+.ConfigurePrimaryHttpMessageHandler(PublicNetworkHttpHandler.Create);
 builder.Services.AddSingleton<WebSearchAnswerer>();
 builder.Services.AddSingleton<INewsWriter, NewsWriter>();
 builder.Services.AddSingleton<ChatHandler>();
