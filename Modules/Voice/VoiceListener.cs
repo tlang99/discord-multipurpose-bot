@@ -274,6 +274,8 @@ public sealed class VoiceListener
                 if (voice.ConnectionState != ConnectionState.Connected)
                 {
                     _logger.LogInformation("Lost the voice connection in guild {GuildId}.", guild.Id);
+                    // Counts as a failed join, so a connection that keeps dropping isn't rejoined every few seconds.
+                    NoteFailedJoin(guild.Id, startedBy: null);
                     await EndAsync(guild.Id, session);
                 }
             }, LogLevel.Debug, "Couldn't check the voice connection in guild {GuildId}.", guild.Id);
@@ -437,6 +439,8 @@ public sealed class VoiceListener
         {
             _logger.LogDebug("Not joining voice by itself in guild {GuildId}: the last try failed {Ago} ago.", guildId,
                 DateTimeOffset.UtcNow - failed);
+            // Look again when the wait's over (this look may have taken the place of the one set for then).
+            ScheduleAutoJoin(guildId, AfterFailedJoin - (DateTimeOffset.UtcNow - failed) + TimeSpan.FromSeconds(1));
             return;
         }
 
@@ -474,6 +478,8 @@ public sealed class VoiceListener
         if (startedBy is null)
         {
             _failedJoins[guildId] = DateTimeOffset.UtcNow;
+            // Try again once the wait is over, even if nobody joins or leaves voice meanwhile.
+            ScheduleAutoJoin(guildId, AfterFailedJoin + TimeSpan.FromSeconds(1));
         }
     }
 
