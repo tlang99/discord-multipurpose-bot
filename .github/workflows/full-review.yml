@@ -60,16 +60,18 @@ jobs:
 
           # Every tracked file outside these (tests, docs, the upstream Discord.Net patch, git settings) must be in
           # exactly one area.
-          echo "$all" | jq -r '.[].paths' | tr ' ' '\n' | sed '/^$/d' | while read -r path; do
+          : > covered.txt
+          # A plain loop, not a pipe, so its "exit 1" stops the step. (The paths have no spaces, so they split cleanly.)
+          for path in $(echo "$all" | jq -r '.[].paths'); do
+            files=$(git ls-files -- "$path")
             # A path matching nothing (a renamed or deleted folder) would quietly shrink an area.
-            if [ -z "$(git ls-files -- "$path")" ]; then
-              echo "::error::Review area path \"$path\" matches no file (renamed or deleted?). Fix it in full-review.yml." >&2
+            if [ -z "$files" ]; then
+              echo "::error::Review area path \"$path\" matches no file (renamed or deleted?). Fix it in full-review.yml."
               exit 1
             fi
-            git ls-files -- "$path"
-          done | sort > covered.txt
-          # The loop above runs in a pipe, so its exit doesn't stop the step: check it here.
-          if [ "${PIPESTATUS[4]}" -ne 0 ]; then exit 1; fi
+            echo "$files" >> covered.txt
+          done
+          sort -o covered.txt covered.txt
           git ls-files | grep -vE '^(tests/|README\.md$|LICENSE\.md$|discord-net-patch/pr3288\.patch$|\.git(attributes|ignore)$)' \
             | sort > tracked.txt
           missing=$(comm -23 tracked.txt <(sort -u covered.txt))
@@ -237,9 +239,14 @@ jobs:
     permissions:
       contents: read
       issues: write
+    # One post at a time across every run (two runs started close together would otherwise both find no issue and
+    # both open one). A post is quick, so waiting costs nothing.
+    concurrency:
+      group: full-review-post
+      cancel-in-progress: false
     strategy:
       fail-fast: false
-      # One at a time, so two areas never race to create the label or an issue.
+      # One at a time within a run too, so two areas never race to create the label.
       max-parallel: 1
       matrix: ${{ fromJson(needs.areas.outputs.matrix) }}
     name: post (${{ matrix.name }})
@@ -260,7 +267,9 @@ jobs:
           # The review is model output from reading repo text, and this issue is public. Refuse anything that looks
           # like a token or key (in case text in the repo talked the reviewer into copying one), and defuse every @
           # with an invisible character after it, so nothing in the review can ping a real account.
-          # GitHub, Anthropic and Discord bot tokens, and private keys.
+          # A safety net, not a guarantee: it knows the shapes of GitHub, Anthropic and Discord bot tokens and private
+          # keys. Secrets with no fixed shape (the Sightengine key, values in appsettings.json) can't be recognised;
+          # they're kept out by the reviewer only reading the repo, where they never are.
           secrets='gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}'
           secrets="$secrets|[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}|-----BEGIN [A-Z ]*PRIVATE KEY"
           if grep -qE "($secrets)" full-review.md; then
@@ -268,8 +277,11 @@ jobs:
             exit 1
           fi
           sed -i 's/@/@\xe2\x80\x8b/g' full-review.md
-          # Images become plain links, so the review can't load anything (a tracking pixel) when the issue is viewed.
+          # Nothing in the review can load from elsewhere (a tracking pixel) when the issue is viewed: Markdown images
+          # become plain links, and HTML tags that fetch something get an invisible character after "<", so they show
+          # as text. (Not every "<": reviews quote C# like List<string>, which must stay readable.)
           sed -i 's/!\[/[/g' full-review.md
+          sed -i -E 's/<(\/?)(img|picture|source|video|audio|track|iframe|frame|object|embed|svg|image|link|style|base|meta|input|form)\b/<\xe2\x80\x8b\1\2/Ig' full-review.md
 
           # --force: fine if it already exists.
           gh label create review --repo "$REPO" --color 5319e7 --force \
