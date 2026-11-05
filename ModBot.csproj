@@ -29,9 +29,13 @@
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
   </ItemGroup>
 
-  <!-- The patched Discord.Net is built locally, not committed: say how, rather than leave a NuGet error. -->
+  <!-- The patched Discord.Net is built locally, not committed: say how, rather than leave a NuGet error. All four
+       packages, so a half-built folder (an interrupted build.ps1) gets this message too. -->
+  <PropertyGroup>
+    <PatchedDiscordNet>$(MSBuildThisFileDirectory)discord-net-patch/packages/</PatchedDiscordNet>
+  </PropertyGroup>
   <Target Name="CheckPatchedDiscordNet" BeforeTargets="Restore;CollectPackageReferences"
-          Condition="!Exists('$(MSBuildThisFileDirectory)discord-net-patch/packages/Discord.Net.WebSocket.3.20.2.1.nupkg')">
+          Condition="!Exists('$(PatchedDiscordNet)Discord.Net.Core.3.20.2.1.nupkg') Or !Exists('$(PatchedDiscordNet)Discord.Net.Rest.3.20.2.1.nupkg') Or !Exists('$(PatchedDiscordNet)Discord.Net.WebSocket.3.20.2.1.nupkg') Or !Exists('$(PatchedDiscordNet)Discord.Net.Dave.3.20.2.1.nupkg')">
     <Error Text="Build the patched Discord.Net first, once: powershell -ExecutionPolicy Bypass -File discord-net-patch/build.ps1 (pwsh on Linux/macOS). See discord-net-patch/build.ps1 for why." />
   </Target>
 

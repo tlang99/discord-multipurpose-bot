@@ -54,8 +54,12 @@ public class MusicService
     }
 
     /// <summary>The server's live player, or null if the bot isn't in voice there.</summary>
-    public MusicPlayer? GetPlayer(ulong guildId)
-        => _audioService.Players.TryGetPlayer<MusicPlayer>(guildId, out var player) &&
+    public MusicPlayer? GetPlayer(ulong guildId) => GetPlayer(_audioService, guildId);
+
+    /// <summary>The same, for code that can't depend on MusicService itself (VoiceListener, which MusicService uses):
+    /// the one definition of "music has the voice connection".</summary>
+    public static MusicPlayer? GetPlayer(IAudioService audioService, ulong guildId)
+        => audioService.Players.TryGetPlayer<MusicPlayer>(guildId, out var player) &&
            player is not null && player.State != PlayerState.Destroyed
             ? player
             : null;

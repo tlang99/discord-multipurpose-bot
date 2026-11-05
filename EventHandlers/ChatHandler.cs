@@ -128,10 +128,15 @@ public partial class ChatHandler
     public async Task HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel, string request)
     {
         var guild = channel.Guild;
+        if (!ChannelAccess.CanPost(guild.CurrentUser, channel))
+        {
+            await StopListeningCantPostAsync(channel);
+            return;
+        }
+
         // The speaker has to be able to post where the answer goes themselves: saying it mustn't put a poll or LFG in
         // a channel they couldn't type in.
-        if (!_options.IsEnabled || !ChannelAccess.CanPost(guild.CurrentUser, channel) ||
-            !ChannelAccess.CanPost(speaker, channel) ||
+        if (!_options.IsEnabled || !ChannelAccess.CanPost(speaker, channel) ||
             await AllowedAsync(guild, speaker, request) is not { } allowed ||
             !allowed.Server.IsEnabled(ServerFeature.VoiceCommands))
         {
@@ -153,11 +158,24 @@ public partial class ChatHandler
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Couldn't post a voice request in channel {ChannelId}.", channel.Id);
+            _logger.LogWarning(ex, "Couldn't post a voice request in channel {ChannelId}.", channel.Id);
+            await StopListeningCantPostAsync(channel);
             return;
         }
 
         await RespondAsync(allowed, new ChatRequest(channel, heard, speaker, request, request, Spoken: true));
+    }
+
+    /// <summary>
+    /// The bot can't post where voice requests are answered any more (a permission changed mid-session): stop
+    /// listening rather than sit in the channel ignoring everyone. It can't say so there, so leaving the voice channel
+    /// is the sign; the log says why.
+    /// </summary>
+    private async Task StopListeningCantPostAsync(SocketTextChannel channel)
+    {
+        _logger.LogWarning("Stopped listening in guild {GuildId}: can't post voice replies in #{Channel} any more.",
+            channel.Guild.Id, channel.Name);
+        await _voice.StopAsync(channel.Guild.Id, notice: null);
     }
 
     /// <summary>A request to the chatbot, typed or said.</summary>

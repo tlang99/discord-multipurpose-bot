@@ -10,6 +10,7 @@ using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.EventHandlers;
 using ModBot.Models;
+using ModBot.Modules.Music;
 using ModBot.Services.Moderation;
 using ModBot.Services.Settings;
 using ModBot.Services.Voice;
@@ -40,6 +41,9 @@ public sealed class VoiceListener
     /// <summary>Sentences waiting to be turned into text, at most. Past this, new ones are dropped rather than queued:
     /// noisy mics shouldn't build a backlog that holds audio in memory and delays every answer.</summary>
     private const int MaxWaitingSpeech = 4;
+
+    /// <summary>Of those, at most this many from one person, so one noisy mic leaves room for everyone else.</summary>
+    private const int MaxWaitingSpeechEach = 2;
 
     /// <summary>Shorter than this is a cough or a click, not a sentence.</summary>
     private static readonly TimeSpan ShortestSpeech = TimeSpan.FromMilliseconds(400);
@@ -397,7 +401,7 @@ public sealed class VoiceListener
                     continue;
                 }
 
-                if (!session.TryQueueSpeech(MaxWaitingSpeech))
+                if (!session.TryQueueSpeech(userId, MaxWaitingSpeech, MaxWaitingSpeechEach))
                 {
                     _logger.LogDebug("Dropped a sentence in guild {GuildId}: too many waiting.", session.Guild.Id);
                     continue;
@@ -411,7 +415,7 @@ public sealed class VoiceListener
                     }
                     finally
                     {
-                        session.SpeechDone();
+                        session.SpeechDone(userId);
                     }
                 }, LogLevel.Warning, "Couldn't handle speech in guild {GuildId}.", session.Guild.Id);
             }
@@ -467,9 +471,7 @@ public sealed class VoiceListener
         await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request);
     }
 
-    private bool MusicIsPlaying(ulong guildId)
-        => _audio.Players.TryGetPlayer(guildId, out var player) && player is not null &&
-           player.State != PlayerState.Destroyed;
+    private bool MusicIsPlaying(ulong guildId) => MusicService.GetPlayer(_audio, guildId) is not null;
 
     private async Task LeaveAsync(SocketVoiceChannel channel)
     {
@@ -531,21 +533,37 @@ public sealed class VoiceListener
             }
         }
 
+        private readonly ConcurrentDictionary<ulong, int> _waitingByUser = new();
+        private readonly Lock _waitingLock = new();
         private int _waitingSpeech;
 
-        /// <summary>Counts a sentence in, unless <paramref name="max"/> are already waiting.</summary>
-        public bool TryQueueSpeech(int max)
+        /// <summary>Counts one of <paramref name="userId"/>'s sentences in, unless <paramref name="max"/> are already
+        /// waiting in all, or <paramref name="maxEach"/> of theirs: one noisy mic can't take every place and crowd out
+        /// everyone else.</summary>
+        public bool TryQueueSpeech(ulong userId, int max, int maxEach)
         {
-            if (Interlocked.Increment(ref _waitingSpeech) <= max)
+            lock (_waitingLock)
             {
+                var theirs = _waitingByUser.GetValueOrDefault(userId);
+                if (_waitingSpeech >= max || theirs >= maxEach)
+                {
+                    return false;
+                }
+
+                _waitingSpeech++;
+                _waitingByUser[userId] = theirs + 1;
                 return true;
             }
-
-            Interlocked.Decrement(ref _waitingSpeech);
-            return false;
         }
 
-        public void SpeechDone() => Interlocked.Decrement(ref _waitingSpeech);
+        public void SpeechDone(ulong userId)
+        {
+            lock (_waitingLock)
+            {
+                _waitingSpeech--;
+                _waitingByUser[userId] = Math.Max(0, _waitingByUser.GetValueOrDefault(userId) - 1);
+            }
+        }
 
         public void HeardWakeWord(ulong userId) => _wakeWords[userId] = DateTimeOffset.UtcNow;
 
