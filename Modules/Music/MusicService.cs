@@ -113,7 +113,7 @@ public class MusicService
         if (!result.HasMatches)
         {
             return new([], null, result.IsFailed
-                ? $"Couldn't load that{(result.Exception?.Message is { } reason ? $": {Format.Sanitize(reason)}" : ".")}"
+                ? $"Couldn't load that{(result.Exception?.Message is { } reason ? $": {TextTools.Escape(reason)}" : ".")}"
                 : isLink ? "That link isn't a YouTube song or playlist I can play." : "No results found.");
         }
 

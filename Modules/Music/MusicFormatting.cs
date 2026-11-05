@@ -70,7 +70,7 @@ public static class MusicFormatting
             .WithColor(Colors.Music)
             .WithAuthor(heading)
             .WithDescription(TrackLink(track))
-            .AddField("By", Format.Sanitize(track.Author ?? "Unknown"), inline: true)
+            .AddField("By", TextTools.Escape(track.Author ?? "Unknown"), inline: true)
             .AddField("Length", Length(track), inline: true);
 
         if (player.Queue.Count > 0)

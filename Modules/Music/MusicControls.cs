@@ -116,7 +116,7 @@ public class MusicControls
         var title = player.State == PlayerState.Paused ? "Paused" : "Now playing";
         if (item is QueueTrackItem queued)
         {
-            title += $" - {Format.Sanitize(queued.Song.PickerName)}'s pick";
+            title += $" - {TextTools.Escape(queued.Song.PickerName)}'s pick";
         }
 
         var embed = MusicFormatting.NowPlayingEmbed(track, player, title).ToEmbedBuilder();

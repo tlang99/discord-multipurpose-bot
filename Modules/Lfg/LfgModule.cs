@@ -112,8 +112,8 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         return list.Count == 0
             ? $"This server hasn't set up any {what}s for LFG yet - a server admin can add them with " +
               "`/settings lfg-game`. Leave it empty to post without one."
-            : $"`{Format.Sanitize(typed.Trim())}` isn't one of this server's {what}s. Pick one of: " +
-              $"{string.Join(", ", list.Select(n => $"**{Format.Sanitize(n)}**"))}.";
+            : $"`{typed.Trim().Replace("`", "")}` isn't one of this server's {what}s. Pick one of: " +
+              $"{string.Join(", ", list.Select(n => $"**{TextTools.Escape(n)}**"))}.";
     }
 
     /// <summary>The playlist or rank a typed value names (by name or other name), or, if it names none, what to tell
@@ -225,7 +225,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
         }
         else if (await LfgPoster.WhyUnsafeToSelfAssignAsync(Context.Guild, role!) is { } reason)
         {
-            await FollowupAsync($"There's already a **@{Format.Sanitize(role!.Name)}** role, but it {reason}. Members " +
+            await FollowupAsync($"There's already a **@{TextTools.Escape(role!.Name)}** role, but it {reason}. Members " +
                                "can give the ping role to themselves, so it must be a plain role with no permissions. " +
                                "Remove those permissions, or rename that role and run this again to create a fresh one.",
                 ephemeral: true, allowedMentions: AllowedMentions.None);
@@ -234,7 +234,7 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
         if (role!.Position >= bot.Hierarchy)
         {
-            await FollowupAsync($"The **@{Format.Sanitize(role.Name)}** role is above my highest role, so I can't hand it " +
+            await FollowupAsync($"The **@{TextTools.Escape(role.Name)}** role is above my highest role, so I can't hand it " +
                                "out. Drag my role above it in Server Settings → Roles, then run this again.",
                 ephemeral: true);
             return;
@@ -254,8 +254,8 @@ public class LfgModule : InteractionModuleBase<SocketInteractionContext>
 
         var pinned = await MessageTools.TryPinAsync(panel, _logger, "the LFG ping panel");
 
-        await FollowupAsync((createdRole ? $"Created the **@{Format.Sanitize(role.Name)}** role. " : "") +
-                           (madeMentionable ? $"Made **@{Format.Sanitize(role.Name)}** mentionable so pings notify people. " : "") +
+        await FollowupAsync((createdRole ? $"Created the **@{TextTools.Escape(role.Name)}** role. " : "") +
+                           (madeMentionable ? $"Made **@{TextTools.Escape(role.Name)}** mentionable so pings notify people. " : "") +
                            $"Posted the opt-in panel{(pinned ? " and pinned it" : " (I couldn't pin it - pin it yourself if you like)")}. " +
                            "New `/lfg` posts will ping the role, at most once every " +
                            $"{(int)_poster.PingCooldown.TotalMinutes} minutes per person.",
