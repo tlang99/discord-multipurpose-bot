@@ -11,7 +11,6 @@ namespace ModBot.Modules.Voice;
 /// <see cref="VoiceListener"/>'s.</summary>
 [Group("voice", "Voice commands: say \"hey ModBot\" in a voice channel to ask it things.")]
 [RequireContext(ContextType.Guild)]
-[RequireFeature(ServerFeature.VoiceCommands)]
 public class VoiceModule : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly VoiceListener _voice;
@@ -21,6 +20,9 @@ public class VoiceModule : InteractionModuleBase<SocketInteractionContext>
         _voice = voice;
     }
 
+    // Only starting needs the feature on. Stopping always works, so nobody's ever left unable to stop it, whatever
+    // the switch says.
+    [RequireFeature(ServerFeature.VoiceCommands)]
     [SlashCommand("listen", "Joins your voice channel and listens for \"hey ModBot...\" requests.")]
     public async Task ListenAsync()
     {

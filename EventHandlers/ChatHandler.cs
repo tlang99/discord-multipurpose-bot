@@ -151,10 +151,20 @@ public partial class ChatHandler
             return;
         }
 
+        // What was heard is posted in the bot's name, so it follows the rules for the bot's own posts: the server's word
+        // list and invite blocking always apply, auto-mod on or off (a mod's own words excepted, as for their polls and
+        // reminders). Typed, the member's own message would be up to auto-mod; said, the bot would be the one posting.
+        if (TextFilter.AppliesToBotPost(speaker) && TextFilter.FindViolation(request, allowed.Settings) is not null)
+        {
+            return;
+        }
+
         IUserMessage heard;
         try
         {
-            heard = await channel.SendMessageAsync(HeardText(speaker, request), allowedMentions: AllowedMentions.None);
+            // No link previews: a misheard or spoken link shouldn't turn into a preview card under the bot's name.
+            heard = await channel.SendMessageAsync(HeardText(speaker, request), allowedMentions: AllowedMentions.None,
+                flags: MessageFlags.SuppressEmbeds);
         }
         catch (Exception ex)
         {
@@ -275,11 +285,12 @@ public partial class ChatHandler
                 return;
             }
 
-            var answer = !server.IsEnabled(ServerFeature.VoiceCommands)
-                ? ServerSettingsService.TurnedOff(ServerFeature.VoiceCommands)
-                : voiceRequest == VoiceRequest.Listen
-                    ? await _voice.StartAsync(voiceAsker, channel)
-                    : await _voice.StopForAsync(voiceAsker, channel);
+            // As with /voice: only starting needs the feature on, stopping always works.
+            var answer = voiceRequest == VoiceRequest.StopListening
+                ? await _voice.StopForAsync(voiceAsker, channel)
+                : !server.IsEnabled(ServerFeature.VoiceCommands)
+                    ? ServerSettingsService.TurnedOff(ServerFeature.VoiceCommands)
+                    : await _voice.StartAsync(voiceAsker, channel);
             _logger.LogInformation("Chat action {Action} for {User} ({UserId}) in #{Channel}.", voiceRequest,
                 asker.Username, asker.Id, channel.Name);
             if (answer.Length > 0)
