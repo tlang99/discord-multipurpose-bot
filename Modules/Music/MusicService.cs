@@ -175,11 +175,17 @@ public class MusicService
 
         // Listening for voice commands holds the server's one voice connection, which music needs to play. Music wins:
         // stop listening and give Discord a moment to see the bot leave before Lavalink joins. (With voice auto-join on,
-        // it comes back once the music's done and the player has left.)
-        if (GetPlayer(user.Guild.Id) is null && _voice.IsListening(user.Guild.Id))
+        // it comes back once the music's done and the player has left.) Until the player has joined, auto-join keeps
+        // off the connection, so it can't grab it back in between.
+        var joining = GetPlayer(user.Guild.Id) is null;
+        if (joining)
         {
-            await _voice.StopAsync(user.Guild.Id);
-            await Task.Delay(TimeSpan.FromSeconds(1));
+            var wasListening = _voice.IsListening(user.Guild.Id);
+            await _voice.MakeWayForMusicAsync(user.Guild.Id);
+            if (wasListening)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
         }
 
         try
@@ -207,6 +213,13 @@ public class MusicService
             _logger.LogWarning(ex, "Couldn't get a music player for guild {GuildId}. Is Lavalink running at {Url}?",
                 user.Guild.Id, _options.LavalinkUrl);
             return (null, "The music server isn't reachable right now - let a server admin know.");
+        }
+        finally
+        {
+            if (joining)
+            {
+                _voice.MusicJoined(user.Guild.Id);
+            }
         }
     }
 

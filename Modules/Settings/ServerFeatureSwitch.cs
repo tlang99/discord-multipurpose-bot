@@ -108,6 +108,15 @@ public class ServerFeatureSwitch
             note += " It does nothing until **Voice commands** is on too.";
         }
 
+        // The channel status ("Listening for hey ModBot") is how people joining later see it's listening.
+        if (on && feature is (ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin) &&
+            server.AutoJoinsVoice && guild is Discord.WebSocket.SocketGuild { CurrentUser.GuildPermissions: var mine } &&
+            !mine.SetVoiceChannelStatus)
+        {
+            note += " Give me **Set Voice Channel Status** too, so the channel shows I'm listening to anyone who " +
+                    "joins later.";
+        }
+
         if (on && feature is (ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin or ServerFeature.Chat))
         {
             _voice.AutoJoinSoon(guild.Id); // anyone already in voice

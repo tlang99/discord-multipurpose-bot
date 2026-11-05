@@ -210,9 +210,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         [ChannelTypes(ChannelType.Voice)]
         IVoiceChannel? channel = null)
     {
-        if (channel is IStageChannel)
+        // Auto-join skips the AFK channel (people there are away), so picking it would mean never joining.
+        // ([ChannelTypes(ChannelType.Voice)] already keeps stage channels out.)
+        if (channel is not null && channel.Id == Context.Guild.AFKChannel?.Id)
         {
-            await RespondAsync("Pick a normal voice channel: I don't listen in stage channels.", ephemeral: true);
+            await RespondAsync("That's the server's AFK channel, which I don't listen in. Pick another one.",
+                ephemeral: true);
             return;
         }
 

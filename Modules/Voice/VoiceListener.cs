@@ -86,6 +86,9 @@ public sealed class VoiceListener
     private readonly ConcurrentDictionary<ulong, bool> _autoJoinPending = new();
     private readonly ConcurrentDictionary<ulong, DateTimeOffset> _failedJoins = new();
 
+    /// <summary>Servers where music is joining voice right now: auto-join keeps off the connection until it has.</summary>
+    private readonly ConcurrentDictionary<ulong, bool> _musicStarting = new();
+
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, IAudioService audio, Lazy<ChatHandler> chat,
         ServerSettingsService settings, IOptions<ChatOptions> chatOptions, IOptions<VoiceOptions> options,
         ILogger<VoiceListener> logger)
@@ -229,6 +232,7 @@ public sealed class VoiceListener
             voice = await connecting;
             session.Voice = voice;
             _sessions[guild.Id] = session;
+            _failedJoins.TryRemove(guild.Id, out _);
         }
         catch (Exception ex)
         {
@@ -374,8 +378,13 @@ public sealed class VoiceListener
     /// (a crash, a power cut).</summary>
     private async Task ClearLeftoverStatusesAsync(SocketGuild guild)
     {
+        if (_sessions.ContainsKey(guild.Id))
+        {
+            return; // reconnected mid-session: that status is current
+        }
+
         var ours = ListeningStatus(guild.CurrentUser.DisplayName);
-        foreach (var channel in guild.VoiceChannels.Where(c => c.Status == ours && !_sessions.ContainsKey(guild.Id)))
+        foreach (var channel in guild.VoiceChannels.Where(c => c.Status == ours))
         {
             try
             {
@@ -419,7 +428,7 @@ public sealed class VoiceListener
     private async Task AutoJoinHoldingLockAsync(ulong guildId)
     {
         if (_client.GetGuild(guildId) is not { } guild || _sessions.ContainsKey(guildId) || SetupProblem is not null ||
-            !_chatOptions.IsEnabled || MusicIsPlaying(guildId))
+            !_chatOptions.IsEnabled || MusicIsPlaying(guildId) || _musicStarting.ContainsKey(guildId))
         {
             return;
         }
@@ -442,6 +451,11 @@ public sealed class VoiceListener
             .Where(c => c is not SocketStageChannel && c.Id != guild.AFKChannel?.Id && CanJoinByItself(me, c))
             .Select(c => new AutoJoinPicker.Channel(c.Id, c.ConnectedUsers.Count(u => !u.IsBot), c.Position));
         var stayOut = _stayOut.TryGetValue(guildId, out var outOf) ? outOf : (ulong?)null;
+        if (stayOut is { } gone && guild.GetVoiceChannel(gone) is null)
+        {
+            _stayOut.TryRemove(new KeyValuePair<ulong, ulong>(guildId, gone)); // that channel was deleted
+            stayOut = null;
+        }
         if (AutoJoinPicker.Pick(candidates, server.AutoJoinChannel.ChannelId, stayOut) is not { } id ||
             guild.GetVoiceChannel(id) is not { } channel)
         {
@@ -470,6 +484,24 @@ public sealed class VoiceListener
         return ChannelAccess.CanListenAndReplyIn(me, channel) &&
                (channel.UserLimit is not > 0 || channel.ConnectedUsers.Count < channel.UserLimit ||
                 me.GetPermissions(channel).MoveMembers);
+    }
+
+    /// <summary>
+    /// Music is about to take the voice connection: stops any listening, and keeps voice auto-join off it until
+    /// <see cref="MusicJoined"/>. Otherwise a slow music join could lose the connection to the bot rejoining to listen
+    /// (its own leave sets auto-join looking, a few seconds later).
+    /// </summary>
+    public async Task MakeWayForMusicAsync(ulong guildId)
+    {
+        _musicStarting[guildId] = true;
+        await StopAsync(guildId);
+    }
+
+    /// <summary>Music has joined, or failed to. If it failed, auto-join can have the connection back.</summary>
+    public void MusicJoined(ulong guildId)
+    {
+        _musicStarting.TryRemove(guildId, out _);
+        ScheduleAutoJoin(guildId, AfterLeavingDelay); // nothing happens while music has the connection
     }
 
     /// <summary>Listening because it joined by itself (not because someone asked).</summary>
@@ -583,9 +615,16 @@ public sealed class VoiceListener
             if (after.VoiceChannel?.Id != session.Channel.Id)
             {
                 var moved = after.VoiceChannel is not null;
-                Background.Run(_logger,
-                    () => EndAsync(member.Guild.Id, session, leave: moved, stayOut: true),
-                    LogLevel.Debug, "Couldn't stop listening in guild {GuildId}.", member.Guild.Id);
+                Background.Run(_logger, async () =>
+                {
+                    await EndAsync(member.Guild.Id, session, leave: moved, stayOut: true);
+                    // Disconnected outright, there's no leave of its own to set auto-join looking: do it here, for
+                    // people in other channels.
+                    if (!moved)
+                    {
+                        ScheduleAutoJoin(guildId, AfterLeavingDelay);
+                    }
+                }, LogLevel.Debug, "Couldn't stop listening in guild {GuildId}.", member.Guild.Id);
             }
 
             return Task.CompletedTask;
@@ -822,9 +861,9 @@ public sealed class VoiceListener
         public async Task StopChimingAsync()
         {
             CanChime = false;
-            // A chime that's playing ends at once (Stopping is cancelled) or within its own 5-second limit; this is
-            // only a backstop, past which the stream is closed anyway.
-            var waited = await _chiming.WaitAsync(TimeSpan.FromSeconds(6));
+            // A chime that's playing ends at once (Stopping is cancelled first). This runs holding the start/stop lock
+            // (music waits on it), so it waits only briefly, then closes the stream anyway.
+            var waited = await _chiming.WaitAsync(TimeSpan.FromSeconds(1));
             try
             {
                 _sound?.Dispose();

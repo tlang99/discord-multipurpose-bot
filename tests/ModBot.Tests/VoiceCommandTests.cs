@@ -230,6 +230,7 @@ public class VoiceCommandsSwitchTests
     [InlineData("enable auto-joining", true)]
     [InlineData("turn off voice auto join for this server", false)]
     [InlineData("turn auto-join voice on here", true)]
+    [InlineData("enable auto joining voice", true)]
     public void Admins_can_switch_auto_join_from_chat(string message, bool on)
         => Assert.Equal(new FeatureSwitchRequest(ServerFeature.VoiceAutoJoin, on), SettingsRequestReader.Read(message));
 }
