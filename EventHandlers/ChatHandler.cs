@@ -128,9 +128,19 @@ public partial class ChatHandler
     public async Task HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel, string request)
     {
         var guild = channel.Guild;
+        // The speaker has to be able to post where the answer goes themselves: saying it mustn't put a poll or LFG in
+        // a channel they couldn't type in.
         if (!_options.IsEnabled || !ChannelAccess.CanPost(guild.CurrentUser, channel) ||
+            !ChannelAccess.CanPost(speaker, channel) ||
             await AllowedAsync(guild, speaker, request) is not { } allowed ||
             !allowed.Server.IsEnabled(ServerFeature.VoiceCommands))
+        {
+            return;
+        }
+
+        // Typed, a request during the cooldown gets a ⏳ on it. Said, there'd be nothing to put it on but a fresh post
+        // of what was heard, so it's just dropped: a chatty speaker or a noisy mic can't flood the channel.
+        if (IsCoolingDown(guild.Id, speaker.Id))
         {
             return;
         }
@@ -563,6 +573,11 @@ public partial class ChatHandler
                 .Concat(embed.Fields.SelectMany(f => new[] { f.Name, f.Value }))
                 .Where(s => !string.IsNullOrEmpty(s)));
 
+    /// <summary>True if the person would have to wait, without counting this as a question.</summary>
+    private bool IsCoolingDown(ulong guildId, ulong userId)
+        => _lastQuestion.TryGetValue((guildId, userId), out var last) &&
+           DateTimeOffset.UtcNow - last < TimeSpan.FromSeconds(Math.Max(0, _options.CooldownSeconds));
+
     /// <summary>Records the question if the person is allowed to ask now; true if they have to wait.</summary>
     private bool IsOnCooldown(ulong guildId, ulong userId)
     {
@@ -647,11 +662,11 @@ public partial class ChatHandler
         if (message.Author.Id == bot.Id)
         {
             // Its posts of what someone said in voice are that person talking, not the bot.
-            if (HeardRegex().Match(message.Content) is { Success: true } heard)
+            if (ReadHeardText(message.Content) is var (speakerId, said))
             {
-                var speaker = guild.GetUser(ulong.Parse(heard.Groups["id"].Value))?.DisplayName ?? "someone";
+                var speaker = guild.GetUser(speakerId)?.DisplayName ?? "someone";
                 speakers.Add(speaker);
-                return $"{speaker} (in voice): {UnescapeRegex().Replace(heard.Groups["said"].Value, "$1")}";
+                return $"{speaker} (in voice): {said}";
             }
 
             // The bot's embeds (LFG cards, music announcements) have no text and aren't conversation.
@@ -770,8 +785,14 @@ public partial class ChatHandler
     }
 
     /// <summary>The bot's post of a voice request: "🎙️ @name: what they said" (escaped, so it shows as said). Read back
-    /// by <see cref="HeardRegex"/> when it turns up in the channel history.</summary>
+    /// by <see cref="ReadHeardText"/> when it turns up in the channel history.</summary>
     public static string HeardText(IUser speaker, string said) => $"🎙️ {speaker.Mention}: {TextTools.Escape(said)}";
+
+    /// <summary>Who spoke and what they said, from a <see cref="HeardText"/> post; null for any other message.</summary>
+    public static (ulong SpeakerId, string Said)? ReadHeardText(string content)
+        => HeardRegex().Match(content) is { Success: true } heard
+            ? (ulong.Parse(heard.Groups["id"].Value), UnescapeRegex().Replace(heard.Groups["said"].Value, "$1"))
+            : null;
 
     [GeneratedRegex(@"^🎙️ <@!?(?<id>\d+)>: (?<said>.+)$", RegexOptions.Singleline)]
     private static partial Regex HeardRegex();

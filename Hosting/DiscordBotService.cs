@@ -260,8 +260,12 @@ public class DiscordBotService : BackgroundService
         };
 
         // Voice encryption (DAVE) warns about every packet it can't decrypt yet while it's being set up, a few dozen
-        // in the first second or two of listening. That's expected, not a problem: keep it out of the log files.
-        if (level == LogLevel.Warning && message.Source.StartsWith("Dave", StringComparison.Ordinal))
+        // in the first second or two of listening. That's expected, not a problem: keep those two out of the log
+        // files. Any other DAVE warning is kept, as it could be a real encryption failure.
+        if (level == LogLevel.Warning && message.Source?.StartsWith("Dave", StringComparison.Ordinal) == true &&
+            message.Message is { } text &&
+            (text.StartsWith("Failed to decrypt audio packet", StringComparison.Ordinal) ||
+             text.StartsWith("Unexpected transition id", StringComparison.Ordinal)))
         {
             level = LogLevel.Debug;
         }

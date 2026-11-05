@@ -7,7 +7,7 @@ still works after a Discord.Net or libdave update, without the rest of the bot.
 
 ## Setup
 
-The same as voice commands in the bot: `powershell -File voice/setup.ps1` (see [voice/README.md](../../voice/README.md)).
+The same as voice commands in the bot: `powershell -ExecutionPolicy Bypass -File voice/setup.ps1` (see [voice/README.md](../../voice/README.md)).
 The tool uses the bot's Discord.Net build too (`discord-net-patch/`).
 
 ## Running it

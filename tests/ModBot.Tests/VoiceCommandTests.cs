@@ -143,3 +143,51 @@ public class VoiceCommandsSwitchTests
     public void Admins_can_switch_it_from_chat(string message, bool on)
         => Assert.Equal(new FeatureSwitchRequest(ServerFeature.VoiceCommands, on), SettingsRequestReader.Read(message));
 }
+
+/// <summary>The bot's "🎙️ @name: what they said" posts, read back as that person talking when they're in the
+/// history the chatbot sees.</summary>
+public class HeardTextTests
+{
+    private sealed class Speaker(ulong id) : Discord.IUser
+    {
+        public ulong Id { get; } = id;
+        public string Mention => $"<@{Id}>";
+        public string AvatarId => "";
+        public string Discriminator => "0000";
+        public ushort DiscriminatorValue => 0;
+        public bool IsBot => false;
+        public bool IsWebhook => false;
+        public string Username => "speaker";
+        public Discord.UserProperties? PublicFlags => null;
+        public string GlobalName => "Speaker";
+        public string AvatarDecorationHash => "";
+        public ulong? AvatarDecorationSkuId => null;
+        public Discord.PrimaryGuild? PrimaryGuild => null;
+        public DateTimeOffset CreatedAt => default;
+        public Discord.UserStatus Status => Discord.UserStatus.Online;
+        public IReadOnlyCollection<Discord.ClientType> ActiveClients => [];
+        public IReadOnlyCollection<Discord.IActivity> Activities => [];
+        public string GetAvatarUrl(Discord.ImageFormat format = Discord.ImageFormat.Auto, ushort size = 128) => "";
+        public string GetDefaultAvatarUrl() => "";
+        public string GetDisplayAvatarUrl(Discord.ImageFormat format = Discord.ImageFormat.Auto, ushort size = 128) => "";
+        public string GetAvatarDecorationUrl() => "";
+        public Task<Discord.IDMChannel> CreateDMChannelAsync(Discord.RequestOptions? options = null)
+            => throw new NotSupportedException();
+    }
+
+    [Theory]
+    [InlineData("make an LFG for ranked")]
+    [InlineData("play *NSYNC [live] - Bye Bye Bye")] // markdown and link brackets, escaped in the post
+    [InlineData("what's 2 > 1? #facts")]
+    public void Reads_back_who_said_what(string said)
+    {
+        var post = EventHandlers.ChatHandler.HeardText(new Speaker(42), said);
+
+        Assert.Equal((42UL, said), EventHandlers.ChatHandler.ReadHeardText(post));
+    }
+
+    [Theory]
+    [InlineData("Hey <@42>: not one of mine")]
+    [InlineData("🎙️ Listening for voice commands in <#1>")]
+    public void Ignores_the_bots_other_posts(string content) => Assert.Null(EventHandlers.ChatHandler.ReadHeardText(content));
+}

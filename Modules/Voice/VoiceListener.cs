@@ -32,6 +32,13 @@ public sealed class VoiceListener
 
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
+    /// <summary>How long a dropped voice connection has to come back before listening ends.</summary>
+    private static readonly TimeSpan ReconnectGrace = TimeSpan.FromSeconds(15);
+
+    /// <summary>Sentences waiting to be turned into text, at most. Past this, new ones are dropped rather than queued:
+    /// noisy mics shouldn't build a backlog that holds audio in memory and delays every answer.</summary>
+    private const int MaxWaitingSpeech = 4;
+
     /// <summary>Shorter than this is a cough or a click, not a sentence.</summary>
     private static readonly TimeSpan ShortestSpeech = TimeSpan.FromMilliseconds(400);
 
@@ -42,6 +49,7 @@ public sealed class VoiceListener
     private readonly VoiceOptions _options;
     private readonly ILogger<VoiceListener> _logger;
     private readonly ConcurrentDictionary<ulong, Session> _sessions = new();
+    private readonly ConcurrentDictionary<ulong, bool> _joining = new();
     private readonly KeyedLock<ulong> _startStop = new();
 
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, IAudioService audio, Lazy<ChatHandler> chat,
@@ -59,7 +67,9 @@ public sealed class VoiceListener
     /// <summary>Whether voice commands can work on this bot at all; null if they can, else why not.</summary>
     public string? SetupProblem => _speech.Problem;
 
-    public bool IsListening(ulong guildId) => _sessions.ContainsKey(guildId);
+    /// <summary>Listening, or joining to listen. Music checks this before it takes the voice connection, so it counts
+    /// while joining too; <see cref="StopAsync"/> then waits for the join to finish before ending it.</summary>
+    public bool IsListening(ulong guildId) => _sessions.ContainsKey(guildId) || _joining.ContainsKey(guildId);
 
     /// <summary>
     /// Joins <paramref name="user"/>'s voice channel and starts listening, posting a notice that says so where the
@@ -108,6 +118,8 @@ public sealed class VoiceListener
             }
 
             IAudioClient voice;
+            var session = new Session(guild, channel, replyChannel);
+            _joining[guild.Id] = true;
             try
             {
                 // Muted (it never talks), but not deafened: a deafened bot is sent no audio.
@@ -119,6 +131,7 @@ public sealed class VoiceListener
                 }
 
                 voice = await connecting;
+                _sessions[guild.Id] = session;
             }
             catch (Exception ex)
             {
@@ -126,9 +139,11 @@ public sealed class VoiceListener
                 await LeaveAsync(channel);
                 return $"I couldn't join {channel.Mention} - try again in a moment.";
             }
+            finally
+            {
+                _joining.TryRemove(guild.Id, out _);
+            }
 
-            var session = new Session(guild, channel, replyChannel);
-            _sessions[guild.Id] = session;
             voice.StreamCreated += (userId, stream) =>
             {
                 Listen(session, userId, stream);
@@ -141,9 +156,17 @@ public sealed class VoiceListener
             };
             voice.Disconnected += _ =>
             {
-                // Kicked, moved, or the connection dropped: nothing more to hear.
-                Background.Run(_logger, () => EndAsync(guild.Id, session, null, leave: false), LogLevel.Debug,
-                    "Couldn't clean up after voice dropped in guild {GuildId}.", guild.Id);
+                // Discord.Net reconnects after a blip, so only a connection that stays down ends it. (Being kicked
+                // or moved is seen sooner, in OnVoiceStateUpdatedAsync.)
+                Background.Run(_logger, async () =>
+                {
+                    await Task.Delay(ReconnectGrace, session.Stopping.Token);
+                    if (voice.ConnectionState != ConnectionState.Connected)
+                    {
+                        await EndAsync(guild.Id, session,
+                            $"🎙️ Stopped listening in {channel.Mention} - I lost the voice connection.");
+                    }
+                }, LogLevel.Debug, "Couldn't check the voice connection in guild {GuildId}.", guild.Id);
                 return Task.CompletedTask;
             };
             foreach (var member in channel.ConnectedUsers)
@@ -196,43 +219,62 @@ public sealed class VoiceListener
     }
 
     /// <summary>Stops listening in the server, if it is, and leaves the voice channel. Posts
-    /// <paramref name="notice"/> where the replies were going, if given.</summary>
-    public async Task StopAsync(ulong guildId, string? notice)
+    /// <paramref name="notice"/> where the replies were going, if given. A join in progress finishes first (it holds
+    /// the same lock), so music asking to stop never races one.</summary>
+    public Task StopAsync(ulong guildId, string? notice)
+        => _startStop.RunAsync(guildId, () => _sessions.TryGetValue(guildId, out var session)
+            ? EndHoldingLockAsync(guildId, session, notice, leave: true)
+            : Task.CompletedTask);
+
+    private Task EndAsync(ulong guildId, Session session, string? notice, bool leave = true)
+        => _startStop.RunAsync(guildId, () => EndHoldingLockAsync(guildId, session, notice, leave));
+
+    private async Task EndHoldingLockAsync(ulong guildId, Session session, string? notice, bool leave)
     {
-        if (_sessions.TryGetValue(guildId, out var session))
+        // Only the session that's still current: a late event from an old one mustn't end a new one.
+        if (!_sessions.TryRemove(new KeyValuePair<ulong, Session>(guildId, session)))
         {
-            await EndAsync(guildId, session, notice);
+            return;
+        }
+
+        session.Stopping.Cancel();
+        if (leave)
+        {
+            await LeaveAsync(session.Channel);
+        }
+
+        _logger.LogInformation("Stopped listening for voice commands in {Channel} ({ChannelId}).",
+            session.Channel.Name, session.Channel.Id);
+        if (notice is not null)
+        {
+            await PostAsync(session.ReplyChannel, notice);
         }
     }
 
-    private Task EndAsync(ulong guildId, Session session, string? notice, bool leave = true)
-        => _startStop.RunAsync(guildId, async () =>
-        {
-            // Only the session that's still current: a late event from an old one mustn't end a new one.
-            if (!_sessions.TryRemove(new KeyValuePair<ulong, Session>(guildId, session)))
-            {
-                return;
-            }
-
-            session.Stopping.Cancel();
-            if (leave)
-            {
-                await LeaveAsync(session.Channel);
-            }
-
-            _logger.LogInformation("Stopped listening for voice commands in {Channel} ({ChannelId}).",
-                session.Channel.Name, session.Channel.Id);
-            if (notice is not null)
-            {
-                await PostAsync(session.ReplyChannel, notice);
-            }
-        });
-
-    /// <summary>Everyone (but bots) left the channel: stop, nobody's there to listen to.</summary>
+    /// <summary>The bot kicked or moved out of the channel, or everyone (but bots) left it: stop.</summary>
     private Task OnVoiceStateUpdatedAsync(SocketUser user, SocketVoiceState before, SocketVoiceState after)
     {
-        if (user is SocketGuildUser member && _sessions.TryGetValue(member.Guild.Id, out var session) &&
-            before.VoiceChannel?.Id == session.Channel.Id && after.VoiceChannel?.Id != session.Channel.Id)
+        if (user is not SocketGuildUser member || !_sessions.TryGetValue(member.Guild.Id, out var session))
+        {
+            return Task.CompletedTask;
+        }
+
+        if (member.Id == _client.CurrentUser.Id)
+        {
+            // Its own leaving ends the session first, so this is someone else taking it out of the channel.
+            if (after.VoiceChannel?.Id != session.Channel.Id)
+            {
+                Background.Run(_logger,
+                    () => EndAsync(member.Guild.Id, session,
+                        $"🎙️ Stopped listening in {session.Channel.Mention} - I was taken out of the channel.",
+                        leave: false),
+                    LogLevel.Debug, "Couldn't stop listening in guild {GuildId}.", member.Guild.Id);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        if (before.VoiceChannel?.Id == session.Channel.Id && after.VoiceChannel?.Id != session.Channel.Id)
         {
             session.StopReading(member.Id);
             if (!session.Channel.ConnectedUsers.Any(u => !u.IsBot))
@@ -284,11 +326,28 @@ public sealed class VoiceListener
 
                 var said = speech.ToArray();
                 speech.SetLength(0);
-                if (VoiceAudio.DurationOf(said.Length) >= ShortestSpeech)
+                if (VoiceAudio.DurationOf(said.Length) < ShortestSpeech)
                 {
-                    Background.Run(_logger, () => HandleSpeechAsync(session, userId, said), LogLevel.Warning,
-                        "Couldn't handle speech in guild {GuildId}.", session.Guild.Id);
+                    continue;
                 }
+
+                if (!session.TryQueueSpeech(MaxWaitingSpeech))
+                {
+                    _logger.LogDebug("Dropped a sentence in guild {GuildId}: too many waiting.", session.Guild.Id);
+                    continue;
+                }
+
+                Background.Run(_logger, async () =>
+                {
+                    try
+                    {
+                        await HandleSpeechAsync(session, userId, said);
+                    }
+                    finally
+                    {
+                        session.SpeechDone();
+                    }
+                }, LogLevel.Warning, "Couldn't handle speech in guild {GuildId}.", session.Guild.Id);
             }
         }, LogLevel.Debug, "Stopped reading voice in guild {GuildId}.", session.Guild.Id);
     }
@@ -401,6 +460,22 @@ public sealed class VoiceListener
                 reader.Cancel();
             }
         }
+
+        private int _waitingSpeech;
+
+        /// <summary>Counts a sentence in, unless <paramref name="max"/> are already waiting.</summary>
+        public bool TryQueueSpeech(int max)
+        {
+            if (Interlocked.Increment(ref _waitingSpeech) <= max)
+            {
+                return true;
+            }
+
+            Interlocked.Decrement(ref _waitingSpeech);
+            return false;
+        }
+
+        public void SpeechDone() => Interlocked.Decrement(ref _waitingSpeech);
 
         public void HeardWakeWord(ulong userId) => _wakeWords[userId] = DateTimeOffset.UtcNow;
 

@@ -24,7 +24,7 @@ while no music is playing: starting music stops the listening, and it won't star
 ## Setup (Windows)
 
 ```
-powershell -File voice/setup.ps1
+powershell -ExecutionPolicy Bypass -File voice/setup.ps1
 ```
 
 This downloads, into `voice/natives/` and `voice/models/` (neither is committed):
@@ -55,4 +55,5 @@ Speech-to-text takes about a second of CPU per sentence; no graphics card is nee
 
 Discord.Net 3.20.2 can't decrypt voice in a channel that already has 2+ people in it
 ([issue #3281](https://github.com/discord-net/Discord.Net/issues/3281)), so the bot uses 3.20.2 with the unreleased
-fix applied: see `discord-net-patch/`.
+fix applied. `discord-net-patch/build.ps1` builds it once from Discord.Net's official source (checked against the
+release commit) plus `pr3288.patch`, two small changes you can read. Nothing prebuilt is committed.

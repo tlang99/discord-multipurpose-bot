@@ -489,7 +489,7 @@ Music needs Java and the Lavalink server. Follow [lavalink/README.md](lavalink/R
 (`java -jar Lavalink.jar` in the `lavalink/` folder) whenever you run the bot.
 
 Voice commands need a one-time download of Discord's voice libraries and a speech-to-text model:
-`powershell -File voice/setup.ps1`, then rebuild. See [voice/README.md](voice/README.md).
+`powershell -ExecutionPolicy Bypass -File voice/setup.ps1`, then rebuild. See [voice/README.md](voice/README.md).
 
 ### 6. (Optional) Set up AI chat
 
@@ -513,7 +513,11 @@ bot logs a warning at startup.
 
 ### 7. Run it
 
+The first time only, build the patched Discord.Net the bot uses (Discord.Net 3.20.2 plus an unreleased voice fix,
+from the official source; see `discord-net-patch/build.ps1` for why). The build stops and says so if you skip this.
+
 ```bash
+powershell -ExecutionPolicy Bypass -File discord-net-patch/build.ps1   # Windows (pwsh on Linux/macOS)
 dotnet run
 ```
 

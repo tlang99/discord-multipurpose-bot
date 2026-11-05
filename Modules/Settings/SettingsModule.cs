@@ -57,7 +57,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("LFG")] Lfg = ServerFeature.Lfg,
         [ChoiceDisplay("Polls")] Polls = ServerFeature.Polls,
         [ChoiceDisplay("Reminders")] Reminders = ServerFeature.Reminders,
-        [ChoiceDisplay("Voice commands (\"hey ModBot...\" in voice; off by default)")]
+        [ChoiceDisplay("Voice commands (say my name in voice; off by default)")]
         VoiceCommands = ServerFeature.VoiceCommands,
     }
 
