@@ -212,6 +212,7 @@ jobs:
             instead, and don't write any other file.
           claude_args: |
             --allowedTools "Read(./**),Glob,Grep,Write(./full-review.md),Edit(./full-review.md)"
+            --disallowedTools "Read(./.git/**),Grep(./.git/**),Glob(./.git/**)"
 
       - name: Check the review was written
         run: |
