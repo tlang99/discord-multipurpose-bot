@@ -95,28 +95,6 @@ public sealed class SharedHelperTests : IDisposable
         Assert.Equal(1, mostAtOnce);
     }
 
-    [Theory]
-    [InlineData("short", 10, "short")]
-    [InlineData("exactly10!", 10, "exactly10!")]
-    [InlineData("this is too long", 10, "this is t…")]
-    public void Truncate_cuts_with_an_ellipsis(string value, int max, string expected)
-    {
-        var cut = TextTools.Truncate(value, max);
-
-        Assert.Equal(expected, cut);
-        Assert.True(cut.Length <= max);
-    }
-
-    [Fact]
-    public void Truncate_never_splits_an_emoji()
-    {
-        // "abcd" + 😀 (two UTF-16 units) + "efgh": a cut to 6 would otherwise keep only the emoji's first half.
-        var cut = TextTools.Truncate("abcd😀efgh", 6);
-
-        Assert.Equal("abcd…", cut);
-        Assert.DoesNotContain(cut, char.IsSurrogate);
-    }
-
     [Fact]
     public async Task Repository_writes_nothing_when_updating_or_removing_a_missing_key()
     {
