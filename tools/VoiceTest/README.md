@@ -16,6 +16,21 @@ Discord.Net needs three native libraries next to the exe. Put them in `tools/Voi
 
 The speech-to-text model (Whisper `base.en`, ~140 MB) downloads itself into `tools/VoiceTest/models/` on first run.
 
+### Patched Discord.Net
+
+Discord.Net 3.20.2 can't decrypt voice when the bot joins a channel that already has 2+ people in it: it rejects
+Discord's encryption-group invite, hears only garbage, and is disconnected after a few seconds
+([issue #3281](https://github.com/discord-net/Discord.Net/issues/3281)). The fix,
+[PR #3288](https://github.com/discord-net/Discord.Net/pull/3288), isn't released yet, so this tool uses 3.20.2 with
+that fix applied (`discord-net-pr3288.patch`), built locally as `3.20.2-dave.1`:
+
+```
+powershell -File tools/VoiceTest/build-discord-net.ps1
+```
+
+Only this tool uses it; the bot itself stays on the official release. Once a Discord.Net release includes the fix,
+switch back to the official package and delete the script, the patch and `nuget.config`.
+
 ## Running it
 
 From the repo folder (so it finds `appsettings.json` and the bot's token):
