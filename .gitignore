@@ -24,3 +24,7 @@ lavalink/*.jar
 lavalink/plugins/
 lavalink/logs/
 lavalink/secrets.yml
+
+## Voice test tool: native libraries and the speech model (downloaded locally, see tools/VoiceTest/README.md)
+tools/VoiceTest/natives/
+tools/VoiceTest/models/
