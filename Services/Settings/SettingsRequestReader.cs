@@ -63,7 +63,9 @@ public static partial class SettingsRequestReader
         @"(?:[\s,]+(?:now|please|pls))*[\s.!]*$", RegexOptions.IgnoreCase)]
     private static partial Regex RequestRegex();
 
-    /// <summary>The ways of naming voice auto-join ("voice auto-join", "auto joining", "auto-join voice"...), whole.</summary>
+    /// <summary>The ways of naming voice auto-join ("voice auto-join", "auto joining", "auto-join voice"...), whole.
+    /// Matches the same names as the auto-join part of <see cref="Feature"/> (after whitespace is normalised): change
+    /// the two together.</summary>
     [GeneratedRegex(@"^(?:voice )?auto[ -]?join(?:ing)?(?: voice)?$")]
     private static partial Regex AutoJoinRegex();
 

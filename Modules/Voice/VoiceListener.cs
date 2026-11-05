@@ -29,7 +29,7 @@ namespace ModBot.Modules.Voice;
 /// <see cref="StopAsync"/>), and it won't start listening over music.</para>
 /// <para>It posts one short "listening" line when it joins, and nothing else about itself: no per-person heads-up,
 /// no "stopped" notices. The chime when it hears its name is the other sign.</para>
-/// <para>Voice auto-join (on by default once a server turns voice commands on): the bot joins by itself when people
+/// <para>Voice auto-join (opt-in, and only with voice commands on too): the bot joins by itself when people
 /// are in a voice channel, the busiest one if several are (<see cref="AutoJoinPicker"/>), and comes back when the
 /// music's done. Told to stop listening, or taken out of the channel, it stays out of that channel until everyone's
 /// left it.</para>
@@ -64,7 +64,8 @@ public sealed class VoiceListener
     /// <summary>After a join by itself fails, it doesn't try again in that server for this long.</summary>
     private static readonly TimeSpan AfterFailedJoin = TimeSpan.FromMinutes(1);
 
-    private static readonly byte[] ChimeSound = VoiceAudio.Chime();
+    /// <summary>Made on first use, so a problem making it can only ever break the chime, never the listener.</summary>
+    private static readonly Lazy<byte[]> ChimeSound = new(VoiceAudio.Chime);
 
     private readonly DiscordSocketClient _client;
     private readonly SpeechToText _speech;
@@ -504,11 +505,14 @@ public sealed class VoiceListener
         if (isMe)
         {
             // Its own leaving ends the session first, so this is someone else taking it out of the channel. It stays
-            // out of there, or voice auto-join would put it straight back.
+            // out of there, or voice auto-join would put it straight back. Moved to another channel rather than
+            // disconnected, it leaves that one too, instead of sitting there connected but not listening; voice
+            // auto-join then picks where to be, which can be the new channel.
             if (after.VoiceChannel?.Id != session.Channel.Id)
             {
+                var moved = after.VoiceChannel is not null;
                 Background.Run(_logger,
-                    () => EndAsync(member.Guild.Id, session, leave: false, stayOut: true),
+                    () => EndAsync(member.Guild.Id, session, leave: moved, stayOut: true),
                     LogLevel.Debug, "Couldn't stop listening in guild {GuildId}.", member.Guild.Id);
             }
 
@@ -664,7 +668,7 @@ public sealed class VoiceListener
         {
             try
             {
-                await session.ChimeAsync(ChimeSound);
+                await session.ChimeAsync(ChimeSound.Value);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

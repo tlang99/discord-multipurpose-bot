@@ -217,15 +217,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         }
 
         // The replies go in the voice channel's own chat.
-        if (channel is not null)
+        if (channel is not null && !ChannelAccess.CanListenAndReplyIn(Context.Guild.CurrentUser, channel))
         {
-            if (!ChannelAccess.CanListenAndReplyIn(Context.Guild.CurrentUser, channel))
-            {
-                await RespondAsync($"I need **View Channel**, **Connect** and **Send Messages** in {channel.Mention} " +
-                                   "to listen there (my replies go in its chat).", ephemeral: true,
-                    allowedMentions: AllowedMentions.None);
-                return;
-            }
+            await RespondAsync($"I need **View Channel**, **Connect** and **Send Messages** in {channel.Mention} " +
+                               "to listen there (my replies go in its chat).", ephemeral: true,
+                allowedMentions: AllowedMentions.None);
+            return;
         }
 
         await _settings.UpdateAsync(Context.Guild.Id, s => s.AutoJoinChannel.ChannelId = channel?.Id);
@@ -244,7 +241,11 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             note += " If I'm listening in another channel now, I'll move once it empties.";
         }
 
-        _voice.AutoJoinSoon(Context.Guild.Id);
+        if (server.AutoJoinsVoice)
+        {
+            _voice.AutoJoinSoon(Context.Guild.Id);
+        }
+
         await RespondAsync($"Voice auto-join: {DescribeAutoJoinChannel(server)}.{note}", ephemeral: true,
             allowedMentions: AllowedMentions.None);
     }
