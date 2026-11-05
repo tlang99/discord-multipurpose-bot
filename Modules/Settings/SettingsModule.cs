@@ -7,6 +7,7 @@ using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Models;
 using ModBot.Modules.Lfg;
+using ModBot.Services.Chat;
 using ModBot.Services.Lfg;
 using ModBot.Services.Settings;
 using ModBot.Services.Storage;
@@ -28,15 +29,18 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     private readonly ServerFeatureSwitch _switch;
     private readonly IGuildSettingsStore _moderation;
     private readonly ChatOptions _chat;
+    private readonly ChatPersonality _personality;
     private readonly ILogger<SettingsModule> _logger;
 
     public SettingsModule(ServerSettingsService settings, ServerFeatureSwitch featureSwitch,
-        IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ILogger<SettingsModule> logger)
+        IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ChatPersonality personality,
+        ILogger<SettingsModule> logger)
     {
         _settings = settings;
         _switch = featureSwitch;
         _moderation = moderation;
         _chat = chat.Value;
+        _personality = personality;
         _logger = logger;
     }
 
@@ -64,6 +68,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
     {
         var server = await _settings.GetAsync(Context.Guild.Id);
         var moderation = await _moderation.GetAsync(Context.Guild.Id);
+        var personality = await _personality.GetWithSourceAsync(Context.Guild.Id);
 
         var features = new StringBuilder();
         foreach (var feature in Enum.GetValues<ServerFeature>())
@@ -93,6 +98,12 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
                 ? $"{TextTools.Count(game.Playlists.Count, "playlist")}, {TextTools.Count(game.Ranks.Count, "rank")} " +
                   "(change with `/settings lfg-game`)"
                 : "not set up: `/lfg` has no playlist or rank options yet (`/settings lfg-game`)")
+            // Embed fields hold 1024 characters; a personality can be up to 1000, plus the note under it.
+            .AddField("Chatbot personality",
+                $"{TextTools.Truncate(personality.Text, 900)}\n-# " +
+                (personality.IsCustom
+                    ? "This server's own - change it with `/chat personality set`, or `reset` for the default."
+                    : "The default - give this server its own with `/chat personality set`."))
             .AddField("Auto-mod",
                 $"{(moderation.AutoModEnabled ? "✅ On" : "🚫 Off")} - change it and the filters with `/automod`, and " +
                 "the log channel with `/modlog`.")
