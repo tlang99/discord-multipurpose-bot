@@ -24,8 +24,7 @@ public static partial class SpokenText
         var at = now ?? DateTimeOffset.UtcNow;
         var text = MarkdownLinkRegex().Replace(reply, "$1");
         text = BareLinkRegex().Replace(text, "");
-        text = TimestampRegex().Replace(text,
-            m => Relative(DateTimeOffset.FromUnixTimeSeconds(long.Parse(m.Groups[1].Value)), at));
+        text = TimestampRegex().Replace(text, m => ReadTimestamp(m.Groups[1].Value, at));
         text = DiscordTagRegex().Replace(text, ""); // mentions, channels, roles, custom emoji
         text = CodeBlockRegex().Replace(text, "");
         text = LinePrefixRegex().Replace(text, ""); // headings, quotes, list bullets
@@ -36,6 +35,14 @@ public static partial class SpokenText
         text = SpaceBeforePunctuationRegex().Replace(text, "$1").Trim();
         return FirstSentences(text, maxLength);
     }
+
+    /// <summary>A Discord timestamp's seconds, read aloud; "" for one no date can hold (the text is from the model or a
+    /// web page, so it can say anything).</summary>
+    private static string ReadTimestamp(string seconds, DateTimeOffset now)
+        => long.TryParse(seconds, out var unix) &&
+           unix >= DateTimeOffset.MinValue.ToUnixTimeSeconds() && unix <= DateTimeOffset.MaxValue.ToUnixTimeSeconds()
+            ? Relative(DateTimeOffset.FromUnixTimeSeconds(unix), now)
+            : "";
 
     /// <summary>"in 20 minutes", "2 hours ago": how a time reads aloud, whatever format Discord shows it in (the
     /// listener's time zone isn't known, so never a clock time).</summary>

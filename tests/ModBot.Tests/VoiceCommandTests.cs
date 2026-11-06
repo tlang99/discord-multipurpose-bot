@@ -208,6 +208,12 @@ public class SpokenTextTests
             "I'll remind you <t:1700001200:R> (<t:1700007200:t>, <t:1699913600:F>).", 300, now));
     }
 
+    [Theory]
+    [InlineData("<t:999999999999:R>")] // past the year 9999
+    [InlineData("<t:-999999999999:R>")]
+    public void A_time_no_date_can_hold_is_left_out(string tag)
+        => Assert.Equal("It's due.", SpokenText.From($"It's due {tag}.", 300));
+
     [Fact]
     public void Says_only_the_first_few_whole_sentences()
         => Assert.Equal("One two three. Four five six!",

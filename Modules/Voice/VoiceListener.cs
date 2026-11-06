@@ -822,7 +822,7 @@ public sealed class VoiceListener
     private void Speak(Session session, string answer, Func<Task>? couldntSay)
     {
         // Nothing to say aloud (only a link or emoji): then it's for reading.
-        if (SpokenText.From(answer, _options.MaxSpokenCharacters) is not { Length: > 0 } text)
+        if (SpokenText.From(answer, Math.Clamp(_options.MaxSpokenCharacters, 50, 2000)) is not { Length: > 0 } text)
         {
             Background.Run(_logger, () => couldntSay?.Invoke() ?? Task.CompletedTask, LogLevel.Warning,
                 "Couldn't post a voice answer in guild {GuildId}.", session.Guild.Id);
@@ -846,11 +846,11 @@ public sealed class VoiceListener
                 played = session.CanPlay && await sound(session.Stopping.Token) is { Length: > 0 } pcm &&
                          await session.PlayAsync(pcm, speech, EchoTail);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (session.Stopping.IsCancellationRequested)
             {
-                // Stopped listening meanwhile.
+                // Stopped listening meanwhile (the answer still goes to chat, below).
             }
-            catch (Exception ex)
+            catch (Exception ex) // including a send that timed out: the connection isn't taking sound
             {
                 session.CanPlay = false;
                 _logger.LogWarning(ex, "Couldn't play sound in guild {GuildId}; no more sounds until I rejoin.",
@@ -898,6 +898,9 @@ public sealed class VoiceListener
 
         public string StatusBefore { get; set; } = "";
 
+        /// <summary>How long a spoken answer waits for another sound (an earlier answer) to finish.</summary>
+        private static readonly TimeSpan LongestWaitToSpeak = TimeSpan.FromSeconds(15);
+
         /// <summary>Whether it can make sounds here (the chime, spoken replies): Speak permission, and nothing's failed.</summary>
         public volatile bool CanPlay = canPlay;
 
@@ -905,8 +908,9 @@ public sealed class VoiceListener
         public bool IsTalking => DateTime.UtcNow.Ticks < Interlocked.Read(ref _talkingUntil);
 
         /// <summary>
-        /// Plays <paramref name="pcm"/> (Discord's format) in the channel, one sound at a time. Speech waits its turn
-        /// (an answer is worth hearing); a chime with something else playing is skipped instead (it'd be late).
+        /// Plays <paramref name="pcm"/> (Discord's format) in the channel, one sound at a time. Speech waits its turn,
+        /// but only <see cref="LongestWaitToSpeak"/> (later than that, it's no longer an answer: the caller posts it
+        /// instead); a chime with something else playing is skipped (it'd be late).
         /// </summary>
         /// <param name="speech">Spoken: <see cref="IsTalking"/> holds while it plays, and for
         /// <paramref name="echoTail"/> after.</param>
@@ -914,8 +918,7 @@ public sealed class VoiceListener
         public async Task<bool> PlayAsync(byte[] pcm, bool speech, TimeSpan echoTail)
         {
             var length = VoiceAudio.DurationOf(pcm.Length);
-            if (Voice is null || !await _playing.WaitAsync(speech ? length + TimeSpan.FromSeconds(30) : TimeSpan.Zero,
-                    Stopping.Token))
+            if (Voice is null || !await _playing.WaitAsync(speech ? LongestWaitToSpeak : TimeSpan.Zero, Stopping.Token))
             {
                 return false;
             }

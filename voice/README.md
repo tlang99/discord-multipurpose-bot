@@ -26,9 +26,10 @@ misheard) and replies to that instead.
   off for every server with `Voice:Chime`).
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
-  for a moment after, it ignores what it
-  hears, so its own voice coming back through someone's mic isn't taken for a request. Needs **Speak**; turn it off
-  for every server with `Voice:SpokenReplies`.
+  for a moment after, it ignores what it hears, so its own voice coming back through someone's mic isn't taken for a
+  request (so wait for it to finish before asking again). An answer that would have to wait more than 15 seconds
+  behind another is posted instead. Needs **Speak**; turn it off for every server with `Voice:SpokenReplies`. After
+  installing Piper, restart the bot.
 - Speech is turned into text, and answers into speech, **on the machine running the bot** (Whisper and Piper).
   Nothing is sent to any other service. (A web search sends only the search words to Ollama, as typed searches do.)
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
