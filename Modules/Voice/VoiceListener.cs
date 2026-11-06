@@ -820,7 +820,8 @@ public sealed class VoiceListener
     /// there: if someone can't, it's posted instead.
     /// </summary>
     private static bool EveryoneCanRead(SocketVoiceChannel voice, SocketTextChannel replyChannel)
-        => voice.ConnectedUsers.Where(u => !u.IsBot).All(u => u.GetPermissions(replyChannel).ViewChannel);
+        => voice.ConnectedUsers.Where(u => !u.IsBot)
+            .All(u => u.GetPermissions(replyChannel) is { ViewChannel: true, ReadMessageHistory: true });
 
     /// <summary>Plays the chime in the channel, if this session can (another sound playing, it's skipped).</summary>
     private void Chime(Session session)

@@ -30,9 +30,9 @@ misheard) and replies to that instead.
   request (so wait for it to finish before asking again). An answer that would have to wait more than 15 seconds
   behind another is posted instead. Needs **Speak**; turn it off for every server with `Voice:SpokenReplies`. After
   installing Piper, restart the bot.
-- An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in (the
-  chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's posted there
-  instead, as typed answers are.
+- An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
+  history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
+  posted there instead, as typed answers are.
 - Speech is turned into text, and answers into speech, **on the machine running the bot** (Whisper and Piper).
   Nothing is sent to any other service. (A web search sends only the search words to Ollama, as typed searches do.)
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for

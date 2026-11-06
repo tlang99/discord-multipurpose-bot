@@ -251,12 +251,13 @@ public partial class ChatHandler
     /// <summary>True (after a ⏳ on the message) if the asker has to wait. Counts the request otherwise.</summary>
     private async Task<bool> MustWaitAsync(ChatRequest request)
     {
-        if (request.Spoken || !IsOnCooldown(request.Channel.Guild.Id, request.Author.Id))
+        if (request.Spoken || request.Message is not { } message ||
+            !IsOnCooldown(request.Channel.Guild.Id, request.Author.Id))
         {
             return false;
         }
 
-        await ReactAsync(request.Message!, "⏳"); // typed, so there's a message
+        await ReactAsync(message, "⏳");
         return true;
     }
 
