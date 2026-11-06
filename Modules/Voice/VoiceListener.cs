@@ -209,7 +209,7 @@ public sealed class VoiceListener
     {
         IAudioClient voice;
         // The chime and spoken replies need the Speak permission, and an unmuted bot: muted, it sends no sound at all.
-        var canPlay = (_options.Chime || _voiceOut.Problem is null) && guild.CurrentUser.GetPermissions(channel).Speak;
+        var canPlay = (_options.Chime || _voiceOut.Problem is null) && CanSpeakIn(channel);
         var session = new Session(guild, channel, replyChannel, autoJoined: startedBy is null, canPlay);
         _joining[guild.Id] = true;
         try
@@ -798,10 +798,8 @@ public sealed class VoiceListener
         _logger.LogInformation("Voice request from {User} ({UserId}) in {Channel}.", speaker.Username, speaker.Id,
             session.Channel.Name);
         // Answered aloud when it can be, and then not posted too; otherwise in chat, as typed.
-        // Checked now, not just on joining: a bot that lost Speak or was server-muted since would talk to no one.
-        var bot = session.Guild.CurrentUser;
-        var aloud = session.CanPlay && _voiceOut.Problem is null && bot.GetPermissions(session.Channel).Speak &&
-                    !bot.IsMuted && !bot.IsSuppressed;
+        var aloud = session.CanPlay && _voiceOut.Problem is null && CanSpeakIn(session.Channel) &&
+                    EveryoneCanRead(session.Channel, session.ReplyChannel);
         if (await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request, aloud) is { } answer &&
             aloud)
         {
@@ -810,6 +808,19 @@ public sealed class VoiceListener
                 : () => _chat.Value.PostUnspokenAnswerAsync(speaker, session.ReplyChannel, request, answer.Text));
         }
     }
+
+    /// <summary>Whether the bot can be heard in <paramref name="channel"/>: Speak, and not server-muted (checked on each
+    /// request, not just on joining, or a bot muted since would talk to no one).</summary>
+    private static bool CanSpeakIn(SocketVoiceChannel channel)
+        => channel.Guild.CurrentUser is var bot && bot.GetPermissions(channel).Speak && !bot.IsMuted && !bot.IsSuppressed;
+
+    /// <summary>
+    /// Whether everyone in <paramref name="voice"/> can read <paramref name="replyChannel"/>. An answer can come from
+    /// that channel's messages (the chatbot reads them), so said aloud it mustn't reach anyone who couldn't read it
+    /// there: if someone can't, it's posted instead.
+    /// </summary>
+    private static bool EveryoneCanRead(SocketVoiceChannel voice, SocketTextChannel replyChannel)
+        => voice.ConnectedUsers.Where(u => !u.IsBot).All(u => u.GetPermissions(replyChannel).ViewChannel);
 
     /// <summary>Plays the chime in the channel, if this session can (another sound playing, it's skipped).</summary>
     private void Chime(Session session)
