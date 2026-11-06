@@ -40,16 +40,16 @@ $downloads = @(
         Sha256 = 'a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002'
     },
     @{
-        # The voice spoken replies use (Piper's "lessac", a natural US English voice, ~63 MB), pinned to a revision.
-        Name = 'the speaking voice (~63 MB)'; File = "$models/en_US-lessac-medium.onnx"; ZipEntry = $null
-        Url = 'https://huggingface.co/rhasspy/piper-voices/resolve/375a0fe641dea077c2a47b4e9a056d6da521eed3/en/en_US/lessac/medium/en_US-lessac-medium.onnx'
-        Sha256 = '5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f'
+        # The voice spoken replies use (Piper's "kusal", a male US English voice, ~63 MB), pinned to a revision.
+        Name = 'the speaking voice (~63 MB)'; File = "$models/en_US-kusal-medium.onnx"; ZipEntry = $null
+        Url = 'https://huggingface.co/rhasspy/piper-voices/resolve/375a0fe641dea077c2a47b4e9a056d6da521eed3/en/en_US/kusal/medium/en_US-kusal-medium.onnx'
+        Sha256 = '438ae25bb305b2a7f6d632327d6102df25011f793e8222fa9db876e7321df8f3'
     },
     @{
         # Its settings (sample rate, pronunciation), which Piper reads next to the voice.
-        Name = "the speaking voice's settings"; File = "$models/en_US-lessac-medium.onnx.json"; ZipEntry = $null
-        Url = 'https://huggingface.co/rhasspy/piper-voices/resolve/375a0fe641dea077c2a47b4e9a056d6da521eed3/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json'
-        Sha256 = 'efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0'
+        Name = "the speaking voice's settings"; File = "$models/en_US-kusal-medium.onnx.json"; ZipEntry = $null
+        Url = 'https://huggingface.co/rhasspy/piper-voices/resolve/375a0fe641dea077c2a47b4e9a056d6da521eed3/en/en_US/kusal/medium/en_US-kusal-medium.onnx.json'
+        Sha256 = 'ddd3c4dfd8b4f568150c934fb94912dd788d44db87f4f0a328c469d7a6761f41'
     }
 )
 

@@ -38,7 +38,7 @@ public class VoiceOptions
 
     /// <summary>The voice Piper speaks with (a .onnx file, with its .onnx.json next to it). voice/setup.ps1
     /// downloads one; others are at https://huggingface.co/rhasspy/piper-voices.</summary>
-    public string SpeakingVoicePath { get; set; } = "voice/models/en_US-lessac-medium.onnx";
+    public string SpeakingVoicePath { get; set; } = "voice/models/en_US-kusal-medium.onnx";
 
     /// <summary>The most of an answer read aloud, in characters (whole sentences): the rest is only in chat, so the
     /// bot doesn't talk over people for long.</summary>

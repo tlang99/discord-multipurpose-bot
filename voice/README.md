@@ -61,7 +61,7 @@ an exact version and checked against its SHA-256:
 | `opus.dll` | The Opus audio codec | [OpusSharp.Natives](https://github.com/AvionBlock/OpusSharp/tree/master/OpusSharp.Natives/runtimes/win-x64/native) (the build Discord.Net's own audio sample uses) |
 | `ggml-base.en.bin` | Whisper's small English speech-to-text model, ~140 MB | [whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp) |
 | `piper/` | Piper, the text-to-speech program for spoken replies, ~22 MB | [rhasspy/piper releases](https://github.com/rhasspy/piper/releases/tag/2023.11.14-2) |
-| `en_US-lessac-medium.onnx` (+ `.onnx.json`) | Piper's "lessac" US English voice, ~63 MB | [piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/medium) |
+| `en_US-kusal-medium.onnx` (+ `.onnx.json`) | Piper's "kusal" US English voice (male), ~63 MB | [piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/kusal/medium) |
 
 Then rebuild or restart the bot (`dotnet run` copies the libraries next to it). The log says at startup if anything is
 missing ("Voice commands aren't available: ..."), and so does `/voice listen`.
@@ -82,7 +82,7 @@ available").
 | `Chime` | `true` | Play a short chime on hearing the bot's name. Needs **Speak**; the bot shows as unmuted while it can make sounds. |
 | `SpokenReplies` | `true` | Read answers to spoken requests aloud. Needs **Speak** and Piper. |
 | `PiperPath` | `voice/piper/piper.exe` | Piper's program. |
-| `SpeakingVoicePath` | `voice/models/en_US-lessac-medium.onnx` | The voice it speaks with; any [Piper voice](https://huggingface.co/rhasspy/piper-voices) works (keep its `.onnx.json` next to it). |
+| `SpeakingVoicePath` | `voice/models/en_US-kusal-medium.onnx` | The voice it speaks with; any [Piper voice](https://huggingface.co/rhasspy/piper-voices) works (keep its `.onnx.json` next to it). |
 | `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest is only in chat. |
 
 ## Patched Discord.Net
