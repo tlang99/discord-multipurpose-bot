@@ -28,4 +28,19 @@ public class VoiceOptions
     /// <summary>Play a short chime when the bot hears its name, so people know it's listening. Needs the Speak
     /// permission in the voice channel; without it, the bot just doesn't chime.</summary>
     public bool Chime { get; set; } = true;
+
+    /// <summary>Read the answer to a spoken request aloud instead of posting it (where it can't be said, it's posted).
+    /// Text-to-speech runs on this machine (Piper); needs the Speak permission, and Piper from voice/setup.ps1.</summary>
+    public bool SpokenReplies { get; set; } = true;
+
+    /// <summary>Piper's program, relative to the bot's folder. voice/setup.ps1 downloads it.</summary>
+    public string PiperPath { get; set; } = "voice/piper/piper.exe";
+
+    /// <summary>The voice Piper speaks with (a .onnx file, with its .onnx.json next to it). voice/setup.ps1
+    /// downloads one; others are at https://huggingface.co/rhasspy/piper-voices.</summary>
+    public string SpeakingVoicePath { get; set; } = "voice/models/en_US-kusal-medium.onnx";
+
+    /// <summary>The most of an answer read aloud, in characters (whole sentences, 50-2000), so the bot doesn't talk
+    /// over people for long. Anything past it isn't said.</summary>
+    public int MaxSpokenCharacters { get; set; } = 300;
 }

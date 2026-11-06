@@ -2,8 +2,11 @@
 
 The bot can sit in a voice channel and listen for its name: "hey ModBot, make an LFG for ranked", "hey ModBot, remind
 me in 20 minutes to check the oven". Whatever is said after its name is handled exactly like the same words typed as
-an @mention, by the same person, with the same rules. It posts what it heard in the voice channel's chat (so everyone
-sees what it acted on, and anything it misheard) and replies to that.
+an @mention, by the same person, with the same rules. It answers out loud, without repeating the answer in chat;
+anything the request makes is still posted (a poll, an LFG card), and a web search posts the same card `/search`
+does, under "🎙️ @name searched: …". When it can't speak (no **Speak** permission, or text-to-speech isn't set up),
+it posts what it heard in the voice channel's chat ("🎙️ @name: …", so everyone sees what it acted on, and anything it
+misheard) and replies to that instead.
 
 ## Privacy
 
@@ -21,9 +24,19 @@ sees what it acted on, and anything it misheard) and replies to that.
   listening: without it, the bot doesn't join by itself (`/voice listen` still works, without the status).
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
   off for every server with `Voice:Chime`).
-- Speech is turned into text **on the machine running the bot** (Whisper). Nothing is sent to any other service.
+- It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
+  say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
+  for a moment after, it ignores what it hears, so its own voice coming back through someone's mic isn't taken for a
+  request (so wait for it to finish before asking again). An answer that would have to wait more than 15 seconds
+  behind another is posted instead. Needs **Speak**; turn it off for every server with `Voice:SpokenReplies`. After
+  installing Piper, restart the bot.
+- An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
+  history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
+  posted there instead, as typed answers are.
+- Speech is turned into text, and answers into speech, **on the machine running the bot** (Whisper and Piper).
+  Nothing is sent to any other service. (A web search sends only the search words to Ollama, as typed searches do.)
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
-  the bot's name, and thrown away. Only what's said after the name is acted on and posted. The log notes that a voice
+  the bot's name, and thrown away. Only what's said after the name is acted on. The log notes that a voice
   request happened, never what was said.
 - Server settings (turning features on or off, news notifications) can't be changed by voice, only by typing: a
   friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
@@ -46,7 +59,8 @@ or straight after `/stop`).
 powershell -ExecutionPolicy Bypass -File voice/setup.ps1
 ```
 
-This downloads, into `voice/natives/` and `voice/models/` (neither is committed):
+This downloads, into `voice/natives/`, `voice/models/` and `voice/piper/` (none of them committed), each pinned to
+an exact version and checked against its SHA-256:
 
 | File | What | From |
 | --- | --- | --- |
@@ -54,11 +68,15 @@ This downloads, into `voice/natives/` and `voice/models/` (neither is committed)
 | `libsodium.dll` | The voice connection's encryption | [libsodium on NuGet](https://www.nuget.org/packages/libsodium) |
 | `opus.dll` | The Opus audio codec | [OpusSharp.Natives](https://github.com/AvionBlock/OpusSharp/tree/master/OpusSharp.Natives/runtimes/win-x64/native) (the build Discord.Net's own audio sample uses) |
 | `ggml-base.en.bin` | Whisper's small English speech-to-text model, ~140 MB | [whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp) |
+| `piper/` | Piper, the text-to-speech program for spoken replies, ~22 MB | [rhasspy/piper releases](https://github.com/rhasspy/piper/releases/tag/2023.11.14-2) |
+| `en_US-kusal-medium.onnx` (+ `.onnx.json`) | Piper's "kusal" US English voice (male), ~63 MB | [piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/kusal/medium) |
 
 Then rebuild or restart the bot (`dotnet run` copies the libraries next to it). The log says at startup if anything is
 missing ("Voice commands aren't available: ..."), and so does `/voice listen`.
 
-Speech-to-text takes about a second of CPU per sentence; no graphics card is needed.
+Speech-to-text takes about a second of CPU per sentence, and speaking an answer about as long; no graphics card is
+needed. Without Piper, voice commands still work and answer in chat only (the startup log says "Spoken replies aren't
+available").
 
 ## Settings (`Voice` in appsettings.json)
 
@@ -69,7 +87,11 @@ Speech-to-text takes about a second of CPU per sentence; no graphics card is nee
 | `PauseMilliseconds` | `800` | How long a pause ends a sentence. |
 | `MaxSpeechSeconds` | `15` | Longest stretch turned into text at once. |
 | `MaxListenMinutes` | `180` | Stop listening after this long (`0` = never). Only when started by hand: joined by itself, it stays until everyone's left. |
-| `Chime` | `true` | Play a short chime on hearing the bot's name. Needs **Speak**; the bot shows as unmuted while it can chime. |
+| `Chime` | `true` | Play a short chime on hearing the bot's name. Needs **Speak**; the bot shows as unmuted while it can make sounds. |
+| `SpokenReplies` | `true` | Read answers to spoken requests aloud. Needs **Speak** and Piper. |
+| `PiperPath` | `voice/piper/piper.exe` | Piper's program. |
+| `SpeakingVoicePath` | `voice/models/en_US-kusal-medium.onnx` | The voice it speaks with; any [Piper voice](https://huggingface.co/rhasspy/piper-voices) works (keep its `.onnx.json` next to it). |
+| `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest is only in chat. |
 
 ## Patched Discord.Net
 

@@ -126,6 +126,134 @@ public class VoiceAudioTests
         Assert.InRange(Math.Abs((int)left[0]), 0, 50);
         Assert.InRange(Math.Abs((int)left[^1]), 0, 50);
     }
+
+    [Fact]
+    public void Speech_becomes_discord_audio_at_48_khz_in_both_channels()
+    {
+        // A second of Piper's 22,050 Hz mono at full volume.
+        var mono = Enumerable.Repeat(BitConverter.GetBytes(short.MaxValue), 22_050).SelectMany(b => b).ToArray();
+
+        var pcm = VoiceAudio.FromSpeech(mono, 22_050);
+        var left = Enumerable.Range(0, 48_000).Select(i => BitConverter.ToInt16(pcm, i * 4)).ToArray();
+        var right = Enumerable.Range(0, 48_000).Select(i => BitConverter.ToInt16(pcm, i * 4 + 2)).ToArray();
+
+        Assert.Equal(0, pcm.Length % VoiceAudio.FrameBytes);
+        Assert.Equal(1, VoiceAudio.DurationOf(pcm.Length).TotalSeconds, precision: 2);
+        Assert.Equal(left, right);
+        Assert.All(left, s => Assert.InRange(s, VoiceAudio.SpeechVolume * short.MaxValue - 2,
+            VoiceAudio.SpeechVolume * short.MaxValue + 1)); // a little under full, never clipped
+    }
+
+    [Fact]
+    public void Speech_resampling_blends_between_samples()
+    {
+        // Two 24 kHz samples, 0 then 1000: at 48 kHz, the one between them is halfway.
+        var mono = BitConverter.GetBytes((short)0).Concat(BitConverter.GetBytes((short)1000)).ToArray();
+
+        var pcm = VoiceAudio.FromSpeech(mono, 24_000);
+
+        Assert.Equal([0, 500, 1000], Enumerable.Range(0, 3)
+            .Select(i => (int)Math.Round(BitConverter.ToInt16(pcm, i * 4) / VoiceAudio.SpeechVolume)));
+    }
+
+    [Fact]
+    public void No_speech_is_no_audio()
+        => Assert.Empty(VoiceAudio.FromSpeech([], 22_050));
+}
+
+/// <summary>Whether spoken replies can work, before Piper is ever run.</summary>
+public class TextToSpeechSetupTests
+{
+    private static TextToSpeech Make(ModBot.Configuration.VoiceOptions options)
+        => new(Microsoft.Extensions.Options.Options.Create(options),
+            new Microsoft.Extensions.Hosting.Internal.HostingEnvironment { ContentRootPath = Path.GetTempPath() },
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<TextToSpeech>.Instance);
+
+    [Fact]
+    public void Says_when_piper_isnt_installed()
+        => Assert.Contains("voice/setup.ps1",
+            Make(new() { PiperPath = "no-such-folder/piper.exe" }).Problem);
+
+    [Fact]
+    public void Can_be_turned_off()
+        => Assert.Contains("turned off", Make(new() { SpokenReplies = false }).Problem);
+
+    [Fact]
+    public async Task Without_piper_it_says_nothing_rather_than_failing()
+        => Assert.Null(await Make(new() { PiperPath = "no-such-folder/piper.exe" })
+            .SpeakAsync("hello", CancellationToken.None));
+}
+
+/// <summary>Answers made fit to read aloud.</summary>
+public class SpokenTextTests
+{
+    [Theory]
+    [InlineData("**Season 2** adds _three_ new maps.", "Season 2 adds three new maps.")]
+    [InlineData("See [the patch notes](https://example.com/patch) for more.", "See the patch notes for more.")]
+    [InlineData("It's out now https://example.com/x - enjoy", "It's out now - enjoy")]
+    [InlineData("<@123456789> your reminder's set ✅ for <#42> .", "your reminder's set for.")]
+    [InlineData("🎶 Added **Song** to the queue 👍🏽", "Added Song to the queue")]
+    [InlineData("# Heading\n- one\n- two", "Heading one two")]
+    [InlineData("Use `/queue` or ||spoilers|| ~~not this~~", "Use /queue or spoilers not this")]
+    [InlineData("snake_case stays, and so does a \\*literal\\* star", "snake_case stays, and so does a *literal* star")]
+    [InlineData("<:pepe:123456> hi <a:dance:654321>", "hi")]
+    [InlineData("Details at https://x.com/a.", "Details at.")]
+    [InlineData("It's 72°F out 🌞", "It's 72°F out")]
+    public void Leaves_only_words(string reply, string spoken) => Assert.Equal(spoken, SpokenText.From(reply, 300));
+
+    [Fact]
+    public void Reads_discord_times_as_how_long_from_now()
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_700_000_000);
+
+        Assert.Equal("I'll remind you in 20 minutes (in 2 hours, 1 day ago).", SpokenText.From(
+            "I'll remind you <t:1700001200:R> (<t:1700007200:t>, <t:1699913600:F>).", 300, now));
+    }
+
+    [Theory]
+    [InlineData(59.6, "in 1 hour")]
+    [InlineData(23.6 * 60, "in 1 day")]
+    [InlineData(0.2, "now")]
+    [InlineData(-90, "2 hours ago")]
+    public void Rounds_to_the_nearest_unit(double minutes, string spoken)
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_700_000_000);
+        Assert.Equal(spoken, SpokenText.Relative(now.AddMinutes(minutes), now));
+    }
+
+    [Theory]
+    [InlineData("<t:999999999999:R>")] // past the year 9999
+    [InlineData("<t:-999999999999:R>")]
+    public void A_time_no_date_can_hold_is_left_out(string tag)
+        => Assert.Equal("It's due.", SpokenText.From($"It's due {tag}.", 300));
+
+    [Fact]
+    public void Says_only_the_first_few_whole_sentences()
+        => Assert.Equal("One two three. Four five six!",
+            SpokenText.From("One two three. Four five six! Seven eight nine ten eleven.", 35));
+
+    [Fact]
+    public void Says_how_long_the_whole_answer_was_so_a_cut_can_be_noted()
+    {
+        var said = SpokenText.From("**One** two three. Four five six! Seven eight nine ten eleven.", 35, out var whole);
+
+        Assert.Equal("One two three. Four five six!", said);
+        Assert.Equal("One two three. Four five six! Seven eight nine ten eleven.".Length, whole);
+
+        // Not cut: all of it is said.
+        Assert.Equal("Short.".Length, SpokenText.From("Short.", 35, out var shortWhole).Length);
+        Assert.Equal("Short.".Length, shortWhole);
+    }
+
+    [Fact]
+    public void A_long_first_sentence_is_cut_at_a_word()
+        => Assert.Equal("one two three.", SpokenText.From("one two three four five six", 15));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("https://example.com 🎶")]
+    public void Nothing_to_say_is_empty(string? reply) => Assert.Equal("", SpokenText.From(reply, 300));
 }
 
 /// <summary>Which voice channel the bot joins by itself.</summary>
@@ -281,6 +409,11 @@ public class HeardTextTests
     [InlineData("Hey <@42>: not one of mine")]
     [InlineData("🎙️ Listening for voice commands in <#1>")]
     public void Ignores_the_bots_other_posts(string content) => Assert.Null(EventHandlers.ChatHandler.ReadHeardText(content));
+
+    [Fact]
+    public void A_spoken_search_shows_who_searched_for_what_as_written()
+        => Assert.Equal("🎙️ <@42> searched: season 2 \\*patch\\* notes",
+            EventHandlers.ChatHandler.SearchedText(new Speaker(42), "season 2 *patch* notes"));
 }
 
 /// <summary>The one line the bot posts on joining voice.</summary>

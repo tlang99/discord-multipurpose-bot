@@ -125,19 +125,26 @@ public partial class ChatHandler
             Describe(message, guild, bot.Id, noteAttachments: false), Describe(message, guild, bot.Id)));
     }
 
+    /// <summary>An answer to a spoken request: what to say (after the word filter), and whether it's in chat already
+    /// (a web search's embed, or an answer that couldn't be said aloud).</summary>
+    public sealed record VoiceAnswer(string Text, bool InChat);
+
     /// <summary>
     /// Something said in voice after the bot's name (<see cref="VoiceListener"/>), handled exactly like the same words
-    /// typed as an @mention by <paramref name="speaker"/>: the same switches, word filter, cooldown and actions. What
-    /// was heard is posted first, so everyone in the channel sees what the bot acted on (and anything it misheard),
-    /// and the answer replies to that.
+    /// typed as an @mention by <paramref name="speaker"/>: the same switches, word filter, cooldown and actions.
+    /// <para>With <paramref name="aloud"/>, the answer is only spoken, not posted: nothing goes in chat but what an
+    /// action posts itself (a poll, an LFG card, a web search's embed under "🎙️ @name searched: …"). Otherwise, what
+    /// was heard is posted ("🎙️ @name: …") and the answer replies to it, as typed.</para>
+    /// Returns the answer, or null if there was none.
     /// </summary>
-    public async Task HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel, string request)
+    public async Task<VoiceAnswer?> HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel,
+        string request, bool aloud)
     {
         var guild = channel.Guild;
         if (!ChannelAccess.CanPost(guild.CurrentUser, channel))
         {
             await StopListeningCantPostAsync(channel);
-            return;
+            return null;
         }
 
         // The speaker has to be able to post where the answer goes themselves: saying it mustn't put a poll or LFG in
@@ -146,7 +153,7 @@ public partial class ChatHandler
             await AllowedAsync(guild, speaker, request) is not { } allowed ||
             !allowed.Server.IsEnabled(ServerFeature.VoiceCommands))
         {
-            return;
+            return null;
         }
 
         // The cooldown is checked (and counted) here, before anything's posted: typed, a request during it gets a ⏳,
@@ -154,7 +161,7 @@ public partial class ChatHandler
         // chatty speaker or a noisy mic can't flood the channel.
         if (IsOnCooldown(guild.Id, speaker.Id))
         {
-            return;
+            return null;
         }
 
         // What was heard is posted in the bot's name, so it follows the rules for the bot's own posts: the server's word
@@ -162,24 +169,51 @@ public partial class ChatHandler
         // reminders). Typed, the member's own message would be up to auto-mod; said, the bot would be the one posting.
         if (TextFilter.AppliesToBotPost(speaker) && TextFilter.FindViolation(request, allowed.Settings) is not null)
         {
-            return;
+            return null;
         }
 
-        IUserMessage heard;
+        IUserMessage? heard = null;
+        if (!aloud)
+        {
+            heard = await PostHeardAsync(speaker, channel, request);
+            if (heard is null)
+            {
+                await StopListeningCantPostAsync(channel);
+                return null;
+            }
+        }
+
+        var said = new ChatRequest(channel, heard, speaker, request, request, Spoken: true);
+        await RespondAsync(allowed, said);
+        return said.Answer is { } answer ? new VoiceAnswer(answer, said.AnswerInChat) : null;
+    }
+
+    /// <summary>For an answer that was to be spoken but couldn't be (text-to-speech failed): posts what was heard and
+    /// the answer in reply, as if it had never been meant to be spoken. <paramref name="answer"/> has been through the
+    /// word filter already.</summary>
+    public async Task PostUnspokenAnswerAsync(SocketGuildUser speaker, SocketTextChannel channel, string request,
+        string answer)
+    {
+        if (await PostHeardAsync(speaker, channel, request) is { } heard)
+        {
+            await ReplyAsync(new ChatRequest(channel, heard, speaker, request, request, Spoken: true), answer);
+        }
+    }
+
+    /// <summary>Posts "🎙️ @name: what they said"; null (logged) if it couldn't be.</summary>
+    private async Task<IUserMessage?> PostHeardAsync(SocketGuildUser speaker, SocketTextChannel channel, string said)
+    {
         try
         {
             // No link previews: a misheard or spoken link shouldn't turn into a preview card under the bot's name.
-            heard = await channel.SendMessageAsync(HeardText(speaker, request), allowedMentions: AllowedMentions.None,
+            return await channel.SendMessageAsync(HeardText(speaker, said), allowedMentions: AllowedMentions.None,
                 flags: MessageFlags.SuppressEmbeds);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Couldn't post a voice request in channel {ChannelId}.", channel.Id);
-            await StopListeningCantPostAsync(channel);
-            return;
+            return null;
         }
-
-        await RespondAsync(allowed, new ChatRequest(channel, heard, speaker, request, request, Spoken: true));
     }
 
     /// <summary>
@@ -195,22 +229,35 @@ public partial class ChatHandler
     }
 
     /// <summary>A request to the chatbot, typed or said.</summary>
-    /// <param name="Message">What replies answer: the typed message, or the bot's post of what it heard.</param>
+    /// <param name="Message">What replies answer: the typed message, or the bot's post of what it heard. Null for a
+    /// spoken request answered aloud: nothing was posted, and the answer isn't either (see <see cref="Aloud"/>).</param>
     /// <param name="Words">Just what they wrote (or said), for working out actions.</param>
     /// <param name="Question">What they wrote with a note for attachments, for the chatbot to answer.</param>
     /// <param name="Spoken">Said in voice: its cooldown was already counted before posting what was heard.</param>
-    private sealed record ChatRequest(SocketTextChannel Channel, IUserMessage Message, IUser Author, string Words,
-        string Question, bool Spoken = false);
+    private sealed record ChatRequest(SocketTextChannel Channel, IUserMessage? Message, IUser Author, string Words,
+        string Question, bool Spoken = false)
+    {
+        /// <summary>Answered by voice only: replies aren't posted, except an embed (a web search's).</summary>
+        public bool Aloud => Message is null;
+
+        /// <summary>The answer: its text, or for an answer that's all in an embed (a web search), the embed's. Set by
+        /// <see cref="ReplyAsync"/>; null if there was none.</summary>
+        public string? Answer { get; set; }
+
+        /// <summary>Whether the answer was posted in chat too.</summary>
+        public bool AnswerInChat { get; set; }
+    }
 
     /// <summary>True (after a ⏳ on the message) if the asker has to wait. Counts the request otherwise.</summary>
     private async Task<bool> MustWaitAsync(ChatRequest request)
     {
-        if (request.Spoken || !IsOnCooldown(request.Channel.Guild.Id, request.Author.Id))
+        if (request.Spoken || request.Message is not { } message ||
+            !IsOnCooldown(request.Channel.Guild.Id, request.Author.Id))
         {
             return false;
         }
 
-        await ReactAsync(request.Message, "⏳");
+        await ReactAsync(message, "⏳");
         return true;
     }
 
@@ -256,19 +303,19 @@ public partial class ChatHandler
             {
                 // Said, it would run as whoever's mic picked it up: a friend in the room, a soundboard, or a
                 // mishearing ("enable" for "disable") could change the server's settings as an admin.
-                await ReplyAsync(message, "Server settings can only be changed by typing, so nobody can change them " +
+                await ReplyAsync(request, "Server settings can only be changed by typing, so nobody can change them " +
                                           "by talking near an admin's mic. Type it, or use `/settings`.");
             }
             else if (!isAdmin)
             {
-                await ReplyAsync(message, change is not null
+                await ReplyAsync(request, change is not null
                     ? "Only server admins (**Manage Server**) can turn features on or off. See `/settings`."
                     : "Only server admins (**Manage Server**) can change news notifications. See `/news notify`.");
             }
             else
             {
                 // Each switch saves, logs who changed it, and words its own reply.
-                await ReplyAsync(message, change is not null
+                await ReplyAsync(request, change is not null
                     ? await _featureSwitch.SetAsync(guild, change.Feature, change.On, member)
                     : await _newsNotifications.SetAsync(guild.Id, newsNotify!.Feed, newsNotify.Silent, member));
             }
@@ -301,7 +348,7 @@ public partial class ChatHandler
                 asker.Username, asker.Id, channel.Name);
             if (answer.Length > 0)
             {
-                await ReplyAsync(message, answer);
+                await ReplyAsync(request, answer);
             }
 
             return;
@@ -309,7 +356,7 @@ public partial class ChatHandler
 
         if (question.Length == 0)
         {
-            await ReplyAsync(message, $"👋 Ask me something after the mention, like \"@{bot.DisplayName} what should " +
+            await ReplyAsync(request, $"👋 Ask me something after the mention, like \"@{bot.DisplayName} what should " +
                                       "we play tonight?\"");
             return;
         }
@@ -321,7 +368,8 @@ public partial class ChatHandler
 
         string? reply = null;
         ChatAction? action = null;
-        using (channel.EnterTypingState())
+        // No "typing…" for an answer that'll only be spoken: nothing would follow it in chat.
+        using (request.Aloud ? null : channel.EnterTypingState())
         {
             // How many requests reach the model at once is limited inside the chat service, shared with news.
             try
@@ -361,6 +409,7 @@ public partial class ChatHandler
                 string text;
                 var suppressEmbeds = false;
                 Embed? embed = null;
+                string? spoken = null; // what to say, when it isn't the text
                 var outcome = "done";
                 try
                 {
@@ -382,6 +431,12 @@ public partial class ChatHandler
                             ? new SearchAnswer(reason, null)
                             : await _search.AnswerAsync(guild.Id, guild.Name, bot.DisplayName, search.Query);
                         (text, embed) = (found.Text, found.Embed);
+                        // Said, it's posted like /search (where Discord shows who searched for what); the answer
+                        // is read aloud.
+                        if (request.Aloud && embed is not null)
+                        {
+                            (text, spoken) = (SearchedText(asker, search.Query), embed.Description);
+                        }
                     }
                     else
                     {
@@ -419,9 +474,10 @@ public partial class ChatHandler
                         : "My reply broke this server's word filter, so I'm keeping the details to myself.";
                     suppressEmbeds = false;
                     embed = null;
+                    spoken = null;
                 }
 
-                await ReplyAsync(message, text, suppressEmbeds, embed);
+                await ReplyAsync(request, text, suppressEmbeds, embed, spoken);
                 return;
             }
         }
@@ -441,7 +497,7 @@ public partial class ChatHandler
         // Not what was said, only that it happened: the conversation itself stays out of the log.
         _logger.LogInformation("Chat answered {User} ({UserId}) in #{Channel} ({Length} characters).",
             asker.Username, asker.Id, channel.Name, reply.Length);
-        await ReplyAsync(message, reply);
+        await ReplyAsync(request, reply);
     }
 
     /// <summary>
@@ -452,10 +508,10 @@ public partial class ChatHandler
     /// answered), and whether to hide link previews in it.
     /// </summary>
     private async Task<(string Text, bool SuppressEmbeds)> RunActionAsync(ChatAction action, SocketGuildUser asker,
-        SocketTextChannel channel, IUserMessage request)
+        SocketTextChannel channel, IUserMessage? request)
     {
         var guild = channel.Guild;
-        var requestMessageId = request.Id;
+        var requestMessageId = request?.Id;
         switch (action)
         {
             case PlayMusicAction play:
@@ -529,7 +585,7 @@ public partial class ChatHandler
 
             case EndPollAction end:
                 // The reply's own target, which is there even when Discord doesn't attach the message itself.
-                return (await _polls.EndRequestedAsync(asker, channel, request.Reference?.MessageId.ToNullable(),
+                return (await _polls.EndRequestedAsync(asker, channel, request?.Reference?.MessageId.ToNullable(),
                     end.SaidMine), true);
 
             case UnclearSongAction:
@@ -649,7 +705,7 @@ public partial class ChatHandler
     /// <remarks>One message rather than a turn per Discord message: given separate "Name: text" turns, small models
     /// tend to continue the pattern and script a whole exchange between the people in the channel.</remarks>
     private async Task<(string Prompt, HashSet<string> Speakers)> BuildPromptAsync(SocketTextChannel channel,
-        IUserMessage message, IUser askedBy, SocketGuild guild, SocketGuildUser bot, string question)
+        IUserMessage? message, IUser askedBy, SocketGuild guild, SocketGuildUser bot, string question)
     {
         var lines = new List<string>();
         var included = new HashSet<ulong>();
@@ -660,7 +716,10 @@ public partial class ChatHandler
         {
             try
             {
-                var earlier = await channel.GetMessagesAsync(message, Direction.Before, historyCount).FlattenAsync();
+                // Before the question, or (a request answered aloud, which was never posted) the latest.
+                var earlier = await (message is null
+                    ? channel.GetMessagesAsync(historyCount)
+                    : channel.GetMessagesAsync(message, Direction.Before, historyCount)).FlattenAsync();
                 foreach (var m in earlier.OrderBy(m => m.Timestamp))
                 {
                     if (ToLine(m, guild, bot, speakers) is { } line)
@@ -678,7 +737,7 @@ public partial class ChatHandler
         }
 
         // Replying to an older bot message: make sure the model sees what it's being asked about.
-        if (message.ReferencedMessage is { } referenced && !included.Contains(referenced.Id) &&
+        if (message?.ReferencedMessage is { } referenced && !included.Contains(referenced.Id) &&
             ToLine(referenced, guild, bot, speakers) is { } referencedLine)
         {
             lines.Add(referencedLine);
@@ -792,21 +851,44 @@ public partial class ChatHandler
     private static string DisplayName(IUser user, SocketGuild guild)
         => guild.GetUser(user.Id)?.DisplayName ?? user.GlobalName ?? user.Username;
 
-    private async Task ReplyAsync(IUserMessage message, string text, bool suppressEmbeds = false,
-        Embed? embed = null)
+    /// <summary>
+    /// Answers <paramref name="request"/>, and notes the answer on it (<see cref="ChatRequest.Answer"/>), so a spoken
+    /// request can be answered aloud with exactly what was posted. Answered aloud, only an embed is posted (on its own,
+    /// with <paramref name="text"/> above it); the rest is just said.
+    /// </summary>
+    /// <param name="spoken">What to say, when it isn't <paramref name="text"/> (or the embed's text, without any).</param>
+    private async Task ReplyAsync(ChatRequest request, string text, bool suppressEmbeds = false, Embed? embed = null,
+        string? spoken = null)
     {
+        request.Answer = spoken ?? (text.Length > 0 ? text : embed?.Description);
+        if (request.Aloud && embed is null)
+        {
+            return;
+        }
+
         try
         {
             // Only the asker can be pinged, however the model's text is worded. (Suppressing embeds would hide the
             // queue/now-playing card too, so it's only done on text-only replies.)
-            await message.ReplyAsync(text.Length == 0 ? null : text, embed: embed,
-                allowedMentions: new AllowedMentions(AllowedMentionTypes.None) { MentionRepliedUser = true },
-                flags: suppressEmbeds && embed is null ? MessageFlags.SuppressEmbeds : MessageFlags.None);
+            var flags = suppressEmbeds && embed is null ? MessageFlags.SuppressEmbeds : MessageFlags.None;
+            if (request.Message is { } message)
+            {
+                await message.ReplyAsync(text.Length == 0 ? null : text, embed: embed,
+                    allowedMentions: new AllowedMentions(AllowedMentionTypes.None) { MentionRepliedUser = true },
+                    flags: flags);
+            }
+            else
+            {
+                await request.Channel.SendMessageAsync(text.Length == 0 ? null : text, embed: embed,
+                    allowedMentions: AllowedMentions.None, flags: flags);
+            }
+
+            request.AnswerInChat = true;
         }
         catch (Exception ex)
         {
             // Most likely the question was deleted in the meantime.
-            _logger.LogDebug(ex, "Couldn't send a chat reply in channel {ChannelId}.", message.Channel.Id);
+            _logger.LogDebug(ex, "Couldn't send a chat reply in channel {ChannelId}.", request.Channel.Id);
         }
     }
 
@@ -825,6 +907,11 @@ public partial class ChatHandler
     /// <summary>The bot's post of a voice request: "🎙️ @name: what they said" (escaped, so it shows as said). Read back
     /// by <see cref="ReadHeardText"/> when it turns up in the channel history.</summary>
     public static string HeardText(IUser speaker, string said) => $"🎙️ {speaker.Mention}: {TextTools.Escape(said)}";
+
+    /// <summary>The line over a web search asked for in voice and answered aloud: "🎙️ @name searched: the words",
+    /// like Discord's "used /search" over the slash command's answer.</summary>
+    public static string SearchedText(IUser speaker, string query)
+        => $"🎙️ {speaker.Mention} searched: {TextTools.Escape(TextTools.Truncate(query, 200))}";
 
     /// <summary>Who spoke and what they said, from a <see cref="HeardText"/> post; null for any other message.</summary>
     public static (ulong SpeakerId, string Said)? ReadHeardText(string content)

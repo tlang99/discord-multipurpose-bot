@@ -143,10 +143,12 @@ suggests a search. Answers to voice requests go in the voice channel's chat.
 **Voice commands** — off until a server turns them on (`/settings feature`). Then `/voice listen` (or "@bot listen in
 voice") has the bot join your voice channel, or with **Voice auto-join** also turned on it joins by itself when people
 are there (`/settings voice-channel` limits that to one channel). It posts a one-line "listening" note on joining and
-listens for its name, chiming when it hears it (the bot shows unmuted, since it needs to send the chime): "hey
+listens for its name, chiming when it hears it (the bot shows unmuted, since it sends sound): "hey
 ModBot, make an LFG for ranked", "hey ModBot, remind me in 20 minutes to check the oven". What's said after the name
-is handled exactly like the same words typed as an @mention, by the same person. The bot posts what it heard in the voice
-channel's chat and replies to that. Speech is turned into text on the bot's own machine (Whisper), and no audio is
+is handled exactly like the same words typed as an @mention, by the same person. The bot answers out loud (the first
+few sentences), without repeating it in chat; a poll or LFG it makes is still posted, and a web search posts the same
+card as `/search`. Where it can't speak, it posts what it heard in the voice channel's chat and replies to that instead.
+Speech is turned into text, and answers into speech, on the bot's own machine (Whisper and Piper), and no audio is
 kept. It stops on `/voice stop`, "hey ModBot, stop listening", when everyone leaves, or when music starts: one voice
 connection can't play and listen at once (with auto-join, it comes back after the music). Needs a one-time setup, see
 [voice/README.md](voice/README.md).
@@ -510,7 +512,7 @@ exemption) is controlled per-server via `/automod`.
 Music needs Java and the Lavalink server. Follow [lavalink/README.md](lavalink/README.md) once, then start Lavalink
 (`java -jar Lavalink.jar` in the `lavalink/` folder) whenever you run the bot.
 
-Voice commands need a one-time download of Discord's voice libraries and a speech-to-text model:
+Voice commands need a one-time download of Discord's voice libraries, a speech-to-text model and a text-to-speech voice:
 `powershell -ExecutionPolicy Bypass -File voice/setup.ps1`, then rebuild. See [voice/README.md](voice/README.md).
 
 ### 6. (Optional) Set up AI chat

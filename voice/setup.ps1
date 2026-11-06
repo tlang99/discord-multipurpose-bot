@@ -1,4 +1,4 @@
-# Downloads what voice commands need, into voice/natives and voice/models (neither is committed). Rebuild the bot
+# Downloads what voice commands need, into voice/natives, voice/models and voice/piper (none of them committed). Rebuild the bot
 # afterwards so the libraries are copied next to it. See voice/README.md.
 #
 # Every download is pinned to an exact release or commit and checked against its SHA-256, so what you get is exactly
@@ -38,8 +38,29 @@ $downloads = @(
         Name = 'the speech-to-text model (~140 MB)'; File = "$models/ggml-base.en.bin"; ZipEntry = $null
         Url = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin'
         Sha256 = 'a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002'
+    },
+    @{
+        # The voice spoken replies use (Piper's "kusal", a male US English voice, ~63 MB), pinned to a revision.
+        Name = 'the speaking voice (~63 MB)'; File = "$models/en_US-kusal-medium.onnx"; ZipEntry = $null
+        Url = 'https://huggingface.co/rhasspy/piper-voices/resolve/375a0fe641dea077c2a47b4e9a056d6da521eed3/en/en_US/kusal/medium/en_US-kusal-medium.onnx'
+        Sha256 = '438ae25bb305b2a7f6d632327d6102df25011f793e8222fa9db876e7321df8f3'
+    },
+    @{
+        # Its settings (sample rate, pronunciation), which Piper reads next to the voice.
+        Name = "the speaking voice's settings"; File = "$models/en_US-kusal-medium.onnx.json"; ZipEntry = $null
+        Url = 'https://huggingface.co/rhasspy/piper-voices/resolve/375a0fe641dea077c2a47b4e9a056d6da521eed3/en/en_US/kusal/medium/en_US-kusal-medium.onnx.json'
+        Sha256 = 'ddd3c4dfd8b4f568150c934fb94912dd788d44db87f4f0a328c469d7a6761f41'
     }
 )
+
+# Piper, the text-to-speech program for spoken replies (~22 MB): a whole folder (the program, its libraries and its
+# pronunciation data), so it's unpacked into voice/piper rather than picked out a file at a time. A note of the
+# archive's hash marks it as installed.
+$piper = @{
+    Dir = Join-Path $PSScriptRoot 'piper'; Folder = 'piper/'
+    Url = 'https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip'
+    Sha256 = 'f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea'
+}
 
 function Test-Hash($path, $expected) {
     (Test-Path $path) -and ((Get-FileHash $path -Algorithm SHA256).Hash -eq $expected.ToUpperInvariant())
@@ -69,6 +90,33 @@ try {
         }
 
         Move-Item $file $d.File -Force
+    }
+
+    $marker = Join-Path $piper.Dir '.installed-sha256'
+    $installed = (Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $piper.Sha256) -and
+        (Test-Path (Join-Path $piper.Dir 'piper.exe'))
+    if (-not $installed) {
+        Write-Host 'Downloading Piper (text-to-speech, ~22 MB)...'
+        $zip = Join-Path $temp 'piper.zip.download'
+        Invoke-WebRequest $piper.Url -OutFile $zip -UseBasicParsing
+        if (-not (Test-Hash $zip $piper.Sha256)) {
+            throw "Piper from $($piper.Url) doesn't match its expected SHA-256, so it wasn't installed."
+        }
+        if (Test-Path $piper.Dir) { Remove-Item -Recurse -Force $piper.Dir }
+        $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+        try {
+            foreach ($entry in $archive.Entries) {
+                if (-not $entry.FullName.StartsWith($piper.Folder) -or $entry.Name -eq '') { continue }
+                $target = [IO.Path]::GetFullPath((Join-Path $piper.Dir $entry.FullName.Substring($piper.Folder.Length)))
+                # Never outside voice/piper, whatever the archive's paths say.
+                if (-not $target.StartsWith([IO.Path]::GetFullPath($piper.Dir) + [IO.Path]::DirectorySeparatorChar)) {
+                    throw "Piper's archive has a file outside its folder ($($entry.FullName)), so it wasn't installed."
+                }
+                New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+            }
+        } finally { $archive.Dispose() }
+        Set-Content $marker $piper.Sha256
     }
 } finally {
     Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
