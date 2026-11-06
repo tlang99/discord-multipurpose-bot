@@ -233,6 +233,19 @@ public class SpokenTextTests
             SpokenText.From("One two three. Four five six! Seven eight nine ten eleven.", 35));
 
     [Fact]
+    public void Says_how_long_the_whole_answer_was_so_a_cut_can_be_noted()
+    {
+        var said = SpokenText.From("**One** two three. Four five six! Seven eight nine ten eleven.", 35, out var whole);
+
+        Assert.Equal("One two three. Four five six!", said);
+        Assert.Equal("One two three. Four five six! Seven eight nine ten eleven.".Length, whole);
+
+        // Not cut: all of it is said.
+        Assert.Equal("Short.".Length, SpokenText.From("Short.", 35, out var shortWhole).Length);
+        Assert.Equal("Short.".Length, shortWhole);
+    }
+
+    [Fact]
     public void A_long_first_sentence_is_cut_at_a_word()
         => Assert.Equal("one two three.", SpokenText.From("one two three four five six", 15));
 

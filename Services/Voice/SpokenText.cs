@@ -15,7 +15,14 @@ public static partial class SpokenText
     /// whole sentences; "" if nothing's left to say.</summary>
     /// <param name="now">For reading Discord timestamps as "in 20 minutes"; the current time when not given.</param>
     public static string From(string? reply, int maxLength, DateTimeOffset? now = null)
+        => From(reply, maxLength, out _, now);
+
+    /// <inheritdoc cref="From(string?, int, DateTimeOffset?)"/>
+    /// <param name="saidOf">How long the whole answer was once made fit to speak: longer than what's returned means
+    /// the rest went unsaid.</param>
+    public static string From(string? reply, int maxLength, out int saidOf, DateTimeOffset? now = null)
     {
+        saidOf = 0;
         if (string.IsNullOrWhiteSpace(reply) || maxLength <= 0)
         {
             return "";
@@ -33,6 +40,7 @@ public static partial class SpokenText
         text = WithoutEmoji(text);
         text = SpacesRegex().Replace(text, " ");
         text = SpaceBeforePunctuationRegex().Replace(text, "$1").Trim();
+        saidOf = text.Length;
         return FirstSentences(text, maxLength);
     }
 

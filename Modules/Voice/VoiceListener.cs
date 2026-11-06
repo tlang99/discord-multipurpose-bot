@@ -837,11 +837,20 @@ public sealed class VoiceListener
     private void Speak(Session session, string answer, Func<Task>? couldntSay)
     {
         // Nothing to say aloud (only a link or emoji): then it's for reading.
-        if (SpokenText.From(answer, Math.Clamp(_options.MaxSpokenCharacters, 50, 2000)) is not { Length: > 0 } text)
+        var max = Math.Clamp(_options.MaxSpokenCharacters, 50, 2000);
+        if (SpokenText.From(answer, max, out var whole) is not { Length: > 0 } text)
         {
             Background.Run(_logger, () => couldntSay?.Invoke() ?? Task.CompletedTask, LogLevel.Warning,
                 "Couldn't post a voice answer in guild {GuildId}.", session.Guild.Id);
             return;
+        }
+
+        // Only how much, never the words: what the bot says stays out of the log, as what people say does.
+        if (text.Length < whole)
+        {
+            _logger.LogInformation("Spoken answer in guild {GuildId} cut to {Said} of {Whole} characters " +
+                                   "(Voice:MaxSpokenCharacters is {Max}); the rest wasn't said or posted.",
+                session.Guild.Id, text.Length, whole, max);
         }
 
         Play(session, token => _voiceOut.SpeakAsync(text, token), speech: true, couldntSay);
