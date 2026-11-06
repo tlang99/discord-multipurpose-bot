@@ -49,11 +49,13 @@ public static partial class SpokenText
     public static string Relative(DateTimeOffset time, DateTimeOffset now)
     {
         var gap = time - now;
-        var span = gap.Duration();
-        var amount = span.TotalMinutes < 1 ? null
-            : span.TotalHours < 1 ? TextTools.Count((int)Math.Round(span.TotalMinutes), "minute")
-            : span.TotalDays < 1 ? TextTools.Count((int)Math.Round(span.TotalHours), "hour")
-            : TextTools.Count((int)Math.Round(span.TotalDays), "day");
+        // Units picked after rounding, so 59.6 minutes is "1 hour", not "60 minutes".
+        var minutes = (long)Math.Round(gap.Duration().TotalMinutes);
+        var hours = (long)Math.Round(minutes / 60.0);
+        var amount = minutes < 1 ? null
+            : minutes < 60 ? TextTools.Count((int)minutes, "minute")
+            : hours < 24 ? TextTools.Count((int)hours, "hour")
+            : TextTools.Count((int)Math.Round(minutes / 1440.0), "day");
         return amount is null ? "now" : gap > TimeSpan.Zero ? $"in {amount}" : $"{amount} ago";
     }
 

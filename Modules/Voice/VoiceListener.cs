@@ -798,7 +798,10 @@ public sealed class VoiceListener
         _logger.LogInformation("Voice request from {User} ({UserId}) in {Channel}.", speaker.Username, speaker.Id,
             session.Channel.Name);
         // Answered aloud when it can be, and then not posted too; otherwise in chat, as typed.
-        var aloud = session.CanPlay && _voiceOut.Problem is null;
+        // Checked now, not just on joining: a bot that lost Speak or was server-muted since would talk to no one.
+        var bot = session.Guild.CurrentUser;
+        var aloud = session.CanPlay && _voiceOut.Problem is null && bot.GetPermissions(session.Channel).Speak &&
+                    !bot.IsMuted && !bot.IsSuppressed;
         if (await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request, aloud) is { } answer &&
             aloud)
         {

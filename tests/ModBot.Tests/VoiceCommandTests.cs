@@ -211,6 +211,17 @@ public class SpokenTextTests
     }
 
     [Theory]
+    [InlineData(59.6, "in 1 hour")]
+    [InlineData(23.6 * 60, "in 1 day")]
+    [InlineData(0.2, "now")]
+    [InlineData(-90, "2 hours ago")]
+    public void Rounds_to_the_nearest_unit(double minutes, string spoken)
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_700_000_000);
+        Assert.Equal(spoken, SpokenText.Relative(now.AddMinutes(minutes), now));
+    }
+
+    [Theory]
     [InlineData("<t:999999999999:R>")] // past the year 9999
     [InlineData("<t:-999999999999:R>")]
     public void A_time_no_date_can_hold_is_left_out(string tag)
