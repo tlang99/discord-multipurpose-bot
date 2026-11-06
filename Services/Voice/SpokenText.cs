@@ -93,7 +93,8 @@ public static partial class SpokenText
         foreach (var rune in text.EnumerateRunes())
         {
             var category = Rune.GetUnicodeCategory(rune);
-            if (category is System.Globalization.UnicodeCategory.OtherSymbol ||
+            // Symbols that read as words ("72°F", "™") stay; Piper says them.
+            if (category is System.Globalization.UnicodeCategory.OtherSymbol && rune.Value is not ('°' or '©' or '®' or '™') ||
                 rune.Value is 0x200D or (>= 0xFE00 and <= 0xFE0F) or (>= 0x1F3FB and <= 0x1F3FF))
             {
                 continue;
@@ -108,7 +109,8 @@ public static partial class SpokenText
     [GeneratedRegex(@"\[([^\]]*)\]\([^)]*\)")]
     private static partial Regex MarkdownLinkRegex();
 
-    [GeneratedRegex(@"<?\b(?:https?://|www\.)\S+>?", RegexOptions.IgnoreCase)]
+    /// <summary>A web address, not the punctuation after it ("see https://x.com/a." keeps its full stop).</summary>
+    [GeneratedRegex(@"<?\b(?:https?://|www\.)\S+?(?=[.,!?;:)]*(?:\s|$))>?", RegexOptions.IgnoreCase)]
     private static partial Regex BareLinkRegex();
 
     [GeneratedRegex(@"<t:(-?\d{1,12})(?::\w)?>")]

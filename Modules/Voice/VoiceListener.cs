@@ -841,10 +841,24 @@ public sealed class VoiceListener
         Background.Run(_logger, async () =>
         {
             var played = false;
+            byte[]? pcm = null;
             try
             {
-                played = session.CanPlay && await sound(session.Stopping.Token) is { Length: > 0 } pcm &&
-                         await session.PlayAsync(pcm, speech, EchoTail);
+                // Making the sound failing only costs this one (its answer goes to chat, below).
+                pcm = session.CanPlay ? await sound(session.Stopping.Token) : null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Couldn't make a sound to play in guild {GuildId}.", session.Guild.Id);
+            }
+            catch (OperationCanceledException)
+            {
+                // Stopped listening meanwhile.
+            }
+
+            try
+            {
+                played = pcm is { Length: > 0 } && await session.PlayAsync(pcm, speech, EchoTail);
             }
             catch (OperationCanceledException) when (session.Stopping.IsCancellationRequested)
             {

@@ -141,7 +141,8 @@ public sealed class TextToSpeech : IDisposable
     {
         if (!_options.Enabled || !_options.SpokenReplies)
         {
-            return "Spoken replies are turned off in the bot's settings (Voice:SpokenReplies).";
+            return $"Spoken replies are turned off in the bot's settings " +
+                   $"({(_options.Enabled ? "Voice:SpokenReplies" : "Voice:Enabled")}).";
         }
 
         if (!File.Exists(_piperPath))
@@ -161,7 +162,8 @@ public sealed class TextToSpeech : IDisposable
         {
             using var settings = JsonDocument.Parse(File.ReadAllBytes(_voicePath + ".json"));
             if (settings.RootElement.TryGetProperty("audio", out var audio) &&
-                audio.TryGetProperty("sample_rate", out var rate) && rate.TryGetInt32(out var hz) && hz > 0)
+                audio.TryGetProperty("sample_rate", out var rate) && rate.TryGetInt32(out var hz) &&
+                hz is >= 8_000 and <= 48_000) // what voices use; anything else is a broken settings file
             {
                 return hz;
             }

@@ -197,6 +197,8 @@ public class SpokenTextTests
     [InlineData("Use `/queue` or ||spoilers|| ~~not this~~", "Use /queue or spoilers not this")]
     [InlineData("snake_case stays, and so does a \\*literal\\* star", "snake_case stays, and so does a *literal* star")]
     [InlineData("<:pepe:123456> hi <a:dance:654321>", "hi")]
+    [InlineData("Details at https://x.com/a.", "Details at.")]
+    [InlineData("It's 72°F out 🌞", "It's 72°F out")]
     public void Leaves_only_words(string reply, string spoken) => Assert.Equal(spoken, SpokenText.From(reply, 300));
 
     [Fact]
