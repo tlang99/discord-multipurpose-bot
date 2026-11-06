@@ -797,8 +797,15 @@ public sealed class VoiceListener
         // Not what was said: the chatbot posts that in the channel, and the log stays free of it.
         _logger.LogInformation("Voice request from {User} ({UserId}) in {Channel}.", speaker.Username, speaker.Id,
             session.Channel.Name);
-        var answer = await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request);
-        Speak(session, answer);
+        // Answered aloud when it can be, and then not posted too; otherwise in chat, as typed.
+        var aloud = session.CanPlay && _voiceOut.Problem is null;
+        if (await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request, aloud) is { } answer &&
+            aloud)
+        {
+            Speak(session, answer.Text, couldntSay: answer.InChat
+                ? null
+                : () => _chat.Value.PostUnspokenAnswerAsync(speaker, session.ReplyChannel, request, answer.Text));
+        }
     }
 
     /// <summary>Plays the chime in the channel, if this session can (another sound playing, it's skipped).</summary>
@@ -806,51 +813,55 @@ public sealed class VoiceListener
     {
         if (_options.Chime)
         {
-            Play(session, _ => Task.FromResult<byte[]?>(ChimeSound.Value), speech: false);
+            Play(session, _ => Task.FromResult<byte[]?>(ChimeSound.Value), speech: false, couldntPlay: null);
         }
     }
 
-    /// <summary>Reads <paramref name="answer"/> aloud (its first few sentences, as speech), if spoken replies work
-    /// here; after any sound already playing.</summary>
-    private void Speak(Session session, string? answer)
+    /// <summary>Reads <paramref name="answer"/> aloud (its first few sentences, as speech), after any sound already
+    /// playing. If it can't be said, <paramref name="couldntSay"/> runs (posting it in chat instead).</summary>
+    private void Speak(Session session, string answer, Func<Task>? couldntSay)
     {
-        if (_voiceOut.Problem is not null ||
-            SpokenText.From(answer, _options.MaxSpokenCharacters) is not { Length: > 0 } text)
+        // Nothing to say aloud (only a link or emoji): then it's for reading.
+        if (SpokenText.From(answer, _options.MaxSpokenCharacters) is not { Length: > 0 } text)
         {
+            Background.Run(_logger, () => couldntSay?.Invoke() ?? Task.CompletedTask, LogLevel.Warning,
+                "Couldn't post a voice answer in guild {GuildId}.", session.Guild.Id);
             return;
         }
 
-        Play(session, token => _voiceOut.SpeakAsync(text, token), speech: true);
+        Play(session, token => _voiceOut.SpeakAsync(text, token), speech: true, couldntSay);
     }
 
     /// <summary>Makes a sound (<paramref name="sound"/>, in Discord's format) and plays it in the channel, without
-    /// waiting for it. A failure to play turns sound off for the rest of the session: the chime and spoken replies are
-    /// niceties, never a reason for a request to go unanswered (it's in chat too).</summary>
-    private void Play(Session session, Func<CancellationToken, Task<byte[]?>> sound, bool speech)
+    /// waiting for it. A failure to play turns sound off for the rest of the session; <paramref name="couldntPlay"/>
+    /// then runs, so a spoken answer still reaches chat.</summary>
+    private void Play(Session session, Func<CancellationToken, Task<byte[]?>> sound, bool speech,
+        Func<Task>? couldntPlay)
     {
-        if (!session.CanPlay)
-        {
-            return;
-        }
-
         Background.Run(_logger, async () =>
         {
-            if (await sound(session.Stopping.Token) is not { Length: > 0 } pcm)
-            {
-                return;
-            }
-
+            var played = false;
             try
             {
-                await session.PlayAsync(pcm, speech, EchoTail);
+                played = session.CanPlay && await sound(session.Stopping.Token) is { Length: > 0 } pcm &&
+                         await session.PlayAsync(pcm, speech, EchoTail);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException)
+            {
+                // Stopped listening meanwhile.
+            }
+            catch (Exception ex)
             {
                 session.CanPlay = false;
                 _logger.LogWarning(ex, "Couldn't play sound in guild {GuildId}; no more sounds until I rejoin.",
                     session.Guild.Id);
             }
-        }, LogLevel.Debug, "A sound stopped in guild {GuildId}.", session.Guild.Id);
+
+            if (!played && couldntPlay is not null)
+            {
+                await couldntPlay();
+            }
+        }, LogLevel.Warning, "A sound or its fallback failed in guild {GuildId}.", session.Guild.Id);
     }
 
     private bool MusicIsPlaying(ulong guildId) => MusicService.GetPlayer(_audio, guildId) is not null;
@@ -899,20 +910,21 @@ public sealed class VoiceListener
         /// </summary>
         /// <param name="speech">Spoken: <see cref="IsTalking"/> holds while it plays, and for
         /// <paramref name="echoTail"/> after.</param>
-        public async Task PlayAsync(byte[] pcm, bool speech, TimeSpan echoTail)
+        /// <returns>Whether it was played (not skipped).</returns>
+        public async Task<bool> PlayAsync(byte[] pcm, bool speech, TimeSpan echoTail)
         {
             var length = VoiceAudio.DurationOf(pcm.Length);
             if (Voice is null || !await _playing.WaitAsync(speech ? length + TimeSpan.FromSeconds(30) : TimeSpan.Zero,
                     Stopping.Token))
             {
-                return;
+                return false;
             }
 
             try
             {
                 if (!CanPlay || Stopping.IsCancellationRequested)
                 {
-                    return; // the session ended while this one waited
+                    return false; // the session ended while this one waited
                 }
 
                 if (speech)
@@ -929,6 +941,7 @@ public sealed class VoiceListener
                 timeout.CancelAfter(length + TimeSpan.FromSeconds(5));
                 await _sound.WriteAsync(pcm, timeout.Token);
                 await _sound.FlushAsync(timeout.Token);
+                return true;
             }
             finally
             {

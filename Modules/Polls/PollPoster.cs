@@ -79,9 +79,10 @@ public partial class PollPoster
     public void Release(ulong guildId, ulong userId) => _cooldowns.Release(guildId, userId);
 
     /// <summary>Posts the poll as a reply to <paramref name="request"/> (the chatbot's path; /poll responds to the
-    /// interaction instead). Returns null on success, or what went wrong.</summary>
+    /// interaction instead), or on its own without one (asked for in voice and answered aloud, so nothing was posted
+    /// to reply to: its "Poll by" line says whose it is). Returns null on success, or what went wrong.</summary>
     public async Task<string?> PostReplyAsync(IGuildUser asker, ITextChannel channel, PollDraft draft,
-        IUserMessage request, bool writtenByModel = false)
+        IUserMessage? request, bool writtenByModel = false)
     {
         if (await PrepareAsync(asker, channel, draft, writtenByModel) is { } problem)
         {
@@ -92,8 +93,9 @@ public partial class PollPoster
         {
             await channel.SendMessageAsync(Header(asker.Id), poll: ToProperties(draft),
                 allowedMentions: new AllowedMentions(AllowedMentionTypes.None) { MentionRepliedUser = false },
-                messageReference: new MessageReference(request.Id, channel.Id, channel.GuildId,
-                    failIfNotExists: false));
+                messageReference: request is null
+                    ? null
+                    : new MessageReference(request.Id, channel.Id, channel.GuildId, failIfNotExists: false));
             return null;
         }
         catch (Exception ex)

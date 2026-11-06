@@ -145,9 +145,10 @@ voice") has the bot join your voice channel, or with **Voice auto-join** also tu
 are there (`/settings voice-channel` limits that to one channel). It posts a one-line "listening" note on joining and
 listens for its name, chiming when it hears it (the bot shows unmuted, since it sends sound): "hey
 ModBot, make an LFG for ranked", "hey ModBot, remind me in 20 minutes to check the oven". What's said after the name
-is handled exactly like the same words typed as an @mention, by the same person. The bot posts what it heard in the voice
-channel's chat and replies to that, and reads the first few sentences of the answer aloud. Speech is turned into text,
-and answers into speech, on the bot's own machine (Whisper and Piper), and no audio is
+is handled exactly like the same words typed as an @mention, by the same person. The bot answers out loud (the first
+few sentences), without repeating it in chat; a poll or LFG it makes is still posted, and a web search posts the same
+card as `/search`. Where it can't speak, it posts what it heard in the voice channel's chat and replies to that instead.
+Speech is turned into text, and answers into speech, on the bot's own machine (Whisper and Piper), and no audio is
 kept. It stops on `/voice stop`, "hey ModBot, stop listening", when everyone leaves, or when music starts: one voice
 connection can't play and listen at once (with auto-join, it comes back after the music). Needs a one-time setup, see
 [voice/README.md](voice/README.md).

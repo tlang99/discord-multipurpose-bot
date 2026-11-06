@@ -377,6 +377,11 @@ public class HeardTextTests
     [InlineData("Hey <@42>: not one of mine")]
     [InlineData("🎙️ Listening for voice commands in <#1>")]
     public void Ignores_the_bots_other_posts(string content) => Assert.Null(EventHandlers.ChatHandler.ReadHeardText(content));
+
+    [Fact]
+    public void A_spoken_search_shows_who_searched_for_what_as_written()
+        => Assert.Equal("🎙️ <@42> searched: season 2 \\*patch\\* notes",
+            EventHandlers.ChatHandler.SearchedText(new Speaker(42), "season 2 *patch* notes"));
 }
 
 /// <summary>The one line the bot posts on joining voice.</summary>

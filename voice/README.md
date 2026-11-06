@@ -2,8 +2,11 @@
 
 The bot can sit in a voice channel and listen for its name: "hey ModBot, make an LFG for ranked", "hey ModBot, remind
 me in 20 minutes to check the oven". Whatever is said after its name is handled exactly like the same words typed as
-an @mention, by the same person, with the same rules. It posts what it heard in the voice channel's chat (so everyone
-sees what it acted on, and anything it misheard) and replies to that.
+an @mention, by the same person, with the same rules. It answers out loud, without repeating the answer in chat;
+anything the request makes is still posted (a poll, an LFG card), and a web search posts the same card `/search`
+does, under "🎙️ @name searched: …". When it can't speak (no **Speak** permission, or text-to-speech isn't set up),
+it posts what it heard in the voice channel's chat ("🎙️ @name: …", so everyone sees what it acted on, and anything it
+misheard) and replies to that instead.
 
 ## Privacy
 
@@ -21,14 +24,15 @@ sees what it acted on, and anything it misheard) and replies to that.
   listening: without it, the bot doesn't join by itself (`/voice listen` still works, without the status).
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
   off for every server with `Voice:Chime`).
-- It reads the first few sentences of its answer aloud (the whole answer is in chat too), without links, emoji or
-  formatting. Typed requests are only answered in chat. While it's talking, and for a moment after, it ignores what it
+- It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
+  say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
+  for a moment after, it ignores what it
   hears, so its own voice coming back through someone's mic isn't taken for a request. Needs **Speak**; turn it off
   for every server with `Voice:SpokenReplies`.
 - Speech is turned into text, and answers into speech, **on the machine running the bot** (Whisper and Piper).
   Nothing is sent to any other service. (A web search sends only the search words to Ollama, as typed searches do.)
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
-  the bot's name, and thrown away. Only what's said after the name is acted on and posted. The log notes that a voice
+  the bot's name, and thrown away. Only what's said after the name is acted on. The log notes that a voice
   request happened, never what was said.
 - Server settings (turning features on or off, news notifications) can't be changed by voice, only by typing: a
   friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
