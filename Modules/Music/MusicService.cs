@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using ModBot.Common;
 using ModBot.Configuration;
 using ModBot.Modules.Voice;
+using ModBot.Services.Music;
 
 namespace ModBot.Modules.Music;
 
@@ -41,11 +42,13 @@ public class MusicService
     private readonly MusicPlayerEvents _events;
     private readonly MusicOptions _options;
     private readonly VoiceListener _voice;
+    private readonly MusicBot _bot;
     private readonly ILogger<MusicService> _logger;
 
     public MusicService(IAudioService audioService, MusicPlayerEvents events, IOptions<MusicOptions> options,
-        VoiceListener voice, ILogger<MusicService> logger)
+        VoiceListener voice, MusicBot bot, ILogger<MusicService> logger)
     {
+        _bot = bot;
         _audioService = audioService;
         _events = events;
         _voice = voice;
@@ -143,10 +146,26 @@ public class MusicService
             return $"I'm already playing in <#{existing.VoiceChannelId}> - join that channel instead.";
         }
 
-        var permissions = user.Guild.CurrentUser.GetPermissions(voiceChannel);
+        // Whoever plays the music needs to get in: the main bot, or the music account (which has to be in the server).
+        if (_bot.IsSeparate && !_bot.IsSignedIn)
+        {
+            // Still connecting, or its token was refused (the log says which).
+            return "My music player isn't connected right now - try again in a moment, or let a server admin know.";
+        }
+
+        var player = _bot.IsSeparate ? _bot.In(user.Guild.Id) : user.Guild.CurrentUser;
+        if (player is null)
+        {
+            // Signed in (checked above), so it has an ID and the invite link exists.
+            return $"My music player, {_bot.Client.CurrentUser.Username}, isn't in this server yet - a server admin " +
+                   $"can add it here: <{_bot.InviteLink}>";
+        }
+
+        var permissions = player.GetPermissions(player.Guild.GetVoiceChannel(voiceChannel.Id) ?? voiceChannel);
         if (!permissions.ViewChannel || !permissions.Connect || !permissions.Speak)
         {
-            return $"I need **View Channel**, **Connect**, and **Speak** in {voiceChannel.Mention} to play music there.";
+            return $"{(_bot.IsSeparate ? player.Mention + " needs" : "I need")} **View Channel**, **Connect**, and " +
+                   $"**Speak** in {voiceChannel.Mention} to play music there.";
         }
 
         // Move Members lets the bot join a full channel anyway; without it, joining would just time out.
@@ -177,7 +196,8 @@ public class MusicService
         // stop listening and give Discord a moment to see the bot leave before Lavalink joins. (With voice auto-join on,
         // it comes back once the music's done and the player has left.) Until the player has joined, auto-join keeps
         // off the connection, so it can't grab it back in between.
-        var joining = GetPlayer(user.Guild.Id) is null;
+        // With its own account (MusicBot), music doesn't need the connection, and listening carries on.
+        var joining = GetPlayer(user.Guild.Id) is null && !_bot.IsSeparate;
         try
         {
             if (joining)

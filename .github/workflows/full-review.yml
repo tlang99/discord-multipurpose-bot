@@ -49,7 +49,7 @@ jobs:
             {"id": "moderation", "name": "Moderation",
              "paths": "Modules/Moderation/ Services/Moderation/ Services/ContentModeration/ EventHandlers/AutoModerationHandler.cs Models/GuildSettings.cs Models/Warning.cs Models/ModerationResult.cs Configuration/SightengineOptions.cs"},
             {"id": "music", "name": "Music",
-             "paths": "Modules/Music/ Models/MusicQueue.cs Configuration/MusicOptions.cs lavalink/"},
+             "paths": "Modules/Music/ Services/Music/ Hosting/MusicBotService.cs Models/MusicQueue.cs Configuration/MusicOptions.cs lavalink/"},
             {"id": "chat-and-voice", "name": "Chatbot and voice",
              "paths": "EventHandlers/ChatHandler.cs Modules/Chat/ Services/Chat/ Modules/Voice/ Services/Voice/ Models/ChatGuildSettings.cs Configuration/ChatOptions.cs Configuration/VoiceOptions.cs voice/ tools/VoiceTest/ discord-net-patch/build.ps1"},
             {"id": "lfg-polls-reminders", "name": "LFG, polls and reminders",

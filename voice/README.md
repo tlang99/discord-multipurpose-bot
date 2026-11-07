@@ -23,7 +23,11 @@ misheard) and replies to that instead.
 - **Voice auto-join needs Set Voice Channel Status**, since the status is how people joining later know it's
   listening: without it, the bot doesn't join by itself (`/voice listen` still works, without the status).
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
-  off for every server with `Voice:Chime`).
+  off for every server with `Voice:Chime`). An action that worked (playing, skipping or stopping music, adding or
+  removing a song, a reminder, an LFG or a poll) is answered with a three-note "done" chime (low, high, low) instead
+  of words, so it doesn't talk over the music. A reminder is also posted in the voice channel's chat (with its time
+  and how to cancel it), since nothing else would show it. If it couldn't do it, it says why. Questions (what's
+  playing, the queue, a web search, chat) are answered aloud. With `Voice:Chime` off, it says what it did, as before.
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
   for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"), which cuts
@@ -55,16 +59,33 @@ misheard) and replies to that instead.
   friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
 - It only listens while the chatbot is on, since every request goes through it.
 - It stops when anyone in the channel says "hey ModBot, stop listening" or uses `/voice stop`, when everyone leaves,
-  or when music starts. Started by hand, it also stops after `Voice:MaxListenMinutes` (3 hours by default).
+  or when music starts (unless music has its own bot account, see [Music](#music)). Started by hand, it also stops
+  after `Voice:MaxListenMinutes` (3 hours by default).
 - Told to stop (or taken out of the channel by a moderator), it won't join that channel by itself again until
   everyone has left it. Asking it to listen brings it straight back.
 
 ## Music
 
-Discord gives a bot one voice connection per server, and music (Lavalink) needs it to play. So the bot listens only
-while no music is playing: starting music stops the listening, and it won't start listening while music plays. With
-voice auto-join on, it comes back once the music player leaves voice (`Music:IdleTimeoutSeconds` after the last song,
-or straight after `/stop`).
+Discord gives a bot one voice connection per server, and music (Lavalink) needs one to play. Two ways to run it:
+
+- **One bot (the default):** the bot listens only while no music is playing. Starting music stops the listening,
+  and it won't start listening while music plays. With voice auto-join on, it comes back once the music player
+  leaves voice (`Music:IdleTimeoutSeconds` after the last song, or straight after `/stop`).
+- **A second bot account for music:** music and listening run at once. The second account only joins voice and
+  plays: `/play`, the music menu and "hey ModBot, play …" all stay on the main bot. While the bot reads an answer
+  aloud, it turns the music down (to `Voice:MusicDuckPercent` of its volume, 25% by default), and back up after.
+
+To set up the second account:
+
+1. In the [Discord Developer Portal](https://discord.com/developers/applications), make a new application (say,
+   "ModBot Music"), and under **Bot**, reset and copy its token. It needs no privileged intents.
+2. Give the token to the bot, like the main one:
+   `dotnet user-secrets set "Bot:MusicToken" "<music-bot-token>"` (or the `MUSIC_BOT_TOKEN` environment variable),
+   then restart.
+3. Invite it to each server. Until it's there, `/play` replies with its invite link (it asks for View Channel,
+   Connect and Speak only). The startup log lists the servers it's in ("Music plays from …").
+
+Remove the token to go back to one bot.
 
 ## Setup (Windows)
 
@@ -107,6 +128,7 @@ available").
 | `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest isn't said. |
 | `ConversationSeconds` | `10` | How long after its last answer it can be replied to without its name (0-60; `0` = no conversations). |
 | `FollowUpCooldownSeconds` | `5` | In a conversation, the least time between one person's requests (0-60). A reply said sooner is dropped. |
+| `MusicDuckPercent` | `25` | With music on its own bot account, how loud it plays while the bot talks, as a percentage of its volume (0-100; `100` = no dip). |
 | `LogRequests` | `false` | Write each voice request, as heard, to the log, to work out why one wasn't understood. The line posted on joining tells people. |
 
 ## Patched Discord.Net

@@ -151,8 +151,8 @@ few sentences), without repeating it in chat; a poll or LFG it makes is still po
 card as `/search`. Where it can't speak, it posts what it heard in the voice channel's chat and replies to that instead.
 Speech is turned into text, and answers into speech, on the bot's own machine (Whisper and Piper), and no audio is
 kept. It stops on `/voice stop`, "hey ModBot, stop listening", when everyone leaves, or when music starts: one voice
-connection can't play and listen at once (with auto-join, it comes back after the music). Needs a one-time setup, see
-[voice/README.md](voice/README.md).
+connection can't play and listen at once (with auto-join, it comes back after the music). A second bot account for
+music (`Bot:MusicToken`) lets both run at once. Needs a one-time setup, see [voice/README.md](voice/README.md).
 
 **Looking for group** — `/lfg` posts an LFG card, e.g. `/lfg players:4 playlist:Ranked Play rank:Gold mic:True`.
 Every option is optional:
@@ -475,6 +475,9 @@ dotnet user-secrets set "Bot:Token" "<your-token>"
 set BOT_TOKEN=<your-token>          # Windows cmd
 $env:BOT_TOKEN = "<your-token>"     # PowerShell
 ```
+
+Optional: a second bot account just for music, so music and listening for "hey ModBot" can run at once. Its
+setup is in [voice/README.md](voice/README.md#music).
 
 For faster iteration while developing, also set a test guild so slash commands register instantly instead of
 waiting up to an hour for global propagation:
