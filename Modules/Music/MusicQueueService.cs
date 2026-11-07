@@ -831,9 +831,14 @@ public class MusicQueueService : IHostedService
             if (_menus.TryGetValue(channel.GuildId, out var menu) && menu.ChannelId == channel.Id &&
                 await _serverSettings.IsEnabledAsync(channel.GuildId, ServerFeature.Music))
             {
-                await PostMenuAsync(channel);
+                var (_, error) = await PostMenuAsync(channel);
+                if (error is null)
+                {
+                    _logger.LogInformation("Moved the music menu back to the bottom of #{Channel} in guild {GuildId}.",
+                        channel.Name, channel.GuildId);
+                }
             }
-        }, LogLevel.Debug, "Couldn't move the music menu to the bottom of channel {ChannelId}.", channel.Id);
+        }, LogLevel.Warning, "Couldn't move the music menu to the bottom of channel {ChannelId}.", channel.Id);
     }
 
     private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
