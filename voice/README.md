@@ -122,7 +122,9 @@ available").
 | `MaxSpeechSeconds` | `15` | Longest stretch turned into text at once. |
 | `MaxListenMinutes` | `180` | Stop listening after this long (`0` = never). Only when started by hand: joined by itself, it stays until everyone's left. |
 | `Chime` | `true` | Play a short chime on hearing the bot's name. Needs **Speak**; the bot shows as unmuted while it can make sounds. |
+| `ChimeVolumePercent` | `20` | How loud the chimes are, as a percentage of full volume (0-100). Turn it up if they're lost under game audio. |
 | `SpokenReplies` | `true` | Read answers to spoken requests aloud. Needs **Speak** and Piper. |
+| `SpeechVolumePercent` | `80` | How loud answers are read aloud, as a percentage of full volume (0-100). |
 | `PiperPath` | `voice/piper/piper.exe` | Piper's program. |
 | `SpeakingVoicePath` | `voice/models/en_US-kusal-medium.onnx` | The voice it speaks with; any [Piper voice](https://huggingface.co/rhasspy/piper-voices) works (keep its `.onnx.json` next to it). |
 | `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest isn't said. |

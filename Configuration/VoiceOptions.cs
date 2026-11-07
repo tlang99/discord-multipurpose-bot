@@ -29,9 +29,17 @@ public class VoiceOptions
     /// permission in the voice channel; without it, the bot just doesn't chime.</summary>
     public bool Chime { get; set; } = true;
 
+    /// <summary>How loud the chimes are, as a percentage of full volume (0-100). Soft by default, so they don't make
+    /// anyone jump; turned up, they're easier to hear over game audio.</summary>
+    public int ChimeVolumePercent { get; set; } = 20;
+
     /// <summary>Read the answer to a spoken request aloud instead of posting it (where it can't be said, it's posted).
     /// Text-to-speech runs on this machine (Piper); needs the Speak permission, and Piper from voice/setup.ps1.</summary>
     public bool SpokenReplies { get; set; } = true;
+
+    /// <summary>How loud answers are read aloud, as a percentage of full volume (0-100). A little under full by
+    /// default, so they don't clip or blare.</summary>
+    public int SpeechVolumePercent { get; set; } = 80;
 
     /// <summary>Piper's program, relative to the bot's folder. voice/setup.ps1 downloads it.</summary>
     public string PiperPath { get; set; } = "voice/piper/piper.exe";

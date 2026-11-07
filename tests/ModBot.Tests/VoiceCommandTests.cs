@@ -163,6 +163,38 @@ public class VoiceAudioTests
     [Fact]
     public void No_speech_is_no_audio()
         => Assert.Empty(VoiceAudio.FromSpeech([], 22_050));
+
+    [Fact]
+    public void The_volume_settings_default_to_the_usual_volumes()
+    {
+        var options = new ModBot.Configuration.VoiceOptions();
+
+        Assert.Equal(VoiceAudio.ChimeVolume, VoiceAudio.Share(options.ChimeVolumePercent));
+        Assert.Equal(VoiceAudio.SpeechVolume, VoiceAudio.Share(options.SpeechVolumePercent));
+        Assert.Equal(1.0, VoiceAudio.Share(250)); // never past full
+        Assert.Equal(0.0, VoiceAudio.Share(-5));
+    }
+
+    [Fact]
+    public void The_chime_plays_at_the_volume_asked_for()
+    {
+        static int Loudest(byte[] pcm) => Enumerable.Range(0, pcm.Length / 4)
+            .Max(i => Math.Abs((int)BitConverter.ToInt16(pcm, i * 4)));
+
+        Assert.Equal(VoiceAudio.Chime(), VoiceAudio.Chime(VoiceAudio.ChimeVolume));
+        Assert.InRange(Loudest(VoiceAudio.Chime(0.6)), 0.6 * short.MaxValue - 2, 0.6 * short.MaxValue + 1);
+        Assert.InRange(Loudest(VoiceAudio.DoneChime(0.6)), 0.6 * short.MaxValue - 2, 0.6 * short.MaxValue + 1);
+    }
+
+    [Fact]
+    public void Speech_plays_at_the_volume_asked_for()
+    {
+        var mono = Enumerable.Repeat(BitConverter.GetBytes(short.MaxValue), 100).SelectMany(b => b).ToArray();
+
+        var pcm = VoiceAudio.FromSpeech(mono, 48_000, 0.5);
+
+        Assert.InRange(BitConverter.ToInt16(pcm, 0), 0.5 * short.MaxValue - 2, 0.5 * short.MaxValue + 1);
+    }
 }
 
 /// <summary>Whether spoken replies can work, before Piper is ever run.</summary>
@@ -438,6 +470,17 @@ public class ListeningLineTests
     [Fact]
     public void Says_so_when_requests_are_logged()
         => Assert.Contains("written to the bot's log", Modules.Voice.VoiceListener.ListeningLine("ModBot", true));
+
+    [Fact]
+    public void Says_so_when_it_cant_speak_and_keeps_the_rest()
+    {
+        var line = Modules.Voice.VoiceListener.ListeningLine("ModBot", cantSpeak: true);
+
+        Assert.StartsWith("🎙️ Listening for \"hey ModBot\" (I can't speak here, so I'll answer in chat).", line);
+        Assert.Contains("no audio is kept", line);
+        Assert.Contains("stop listening", line);
+        Assert.DoesNotContain("can't speak", Modules.Voice.VoiceListener.ListeningLine("ModBot"));
+    }
 }
 
 /// <summary>The back-and-forth after an answer: who can follow up, when it ends, what it remembers.</summary>
