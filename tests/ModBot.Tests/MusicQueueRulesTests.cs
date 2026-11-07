@@ -229,4 +229,62 @@ public sealed class MusicQueueRulesTests
     [InlineData(725, "about 13 min")]
     public void Waits_read_as_rough_minutes(int seconds, string expected)
         => Assert.Equal(expected, MusicFormatting.RoughWait(TimeSpan.FromSeconds(seconds)));
+
+    [Fact]
+    public void Play_next_moves_your_song_up_without_moving_anyone_elses()
+    {
+        var state = new MusicQueueState();
+        Add(state, Alice, "a1", "a2", "a3");
+        Add(state, Bob, "b1", "b2");
+
+        // Play order: a1, b1, a2, b2, a3. Alice's a3 is #5.
+        Assert.Equal(QueueRemoveResult.Removed, MusicQueueRules.PlayNextAt(state, 5, Alice, out var moved));
+        Assert.Equal("a3", moved!.Title);
+        Assert.Equal(["a3", "b1", "a1", "b2", "a2"], Titles(MusicQueueRules.Order(state)));
+    }
+
+    [Fact]
+    public void Play_next_is_only_for_your_own_songs()
+    {
+        var state = new MusicQueueState();
+        Add(state, Alice, "a1");
+        Add(state, Bob, "b1", "b2");
+
+        Assert.Equal(QueueRemoveResult.NotYours, MusicQueueRules.PlayNextAt(state, 3, Alice, out _));
+        Assert.Equal(QueueRemoveResult.NotFound, MusicQueueRules.PlayNextAt(state, 9, Alice, out _));
+        Assert.Equal(["a1", "b1", "b2"], Titles(MusicQueueRules.Order(state)));
+    }
+
+    [Fact]
+    public void Shuffling_your_songs_leaves_everyone_elses_in_place()
+    {
+        var state = new MusicQueueState();
+        Add(state, Alice, "a1", "a2", "a3", "a4", "a5");
+        Add(state, Bob, "b1", "b2");
+
+        Assert.Equal(5, MusicQueueRules.ShuffleMine(state, Alice, new Random(7)));
+
+        var order = Titles(MusicQueueRules.Order(state));
+        Assert.Equal("b1", order[1]); // Bob's turns don't move
+        Assert.Equal("b2", order[3]);
+        Assert.Equal(["a1", "a2", "a3", "a4", "a5"], order.Where(t => t.StartsWith('a')).Order().ToList());
+        Assert.Equal(0, MusicQueueRules.ShuffleMine(state, Cara, Random.Shared));
+    }
+
+    [Theory]
+    [InlineData(1, false, false, true)] // alone, or with one other: no vote
+    [InlineData(2, false, false, true)]
+    [InlineData(3, false, false, false)] // 3 in the channel (deafened or not): a vote
+    [InlineData(6, false, false, false)]
+    [InlineData(6, true, false, true)] // a moderator
+    [InlineData(6, false, true, true)] // whoever started the music
+    public void Stopping_takes_a_vote_with_three_or_more_in_the_channel(int inChannel, bool moderator, bool starter,
+        bool atOnce)
+        => Assert.Equal(atOnce, MusicQueueService.StopsAtOnce(inChannel, moderator, starter));
+
+    [Theory]
+    [InlineData(false, LoopMode.Off)]
+    [InlineData(true, LoopMode.Queue)]
+    public void Looping_the_queue_shows_without_a_player(bool loopQueue, LoopMode expected)
+        => Assert.Equal(expected, MusicQueueService.LoopOf(new MusicQueueState { LoopQueue = loopQueue }, null));
 }

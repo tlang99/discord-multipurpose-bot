@@ -96,14 +96,42 @@ public class MusicControls
             return MusicReply.Fail(error);
         }
 
+        // With 3 or more in the channel, it ends the music for all of them, so it takes a vote (see VoteStop).
+        if (_queue.VoteStop(user, player) is { } vote)
+        {
+            _queue.RefreshMenu(user.Guild.Id);
+            return vote;
+        }
+
         await player.StopAsync();
         await player.DisposeAsync(); // disconnects from voice and forgets the player
-        var waiting = (await _queue.GetAsync(user.Guild.Id)).Songs.Count;
+        var state = await _queue.GetAsync(user.Guild.Id);
+        var waiting = state.Songs.Count;
         return MusicReply.Ok($"⏹️ {user.Mention} stopped the music." + (waiting == 0
             ? ""
-            : $" The queue's kept ({waiting} song{(waiting == 1 ? "" : "s")} waiting) - press **Play** to carry on."),
+            : $" The queue's kept ({waiting} song{(waiting == 1 ? "" : "s")} waiting) - press **Play** to carry on.") +
+            // It's saved, so it'd quietly carry on next time.
+            (state.LoopQueue ? " Queue looping is still on (the menu's Loop button turns it off)." : ""),
             suppressEmbeds: false);
     }
+
+    /// <summary>The menu's Loop button: off, then the current song (while one's playing), then the whole queue, then
+    /// off again.</summary>
+    public async Task<MusicReply> LoopNextAsync(SocketGuildUser user)
+    {
+        var player = _music.GetPlayer(user.Guild.Id);
+        var next = MusicQueueService.LoopOf(await _queue.GetAsync(user.Guild.Id), player) switch
+        {
+            LoopMode.Off when player?.CurrentItem is not null => LoopMode.Song,
+            LoopMode.Off or LoopMode.Song => LoopMode.Queue,
+            _ => LoopMode.Off,
+        };
+        return await LoopAsync(user, next); // which redraws the menu, button and all
+    }
+
+    public Task<MusicReply> PlayNextAsync(SocketGuildUser user, int position) => _queue.PlayNextAsync(user, position);
+
+    public Task<MusicReply> ShuffleMineAsync(SocketGuildUser user) => _queue.ShuffleMineAsync(user);
 
     public MusicReply NowPlaying(SocketGuildUser user)
     {
@@ -167,7 +195,12 @@ public class MusicControls
         }
 
         var total = order.Where(s => !s.IsLiveStream).Aggregate(TimeSpan.Zero, (sum, s) => sum + s.Duration);
-        var loop = player?.RepeatMode == TrackRepeatMode.Track ? "Current song" : state.LoopQueue ? "Whole queue" : "Off";
+        var loop = MusicQueueService.LoopOf(state, player) switch
+        {
+            LoopMode.Song => "Current song",
+            LoopMode.Queue => "Whole queue",
+            _ => "Off",
+        };
         var embed = new EmbedBuilder()
             .WithColor(Colors.Music)
             .WithTitle("Queue - in turn order")

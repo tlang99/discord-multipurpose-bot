@@ -99,22 +99,67 @@ public static class MusicQueueRules
     public static QueueRemoveResult RemoveAt(MusicQueueState state, int position, ulong userId, bool isModerator,
         out QueuedSong? removed)
     {
-        removed = null;
+        var result = FindAt(state, position, userId, isModerator, out removed);
+        if (removed is { } song)
+        {
+            state.Songs.RemoveAll(s => s.Id == song.Id);
+            Prune(state);
+        }
+
+        return result;
+    }
+
+    /// <summary>Moves <paramref name="userId"/>'s song at <paramref name="position"/> in play order to the front of
+    /// their own songs, so it's the one they play on their next turn. Only their own songs move, so nobody else's
+    /// turn comes any later. Removed (here: moved) unless it's not there or not theirs.</summary>
+    public static QueueRemoveResult PlayNextAt(MusicQueueState state, int position, ulong userId, out QueuedSong? song)
+    {
+        var result = FindAt(state, position, userId, isModerator: false, out song);
+        if (result == QueueRemoveResult.Removed)
+        {
+            var moving = song!;
+            state.Songs.Remove(moving);
+            var firstOfTheirs = state.Songs.FindIndex(s => s.PickerId == userId);
+            state.Songs.Insert(firstOfTheirs < 0 ? state.Songs.Count : firstOfTheirs, moving);
+        }
+
+        return result;
+    }
+
+    /// <summary>Shuffles <paramref name="userId"/>'s own waiting songs among themselves (everyone else's stay put);
+    /// returns how many they have.</summary>
+    public static int ShuffleMine(MusicQueueState state, ulong userId, Random random)
+    {
+        var slots = Enumerable.Range(0, state.Songs.Count).Where(i => state.Songs[i].PickerId == userId).ToList();
+        var mine = slots.Select(i => state.Songs[i]).ToArray();
+        random.Shuffle(mine);
+        for (var i = 0; i < slots.Count; i++)
+        {
+            state.Songs[slots[i]] = mine[i];
+        }
+
+        return mine.Length;
+    }
+
+    /// <summary>The song at <paramref name="position"/> in play order (1 = next), if <paramref name="userId"/> may
+    /// change it: theirs, or anyone's for a moderator. Removed means it was found and may be changed.</summary>
+    private static QueueRemoveResult FindAt(MusicQueueState state, int position, ulong userId, bool isModerator,
+        out QueuedSong? song)
+    {
+        song = null;
         var order = Order(state);
         if (position < 1 || position > order.Count)
         {
             return QueueRemoveResult.NotFound;
         }
 
-        var song = order[position - 1];
-        if (song.PickerId != userId && !isModerator)
+        var found = order[position - 1];
+        if (found.PickerId != userId && !isModerator)
         {
             return QueueRemoveResult.NotYours;
         }
 
-        state.Songs.RemoveAll(s => s.Id == song.Id);
-        Prune(state);
-        removed = song;
+        song = found;
         return QueueRemoveResult.Removed;
     }
 

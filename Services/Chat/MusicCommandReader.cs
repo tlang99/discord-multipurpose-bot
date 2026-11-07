@@ -25,9 +25,15 @@ public enum MusicCommand
 
     /// <summary>Point them to the music menu.</summary>
     ShowMenu,
+
+    /// <summary>Make one of the person's own songs (at Position) the next of theirs to play.</summary>
+    PlayNext,
+
+    /// <summary>Shuffle the person's own waiting songs.</summary>
+    ShuffleMine,
 }
 
-/// <param name="Position">For remove: the song's place in the queue.</param>
+/// <param name="Position">For remove and play next: the song's place in the queue.</param>
 /// <param name="Title">For remove: words from the song's title, instead of its place.</param>
 public record MusicCommandRequest(MusicCommand Command, int? Position = null, string? Title = null);
 
@@ -53,6 +59,12 @@ public static partial class MusicCommandReader
             _ => new(MusicCommand.LoopQueue)),
         (Rx(@"(loop|repeat)( this| the| current| that)?( song| track| one)?|put( this| the| that)?( song| track| one)? on (loop|repeat)"),
             _ => new(MusicCommand.LoopSong)),
+
+        // Before skip: "play song 3 next" reorders your songs, it isn't "play the next one".
+        (Rx(@"(play|put|move|bump)( song| track| number| no)? #?(?<n>\d+) (next|first|up next|to the front|to the top)( of my songs)?"),
+            m => new(MusicCommand.PlayNext, Number(m))),
+        (Rx(@"(shuffle|mix up|randomi[sz]e)( all)? my (songs|picks|tracks|stuff)( in the queue)?"),
+            _ => new(MusicCommand.ShuffleMine)),
 
         (Rx(@"(vote )?skip( to the next one| to the next song)?( (this|it|that|the|current))?( (song|track|one|tune))?|vote to skip( (this|it|that))?( (song|track|one))?|next( (song|track|one))?|play the next (song|track|one)"),
             _ => new(MusicCommand.Skip)),
@@ -83,7 +95,7 @@ public static partial class MusicCommandReader
             _ => new(MusicCommand.ShowQueue)),
 
         (Rx(@"(remove|delete|take out|drop)( song| track| number| no| the song at( position)?)? #?(?<n>\d+)( out)?( from the queue| out of the queue)?|take( song| number)? #?(?<n>\d+) out( of the queue)?"),
-            m => new(MusicCommand.Remove, int.Parse(m.Groups["n"].Value))),
+            m => new(MusicCommand.Remove, Number(m))),
         // One song by name: "remove mr brightside from the queue". Needs "from the queue" (or "out of"), so "take out
         // the trash" is just chat; "my songs" / "me" are caught above.
         (Rx(@"(remove|delete|drop|take)( out)?( my| the)?( song)? (?<title>.+?)( out)? (from|out of|off) (the|my) (queue|playlist)"),
@@ -141,6 +153,10 @@ public static partial class MusicCommandReader
 
         return clause;
     }
+
+    /// <summary>The song number a rule matched ("n"), or 0 if it's too big to be one ("play 99999999999 next"), which
+    /// Read then passes over like any place that isn't in the queue.</summary>
+    private static int Number(Match match) => int.TryParse(match.Groups["n"].Value, out var n) ? n : 0;
 
     private static Regex Rx(string pattern)
         => new($"^(?:{pattern})$", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, TimeSpan.FromMilliseconds(100));

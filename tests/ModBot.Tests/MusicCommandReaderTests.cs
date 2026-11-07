@@ -93,6 +93,33 @@ public sealed class MusicCommandReaderTests
     }
 
     [Theory]
+    [InlineData("play song 3 next", 3)]
+    [InlineData("can you put number 4 first", 4)]
+    [InlineData("move #2 to the front of my songs", 2)]
+    [InlineData("bump 5 up next please", 5)]
+    public void Reads_play_next_with_its_place(string message, int position)
+        => Assert.Equal(new MusicCommandRequest(MusicCommand.PlayNext, position), MusicCommandReader.Read(message));
+
+    [Theory]
+    [InlineData("play 99999999999 next")]
+    [InlineData("remove 99999999999999999999")]
+    public void A_number_too_big_for_a_place_is_passed_over(string message)
+        => Assert.Null(MusicCommandReader.Read(message)?.Position);
+
+    [Theory]
+    [InlineData("shuffle my songs")]
+    [InlineData("can you mix up my picks")]
+    [InlineData("randomize all my songs in the queue")]
+    public void Reads_shuffling_your_own_songs(string message)
+        => Assert.Equal(MusicCommand.ShuffleMine, MusicCommandReader.Read(message)?.Command);
+
+    [Theory]
+    [InlineData("play the next song", MusicCommand.Skip)] // still a skip, not a reorder
+    [InlineData("next song please", MusicCommand.Skip)]
+    public void Play_next_doesnt_take_over_skipping(string message, MusicCommand expected)
+        => Assert.Equal(expected, MusicCommandReader.Read(message)?.Command);
+
+    [Theory]
     [InlineData("i hate it when people skip songs")]
     [InlineData("do you like this song?")]
     [InlineData("what music do you like?")]

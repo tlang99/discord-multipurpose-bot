@@ -73,6 +73,13 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     public Task RemoveAsync([Summary(description: "Its position, as shown by /queue")] [MinValue(1)] int position)
         => RunAsync((user, _) => _controls.RemoveAsync(user, position));
 
+    [SlashCommand("playnext", "Makes one of your songs the next of yours to play (nobody else's turn moves).")]
+    public Task PlayNextAsync([Summary(description: "Its position, as shown by /queue")] [MinValue(1)] int position)
+        => RunAsync((user, _) => _controls.PlayNextAsync(user, position));
+
+    [SlashCommand("shuffle-mine", "Shuffles your own waiting songs (everyone else's stay put).")]
+    public Task ShuffleMineAsync() => RunAsync((user, _) => _controls.ShuffleMineAsync(user));
+
     [SlashCommand("remove-mine", "Takes all your waiting songs out of the queue.")]
     public Task RemoveMineAsync() => RunAsync((user, _) => _controls.RemoveMineAsync(user));
 
@@ -132,6 +139,9 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 
     [ComponentInteraction(MusicQueueService.StopButton)]
     public Task StopButtonAsync() => ButtonAsync((user, _) => _controls.StopAsync(user));
+
+    [ComponentInteraction(MusicQueueService.LoopButton)]
+    public Task LoopButtonAsync() => ButtonAsync((user, _) => _controls.LoopNextAsync(user));
 
     /// <summary>"Remove mine": a private list of the person's waiting songs, to take out one, or all of them.</summary>
     [ComponentInteraction(MusicQueueService.MineButton)]
