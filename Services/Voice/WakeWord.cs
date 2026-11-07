@@ -1,4 +1,4 @@
-using System.Text;
+using ModBot.Common;
 
 namespace ModBot.Services.Voice;
 
@@ -78,17 +78,5 @@ public static class WakeWord
 
     /// <summary>Letters and digits only, lower case: "Mod-Bot," is "modbot". ("ModBot's" is "modbots", so "ModBot's so
     /// slow" isn't taken as a request.)</summary>
-    internal static string Squash(string word)
-    {
-        var builder = new StringBuilder(word.Length);
-        foreach (var c in word)
-        {
-            if (char.IsLetterOrDigit(c))
-            {
-                builder.Append(char.ToLowerInvariant(c));
-            }
-        }
-
-        return builder.ToString();
-    }
+    private static string Squash(string word) => TextTools.Squash(word);
 }

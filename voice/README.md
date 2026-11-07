@@ -26,12 +26,11 @@ misheard) and replies to that instead.
   off for every server with `Voice:Chime`).
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
-  for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"),
-  which cuts it off; anything else is
-  ignored, so its own voice coming back through someone's mic isn't taken for a request (wait for it to finish
-  before asking again). An answer that would have to wait more than 15 seconds
-  behind another is posted instead. Needs **Speak**; turn it off for every server with `Voice:SpokenReplies`. After
-  installing Piper, restart the bot.
+  for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"), which cuts
+  it off; anything else is ignored, so its own voice coming back through someone's mic isn't taken for a request
+  (wait for it to finish before asking again). An answer that would have to wait more than 15 seconds behind another
+  is posted instead. Needs **Speak**; turn it off for every server with `Voice:SpokenReplies`. After installing Piper,
+  restart the bot.
 - **Conversations:** after an answer read aloud, whoever said "hey ModBot" can say the next thing without the name
   ("and what about tomorrow?"), and the bot remembers what was said and answered so far, in memory only. Anyone else
   still says the name, and then the conversation is with them. `/settings voice-follow-ups` lets anyone in the

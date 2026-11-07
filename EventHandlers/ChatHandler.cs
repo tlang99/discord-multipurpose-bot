@@ -646,7 +646,7 @@ public partial class ChatHandler
         // In voice, "repeat that" / "repeat everything" is far more often "say it again" than looping, and the bot
         // only listens while no music plays, so a loop turned on there would just wait, unnoticed, to repeat songs
         // later. Turning looping off still works.
-        if (spoken && request.Command is MusicCommand.LoopSong or MusicCommand.LoopQueue)
+        if (spoken && request.Command is (MusicCommand.LoopSong or MusicCommand.LoopQueue))
         {
             return MusicReply.Fail("I don't turn looping on by voice, since \"repeat that\" sounds just like it. " +
                                    "Use `/loop` or the music menu.");

@@ -123,6 +123,7 @@ public sealed class MusicQueueRulesTests
         Assert.Equal(["Mr. Brightside (Official Video)"], Titles(MusicQueueRules.FindByTitle(state, "mr brightside", Alice, false)));
         Assert.Equal(2, MusicQueueRules.FindByTitle(state, "brightside", Alice, true).Count); // a moderator: anyone's
         Assert.Empty(MusicQueueRules.FindByTitle(state, "!!", Alice, false));
+        Assert.Empty(MusicQueueRules.FindByTitle(state, "a", Alice, false)); // too short to go on
     }
 
     [Fact]

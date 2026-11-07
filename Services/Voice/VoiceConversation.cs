@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ModBot.Common;
 using ModBot.Services.Chat;
 
 namespace ModBot.Services.Voice;
@@ -206,13 +207,13 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     {
         named = false;
         var words = request.Replace('’', '\'').Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ToList();
-        var squashed = names.Select(WakeWord.Squash).Where(n => n.Length > 0).ToHashSet();
+        var squashed = names.Select(TextTools.Squash).Where(n => n.Length > 0).ToHashSet();
         // The name, wherever it is, split over up to three words ("Mod Bot").
         for (var at = 0; at < words.Count; at++)
         {
             for (var take = Math.Min(3, words.Count - at); take > 0; take--)
             {
-                if (squashed.Contains(string.Concat(words.Skip(at).Take(take).Select(WakeWord.Squash))))
+                if (squashed.Contains(string.Concat(words.Skip(at).Take(take).Select(TextTools.Squash))))
                 {
                     words.RemoveRange(at, take);
                     named = true;

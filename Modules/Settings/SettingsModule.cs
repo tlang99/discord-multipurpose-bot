@@ -41,7 +41,6 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         IGuildSettingsStore moderation, IOptions<ChatOptions> chat, ChatPersonality personality, VoiceListener voice,
         IOptions<SearchOptions> search, MusicQueueService musicQueue, ILogger<SettingsModule> logger)
     {
-        _musicQueue = musicQueue;
         _settings = settings;
         _switch = featureSwitch;
         _moderation = moderation;
@@ -49,6 +48,7 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         _personality = personality;
         _voice = voice;
         _search = search.Value;
+        _musicQueue = musicQueue;
         _logger = logger;
     }
 

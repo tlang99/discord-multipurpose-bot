@@ -74,6 +74,9 @@ public sealed class MusicCommandReaderTests
     [InlineData("take it out of the queue")]
     [InlineData("remove the current one from the queue")]
     [InlineData("pull the plug off the queue")]
+    [InlineData("remove everything from the queue")]
+    [InlineData("remove all the songs from the queue")]
+    [InlineData("take them out of the queue")]
     [InlineData("I took the trash out")]
     public void Doesnt_read_a_title_that_isnt_one(string message)
         => Assert.Null(MusicCommandReader.Read(message)?.Title);

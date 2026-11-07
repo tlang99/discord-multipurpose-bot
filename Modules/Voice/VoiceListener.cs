@@ -898,9 +898,9 @@ public sealed class VoiceListener
             return;
         }
 
-        // Every request starts the person's follow-up cooldown; only a reply without the name is held to it (one with
-        // the name has the chatbot's own, longer cooldown).
-        if (!_followUps.TryClaim(session.Guild.Id, userId, out _) && followUp)
+        // Every request starts the person's follow-up cooldown. Every one in a conversation is held to it, name or not:
+        // there, the chatbot's own longer cooldown is skipped (ChatHandler), so this is the one that applies.
+        if (!_followUps.TryClaim(session.Guild.Id, userId, out _) && (followUp || inConversation))
         {
             _logger.LogInformation("Dropped a voice reply from {User} ({UserId}): under " +
                                    "Voice:FollowUpCooldownSeconds since their last request.", speaker.Username,

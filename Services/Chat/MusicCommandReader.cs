@@ -151,8 +151,8 @@ public static partial class MusicCommandReader
     [GeneratedRegex(@"\s+")]
     private static partial Regex SpacesRegex();
 
-    /// <summary>"this song", "it", "the current one": pointing at a song rather than naming it.</summary>
-    [GeneratedRegex(@"^(?:(?:this|that|the|it|current|playing|last|next|one|song|track|tune|thing|stuff|plug)\s*)+$")]
+    /// <summary>"this song", "it", "the current one", "everything": pointing at songs rather than naming one.</summary>
+    [GeneratedRegex(@"^(?:(?:this|that|the|it|current|playing|last|next|one|ones|song|songs|track|tracks|tune|tunes|thing|things|stuff|plug|all|everything|them|those|these|every|of)\s*)+$")]
     private static partial Regex NoTitleRegex();
 
     [GeneratedRegex(@"^(?:hey|hi|yo|ok|okay|alright|aight|lol|lmao|um+|uh+|so|now|please|pls|plz|can you|could you|would you|will you|can u|could u|would u|you can|go ahead and|just|kindly|bot|mate|bro|dude|i want you to|id like you to|i want to|i wanna|we want to|we wanna|lets|let us)\b\s*")]
