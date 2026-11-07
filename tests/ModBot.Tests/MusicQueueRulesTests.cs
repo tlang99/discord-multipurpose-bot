@@ -290,6 +290,20 @@ public sealed class MusicQueueRulesTests
     }
 
     [Fact]
+    public void A_song_played_again_keeps_its_place_id_in_the_history()
+    {
+        var state = new MusicQueueState();
+        var song = Song(Alice, "mr brightside");
+        MusicQueueRules.RecordPlayed(state, song);
+        var listed = state.History[0].Id; // what an open History list would pick by
+        MusicQueueRules.RecordPlayed(state, Song(Bob, "other"));
+
+        MusicQueueRules.RecordPlayed(state, Song(Bob, "mr brightside"));
+
+        Assert.Equal(listed, state.History[0].Id);
+    }
+
+    [Fact]
     public void A_song_cut_off_by_going_back_plays_on_its_pickers_next_turn()
     {
         var state = new MusicQueueState();

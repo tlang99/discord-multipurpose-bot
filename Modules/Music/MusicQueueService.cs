@@ -813,12 +813,25 @@ public class MusicQueueService : IHostedService
                 return MusicReply.Fail("I couldn't read the saved copy of the last song. Add it again by name.");
             }
 
-            await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.GoBack(state, current));
             // A looped song would otherwise carry on looping the one gone back to, so the loop's turned off, and the
             // reply says so. (Only the song loop: looping the queue is saved separately and stays as it is.)
             var wasLooping = player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track;
             player.RepeatMode = Lavalink4NET.Players.Queued.TrackRepeatMode.None;
-            await player.PlayAsync(new QueueTrackItem(track, MusicQueueRules.Copy(previous)), enqueue: false);
+            try
+            {
+                await player.PlayAsync(new QueueTrackItem(track, MusicQueueRules.Copy(previous)), enqueue: false);
+            }
+            catch
+            {
+                // Nothing changed: the song is still playing, and still looping if it was.
+                player.RepeatMode = wasLooping
+                    ? Lavalink4NET.Players.Queued.TrackRepeatMode.Track
+                    : Lavalink4NET.Players.Queued.TrackRepeatMode.None;
+                throw;
+            }
+
+            // Only once the song gone back to is playing: otherwise the one cut off would be queued while it plays on.
+            await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.GoBack(state, current));
             return MusicReply.Ok($"⏮️ {user.Mention} went back to {MusicFormatting.SongLink(previous)}." +
                                  (current is null
                                      ? ""

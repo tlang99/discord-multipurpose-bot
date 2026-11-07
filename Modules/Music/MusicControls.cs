@@ -147,6 +147,14 @@ public class MusicControls
             }
         }
 
+        // Asked for a number past the limits ("volume 500"), it says so rather than quietly picking another, as the
+        // slash command does. (Steps of 🔉 🔊 just stop at the ends.)
+        if (to is < 0 or > MusicQueueRules.MaxVolume)
+        {
+            return MusicReply.Fail($"The volume goes from 0 to {MusicQueueRules.MaxVolume}% (100 is the song as it " +
+                                   "is).");
+        }
+
         var (was, now) = await _queue.SetVolumeAsync(user.Guild.Id, saved => to ?? saved + by, player);
         if (now == was)
         {

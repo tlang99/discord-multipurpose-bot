@@ -113,8 +113,12 @@ public static class MusicQueueRules
     /// </summary>
     public static void RecordPlayed(MusicQueueState state, QueuedSong song)
     {
+        // A song moving up keeps its ID, so a History list opened before it played again still finds it.
+        var earlier = state.History.FirstOrDefault(s => s.Track == song.Track);
         state.History.RemoveAll(s => s.Track == song.Track);
-        state.History.Insert(0, Copy(song));
+        var entry = Copy(song);
+        entry.Id = earlier?.Id ?? entry.Id;
+        state.History.Insert(0, entry);
         if (state.History.Count > HistoryLength)
         {
             state.History.RemoveRange(HistoryLength, state.History.Count - HistoryLength);
