@@ -101,6 +101,12 @@ public sealed class MusicCommandReaderTests
         => Assert.Equal(new MusicCommandRequest(MusicCommand.PlayNext, position), MusicCommandReader.Read(message));
 
     [Theory]
+    [InlineData("play 99999999999 next")]
+    [InlineData("remove 99999999999999999999")]
+    public void A_number_too_big_for_a_place_is_passed_over(string message)
+        => Assert.Null(MusicCommandReader.Read(message)?.Position);
+
+    [Theory]
     [InlineData("shuffle my songs")]
     [InlineData("can you mix up my picks")]
     [InlineData("randomize all my songs in the queue")]
