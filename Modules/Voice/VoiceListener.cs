@@ -93,12 +93,14 @@ public sealed partial class VoiceListener
     /// <summary>The longest the music waits for <see cref="LeavingForMusicLine"/> to be said.</summary>
     private static readonly TimeSpan LeavingForMusicWait = TimeSpan.FromSeconds(8);
 
-    /// <summary>What it says, before leaving, when music needs the voice connection (no music account of its own).</summary>
+    /// <summary>What it says, before leaving, when music needs the voice connection (no music account of its
+    /// own).</summary>
     public const string LeavingForMusicLine =
         "Starting the music. I can't listen while it's on, so use the music menu, and I'll be back when it's done.";
 
     private readonly DiscordSocketClient _client;
     private readonly IMusicQueueStore _queue;
+    private readonly IGuildSettingsStore _guildSettings;
     private readonly SpeechToText _speech;
     private readonly TextToSpeech _voiceOut;
     private readonly IAudioService _audio;
@@ -139,10 +141,12 @@ public sealed partial class VoiceListener
 
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, TextToSpeech voiceOut, IAudioService audio,
         Lazy<ChatHandler> chat, IChatService model, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
-        IOptions<VoiceOptions> options, MusicBot musicBot, IMusicQueueStore queue, ILogger<VoiceListener> logger)
+        IOptions<VoiceOptions> options, MusicBot musicBot, IMusicQueueStore queue, IGuildSettingsStore guildSettings,
+        ILogger<VoiceListener> logger)
     {
         _musicBot = musicBot;
         _queue = queue;
+        _guildSettings = guildSettings;
         _client = client;
         _speech = speech;
         _voiceOut = voiceOut;
@@ -576,14 +580,17 @@ public sealed partial class VoiceListener
     /// (its own leave sets auto-join looking, a few seconds later). Every call must be matched by one to
     /// <see cref="MusicJoined"/>, even if this throws.
     /// </summary>
-    public async Task MakeWayForMusicAsync(ulong guildId)
+    /// <param name="requester">Who started the music: only when they're in the channel it's listening in does it say
+    /// why it's leaving (they've passed the music's own checks to get here, so the music is about to join
+    /// them).</param>
+    public async Task MakeWayForMusicAsync(ulong guildId, SocketGuildUser? requester = null)
     {
         _musicStarting.AddOrUpdate(guildId, 1, (_, n) => n + 1);
         // Leaving mid-conversation with no word would look like it broke: it says why first, where it can speak. The
         // music waits for that, but never longer than LeavingForMusicWait, and a problem saying it never keeps the
         // connection from music (StopAsync always runs, and cuts the line off if it's still going).
-        if (_sessions.TryGetValue(guildId, out var session) && session.CanPlay && _voiceOut.Problem is null &&
-            CanSpeakIn(session.Channel))
+        if (_sessions.TryGetValue(guildId, out var session) && requester?.VoiceChannel?.Id == session.Channel.Id &&
+            session.CanPlay && _voiceOut.Problem is null && CanSpeakIn(session.Channel))
         {
             var saying = SpeakAsync(session, LeavingForMusicLine, TimeSpan.Zero, TimeSpan.Zero, session.Hushes,
                 couldntSay: null);
@@ -1018,6 +1025,13 @@ public sealed partial class VoiceListener
             var addressed = answer is not null && session.OthersAsked(speaker.Id, DateTimeOffset.UtcNow, GroupWindow)
                 ? SpokenName(speaker.DisplayName)
                 : null;
+            // Said in the bot's voice, so a nickname follows the word filter for its own posts: one that breaks it
+            // isn't said (the answer just isn't addressed).
+            if (addressed is not null &&
+                TextFilter.FindViolation(addressed, await _guildSettings.GetAsync(session.Guild.Id)) is not null)
+            {
+                addressed = null;
+            }
 
             // An action that worked (a song, a reminder, an LFG, a poll): the "done" chime says so, rather than
             // reading out what chat would show. (Nothing's said, so no conversation opens: the next request takes the
@@ -1129,7 +1143,8 @@ public sealed partial class VoiceListener
         bool HasBotName(string text) => botNames.Any(TextTools.Squash(text).Contains);
         var words = new List<string>();
         var length = 0;
-        foreach (var word in (extra ?? []).Select(HintWord).Where(w => w.Length > 1 && !HasBotName(w))
+        foreach (var word in (extra ?? []).OfType<string>().Select(HintWord)
+                     .Where(w => w.Length > 1 && !HasBotName(w))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (length + word.Length + 2 > MaxHintExtra)
@@ -1170,9 +1185,16 @@ public sealed partial class VoiceListener
     /// since every sentence heard (noise included) needs a hint before it's turned into text.</summary>
     private async Task<IReadOnlyList<string>> HintExtraAsync(Session session)
     {
-        if (session.Hint is { } cached && DateTimeOffset.UtcNow - cached.At < HintFor)
+        var cached = session.Hint;
+        if (cached is not null && DateTimeOffset.UtcNow - cached.At < HintFor)
         {
             return cached.Words;
+        }
+
+        // One read at a time: sentences heard while it's being read use the last words (or none yet).
+        if (!session.TryStartHintRead())
+        {
+            return cached?.Words ?? [];
         }
 
         try
@@ -1191,6 +1213,10 @@ public sealed partial class VoiceListener
             _logger.LogDebug(ex, "Couldn't read the speech hint's words for guild {GuildId}.", session.Guild.Id);
             session.Hint = new HintCache(DateTimeOffset.UtcNow, []);
             return [];
+        }
+        finally
+        {
+            session.HintReadDone();
         }
     }
 
@@ -1236,7 +1262,8 @@ public sealed partial class VoiceListener
         }
     }
 
-    /// <summary>Plays <paramref name="sound"/> (one of the chimes) once anything already playing has finished.</summary>
+    /// <summary>Plays <paramref name="sound"/> (one of the chimes) once anything already playing has
+    /// finished.</summary>
     private void ChimeAfter(Session session, Lazy<byte[]> sound, string what)
     {
         if (_options.Chime)
@@ -1681,5 +1708,12 @@ public sealed partial class VoiceListener
         public HintCache? Hint { get => Volatile.Read(ref _hint); set => Volatile.Write(ref _hint, value); }
 
         private HintCache? _hint;
+        private int _readingHint;
+
+        /// <summary>True if no other read of the hint's words is under way (then call
+        /// <see cref="HintReadDone"/>).</summary>
+        public bool TryStartHintRead() => Interlocked.CompareExchange(ref _readingHint, 1, 0) == 0;
+
+        public void HintReadDone() => Volatile.Write(ref _readingHint, 0);
     }
 }

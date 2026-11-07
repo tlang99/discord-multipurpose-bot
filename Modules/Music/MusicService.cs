@@ -203,7 +203,8 @@ public class MusicService
             if (joining)
             {
                 var wasListening = _voice.IsListening(user.Guild.Id);
-                await _voice.MakeWayForMusicAsync(user.Guild.Id); // matched by MusicJoined below, whatever happens
+                // Matched by MusicJoined below, whatever happens.
+                await _voice.MakeWayForMusicAsync(user.Guild.Id, user);
                 if (wasListening)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(1));

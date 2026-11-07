@@ -32,9 +32,11 @@ misheard) and replies to that instead.
   `Voice:FollowUpCooldownSeconds` in a conversation), it plays two low falling notes: "heard you, but not right
   now". Wait a moment and ask again. (With `Voice:Chime` on; at most once every 10 seconds each.)
 - To spell things right, speech-to-text is told what to expect: gaming words, the bot's name, and this server's own
-  words (the next songs in the queue, the people in the channel, and its LFG game and playlists).
+  words (the next songs in the queue, the people in the channel, and its LFG game and playlists). Like the speech
+  itself, these words stay on the bot's own computer (Whisper runs there).
 - When more than one person has asked it something in the last 30 seconds, a spoken answer starts with the asker's
-  name ("Sam, it's 8 degrees…"), so everyone can tell whose it is.
+  name ("Sam, it's 8 degrees…"), so everyone can tell whose it is. A nickname that breaks the server's word filter
+  isn't said.
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
   for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"), which cuts

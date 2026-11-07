@@ -67,6 +67,11 @@ public class WakeWordTests
     }
 
     [Fact]
+    public void A_missing_hint_word_is_skipped_not_fatal()
+        => Assert.Equal(Modules.Voice.VoiceListener.SpeechHint("ModBot", ["Sam"]),
+            Modules.Voice.VoiceListener.SpeechHint("ModBot", [null!, "Sam"]));
+
+    [Fact]
     public void A_long_hint_word_is_never_cut_through_an_emoji()
     {
         var title = new string('a', 39) + "🎵 and more";
