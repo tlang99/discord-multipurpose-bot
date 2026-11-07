@@ -49,6 +49,23 @@ public sealed class ChatActionParserTests : IDisposable
         Assert.Equal(0, chat.Calls);
     }
 
+    [Theory]
+    [InlineData("previous", MusicCommand.Previous)]
+    [InlineData("play_again", MusicCommand.PlayAgain)]
+    [InlineData("restart", MusicCommand.Restart)]
+    [InlineData("volume_down", MusicCommand.VolumeDown)]
+    [InlineData("volume_up", MusicCommand.VolumeUp)]
+    [InlineData("shuffle_mine", MusicCommand.ShuffleMine)]
+    [InlineData("show_history", MusicCommand.ShowHistory)]
+    public async Task The_model_knows_the_newer_music_controls_too(string picked, MusicCommand expected)
+    {
+        var chat = new FakeChat($$"""{"action":"music_control","command":"{{picked}}"}""");
+
+        var action = await Parser(chat).ParseAsync("could you sort of bring back that tune from before");
+
+        Assert.Equal(new MusicControlAction(new MusicCommandRequest(expected), FromModel: true), action);
+    }
+
     [Fact]
     public async Task Looser_wording_goes_to_the_model_and_is_marked_as_its_pick()
     {

@@ -757,18 +757,22 @@ public partial class ChatHandler
                 return await _musicControls.SeekAsync(asker, request.At ?? TimeSpan.Zero);
             case MusicCommand.Restart:
                 return await _musicControls.SeekAsync(asker, TimeSpan.Zero);
-            case MusicCommand.Previous:
-                return await _musicControls.BackAsync(asker);
             case MusicCommand.ShowHistory:
                 return await _musicControls.HistoryAsync(asker);
 
-            case MusicCommand.PlayAgain:
+            case MusicCommand.PlayAgain or MusicCommand.Previous:
             {
-                // Like any add: "Now playing" goes where music does, wherever the request was made.
+                // Either can add a song (going back with nothing playing adds the last one again), so like any add,
+                // "Now playing" goes where music does, wherever the request was made.
                 var music = await _serverSettings.MusicChannelAsync(guild);
-                return music.Or(channel) is { } musicChannel
-                    ? await _musicControls.AgainAsync(asker, musicChannel)
-                    : MusicReply.Fail(music.Missing("Music goes"));
+                if (music.Or(channel) is not { } musicChannel)
+                {
+                    return MusicReply.Fail(music.Missing("Music goes"));
+                }
+
+                return request.Command == MusicCommand.Previous
+                    ? await _musicControls.BackAsync(asker, musicChannel)
+                    : await _musicControls.AgainAsync(asker, musicChannel);
             }
             case MusicCommand.ClearQueue:
                 return await _musicControls.ClearQueueAsync(asker);

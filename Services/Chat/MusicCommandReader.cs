@@ -99,9 +99,11 @@ public static partial class MusicCommandReader
         // Before resume ("play again" there means unpause): these are the song played before, or once more.
         (Rx(@"(restart|replay)( this| the| current| that)?( song| track| one)?|start (this|the|that)( song| track| one)? (over|again|from the (start|beginning|top))|play (this|it|that)( song| one)? from the (start|beginning|top)|(go )?back to the (start|beginning)( of (this|the) song)?"),
             _ => new(MusicCommand.Restart)),
-        (Rx(@"(go|skip) back( a song| one| to the (last|previous) (song|one|track))?|(play )?(the )?previous( song| track| one)?|back to the (last|previous) (song|one|track)"),
+        // "Replay the last song" and "play the last song (again)" go back to it, so it plays now; "queue the last song
+        // again" (below) adds it to the queue instead.
+        (Rx(@"(go|skip) back( a song| one| to the (last|previous) (song|one|track))?|(play )?(the )?previous( song| track| one)?( again)?|back to the (last|previous) (song|one|track)|(re ?play|play)( the)? (last|previous|other) (song|one|track)( again)?|(re ?play|play) the (song|one|track) (before|before this( one)?)"),
             _ => new(MusicCommand.Previous)),
-        (Rx(@"(play|queue|add) (that|this|it)( song| track| one)? again|(play|queue|add)( the)? (last|previous) (song|track|one) again|(play it|play that|play the song) one more time"),
+        (Rx(@"(play|queue|add) (that|this|it)( song| track| one)? again|(queue|add)( the)? (last|previous) (song|track|one) again|(play it|play that|play the song) one more time"),
             _ => new(MusicCommand.PlayAgain)),
         (Rx(@"(what|which) (was|were) (that|the last|the previous|the) (song|track|one|songs)( called| before| just now)?|(show|list|see|view)( me| us)?( the)? (history|song history|recent songs|recently played( songs)?|last (few )?songs)|whats? (been|was) (played|playing)( (lately|before|earlier))?|what did (we|you) (just )?(play|listen to)|recently played"),
             _ => new(MusicCommand.ShowHistory)),

@@ -111,6 +111,11 @@ public sealed class MusicCommandReaderTests
     [InlineData("go back to the start", MusicCommand.Restart)]
     [InlineData("go back", MusicCommand.Previous)]
     [InlineData("play the previous song", MusicCommand.Previous)]
+    [InlineData("replay the last song", MusicCommand.Previous)] // asked by voice, and missed, in v0.5.4
+    [InlineData("can you replay the previous song", MusicCommand.Previous)]
+    [InlineData("play the last song again", MusicCommand.Previous)]
+    [InlineData("play the song before this one", MusicCommand.Previous)]
+    [InlineData("replay this song", MusicCommand.Restart)] // this one, over again: still a restart
     [InlineData("play that again", MusicCommand.PlayAgain)]
     [InlineData("queue the last song again", MusicCommand.PlayAgain)]
     [InlineData("what was that song?", MusicCommand.ShowHistory)]

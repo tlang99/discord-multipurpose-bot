@@ -85,11 +85,12 @@ public partial class ChatActionParser
         "if the person explicitly asks the bot to play, queue or put on a song or music. Answer create_lfg only if " +
         "they explicitly ask the bot to make, post or create an LFG or looking-for-group post, or to find them players " +
         "or a squad. Answer music_control only if they explicitly ask the bot to skip, pause, resume or stop the music, " +
-        "show or change the song queue, or start, end, join or leave a music session. Questions about music or LFG, " +
-        "opinions, and general chat are none. When unsure, answer none.";
+        "go back to or replay a song that already played, restart the song, turn the music up or down, shuffle their " +
+        "songs, show what played recently, show or change the song queue, or start, end, join or leave a music " +
+        "session. Questions about music or LFG, opinions, and general chat are none. When unsure, answer none.";
 
     private const string MusicControlSchema =
-        """{"type":"object","properties":{"command":{"type":"string","enum":["skip","pause","resume","stop","now_playing","show_queue","loop_song","loop_queue","loop_off","clear_queue","start_playing","remove_mine","show_menu","unclear"]}},"required":["command"]}""";
+        """{"type":"object","properties":{"command":{"type":"string","enum":["skip","pause","resume","stop","now_playing","show_queue","loop_song","loop_queue","loop_off","clear_queue","start_playing","remove_mine","show_menu","previous","play_again","restart","volume_down","volume_up","shuffle_mine","show_history","unclear"]}},"required":["command"]}""";
 
     private const string MusicControlPrompt =
         "The message asks a Discord music bot to control its music. Pick the command that matches: skip (skip or vote " +
@@ -97,7 +98,10 @@ public partial class ChatActionParser
         "is on), show_queue (list the waiting songs), loop_song (repeat this song), loop_queue (repeat the whole " +
         "queue), loop_off (stop repeating), clear_queue (remove every waiting song), start_playing (start playing the " +
         "queue, or start a music session), remove_mine (take the person's own songs out of the queue, or leave the " +
-        "music session), show_menu (show the music menu). If none fit, answer unclear.";
+        "music session), show_menu (show the music menu), previous (go back to, or replay, the song that played " +
+        "before), play_again (queue a song that already played once more), restart (start the current song over), " +
+        "volume_down (quieter), volume_up (louder), shuffle_mine (shuffle the person's own songs), show_history (what " +
+        "played recently, or what an earlier song was called). If none fit, answer unclear.";
 
     private const string PlaySchema =
         """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}""";
@@ -230,6 +234,13 @@ public partial class ChatActionParser
                 "start_playing" => MusicCommand.Start,
                 "remove_mine" => MusicCommand.RemoveMine,
                 "show_menu" => MusicCommand.ShowMenu,
+                "previous" => MusicCommand.Previous,
+                "play_again" => MusicCommand.PlayAgain,
+                "restart" => MusicCommand.Restart,
+                "volume_down" => MusicCommand.VolumeDown,
+                "volume_up" => MusicCommand.VolumeUp,
+                "shuffle_mine" => MusicCommand.ShuffleMine,
+                "show_history" => MusicCommand.ShowHistory,
                 _ => null,
             };
 
