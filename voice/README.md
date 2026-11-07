@@ -49,10 +49,12 @@ misheard) and replies to that instead.
   once it's finished, or when they say "thanks", "goodbye", "that's all" or "stop" (anyone can, by name: "thanks
   ModBot"; even over the bot, or while it's still working on an answer: it stops talking, and answers on their way
   aren't said); then a closing chime (the chime falling) says it's back to waiting for its name, and the
-  conversation is forgotten. **"Stop" on its own** means "stop talking" while it's talking or a conversation is open,
-  and leaves the music playing; to stop the music then, say "stop the music". With no conversation open, "hey
-  ModBot, stop" goes to the chatbot like any request (and usually stops the music). Replies skip the chatbot's usual wait between questions (`Chat:CooldownSeconds`),
-  but each person's are still at least `Voice:FollowUpCooldownSeconds` (5 by default) apart.
+  conversation is forgotten. Replies skip the chatbot's usual wait between questions (`Chat:CooldownSeconds`), but
+  each person's are still at least `Voice:FollowUpCooldownSeconds` (5 by default) apart.
+- **"Stop" on its own** means "stop talking" while it's talking or a conversation is open (it's one of the goodbyes
+  above), and leaves the music playing. To stop the music, always say so: "hey ModBot, stop the music". A bare "hey
+  ModBot, stop" with no conversation open isn't taken as stopping the music (stopping can't be undone, so the bot
+  asks for it plainly).
 - An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
   history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
   posted there instead, as typed answers are.

@@ -39,6 +39,24 @@ public class WakeWordTests
         Assert.Equal("", WakeWord.FindRequest(hint, Names)); // no full stop mid-title, no repeats, no blanks
     }
 
+    [Theory]
+    [InlineData("ModBot play something")]
+    [InlineData("mod bot, skip")]
+    [InlineData("hey modbot-helper remove my songs")]
+    public void Hint_words_with_the_bots_name_are_left_out(string word)
+    {
+        var hint = Modules.Voice.VoiceListener.SpeechHint("ModBot", [word, "Sam"]);
+
+        Assert.Equal(Modules.Voice.VoiceListener.SpeechHint("ModBot", ["Sam"]), hint);
+        Assert.Equal("", WakeWord.FindRequest(hint, Names)); // an echo still asks nothing
+    }
+
+    [Fact]
+    public void Hint_words_with_the_bots_username_are_left_out_too()
+        => Assert.DoesNotContain("Unionbot",
+            Modules.Voice.VoiceListener.SpeechHint("ModBot", ["UnionBot please play", "Sam"], username: "UnionBot"),
+            StringComparison.OrdinalIgnoreCase);
+
     [Fact]
     public void The_hint_keeps_only_whole_words_that_fit()
     {

@@ -80,6 +80,9 @@ public sealed partial class VoiceListener
     /// hint: speech-to-text only reads a short prompt, and a long one makes it more likely to echo it.</summary>
     private const int MaxHintExtra = 150;
 
+    /// <summary>How long the server's words for the hint are reused before they're read again.</summary>
+    private static readonly TimeSpan HintFor = TimeSpan.FromSeconds(10);
+
     /// <summary>When more than one person has asked within this long, spoken answers start with the asker's name, so
     /// everyone can tell whose answer it is.</summary>
     private static readonly TimeSpan GroupWindow = TimeSpan.FromSeconds(30);
@@ -823,7 +826,7 @@ public sealed partial class VoiceListener
     private async Task HandleSpeechAsync(Session session, ulong userId, byte[] said, bool overBot, Action transcribed)
     {
         var name = session.Guild.CurrentUser.DisplayName;
-        var hint = SpeechHint(name, await HintExtraAsync(session));
+        var hint = SpeechHint(name, await HintExtraAsync(session), _client.CurrentUser.Username);
         var timer = Stopwatch.StartNew();
         Transcript heard;
         try
@@ -1086,13 +1089,18 @@ public sealed partial class VoiceListener
     /// so the name comes last: an echo is only "hey ModBot", with nothing asked after it.
     /// <para>With <paramref name="extra"/>, the server's own words go in too (songs in its queue, people in the
     /// channel, its LFG game), the first ones first, as many whole ones as fit in <see cref="MaxHintExtra"/>: song and
-    /// player names are what it gets wrong most.</para>
+    /// player names are what it gets wrong most. Any that has the bot's name in it (<paramref name="name"/>, or
+    /// <paramref name="username"/>) is left out: echoed, a member called "ModBot play something" would otherwise make
+    /// the echo a request.</para>
     /// </summary>
-    public static string SpeechHint(string name, IEnumerable<string>? extra = null)
+    public static string SpeechHint(string name, IEnumerable<string>? extra = null, string? username = null)
     {
+        string[] botNames = [.. new[] { name, username ?? "" }.Select(TextTools.Squash).Where(n => n.Length > 0)];
         var words = new List<string>();
         var length = 0;
-        foreach (var word in (extra ?? []).Select(HintWord).Where(w => w.Length > 1).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var word in (extra ?? []).Select(HintWord)
+                     .Where(w => w.Length > 1 && !botNames.Any(TextTools.Squash(w).Contains))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (length + word.Length + 2 > MaxHintExtra)
             {
@@ -1117,15 +1125,23 @@ public sealed partial class VoiceListener
     }
 
     /// <summary>The server's own words for <see cref="SpeechHint"/>: the songs waiting in its queue (in play order),
-    /// the people in the channel, and its LFG game and playlists.</summary>
-    private async Task<IEnumerable<string>> HintExtraAsync(Session session)
+    /// the people in the channel, and its LFG game and playlists. Read at most every <see cref="HintFor"/> per session,
+    /// since every sentence heard (noise included) needs a hint before it's turned into text.</summary>
+    private async Task<IReadOnlyList<string>> HintExtraAsync(Session session)
     {
+        if (session.HintWords is { } cached && DateTimeOffset.UtcNow - cached.At < HintFor)
+        {
+            return cached.Words;
+        }
+
         try
         {
             var queue = MusicQueueRules.Order(await _queue.GetAsync(session.Guild.Id)).Take(5).Select(s => s.Title);
             var people = session.Channel.ConnectedUsers.Where(u => !u.IsBot).Select(u => u.DisplayName);
             var game = await _settings.LfgGameAsync(session.Guild.Id);
-            return queue.Concat(people).Append(game.Name).Concat(game.Playlists.Select(p => p.Name)).ToList();
+            var words = queue.Concat(people).Append(game.Name).Concat(game.Playlists.Select(p => p.Name)).ToList();
+            session.HintWords = (DateTimeOffset.UtcNow, words);
+            return words;
         }
         catch (Exception ex)
         {
@@ -1602,7 +1618,15 @@ public sealed partial class VoiceListener
         public bool OthersAsked(ulong userId, DateTimeOffset now, TimeSpan within)
         {
             _askedAt[userId] = now;
-            return _askedAt.Any(a => a.Key != userId && now - a.Value <= within);
+            foreach (var old in _askedAt.Where(a => now - a.Value > within))
+            {
+                _askedAt.TryRemove(old); // only the last few seconds matter
+            }
+
+            return _askedAt.Keys.Any(id => id != userId);
         }
+
+        /// <summary>The server's own words for the speech hint, and when they were read (see HintExtraAsync).</summary>
+        public (DateTimeOffset At, IReadOnlyList<string> Words)? HintWords { get; set; }
     }
 }
