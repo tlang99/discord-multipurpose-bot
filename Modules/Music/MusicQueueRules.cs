@@ -153,7 +153,8 @@ public static class MusicQueueRules
             return QueueRemoveResult.NotFound;
         }
 
-        if (order[position - 1] is var found && found.PickerId != userId && !isModerator)
+        var found = order[position - 1];
+        if (found.PickerId != userId && !isModerator)
         {
             return QueueRemoveResult.NotYours;
         }

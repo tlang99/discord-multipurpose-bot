@@ -272,6 +272,17 @@ public sealed class MusicQueueRulesTests
     }
 
     [Theory]
+    [InlineData(1, false, false, true)] // alone, or with one other: no vote
+    [InlineData(2, false, false, true)]
+    [InlineData(3, false, false, false)] // 3 in the channel (deafened or not): a vote
+    [InlineData(6, false, false, false)]
+    [InlineData(6, true, false, true)] // a moderator
+    [InlineData(6, false, true, true)] // whoever started the music
+    public void Stopping_takes_a_vote_with_three_or_more_in_the_channel(int inChannel, bool moderator, bool starter,
+        bool atOnce)
+        => Assert.Equal(atOnce, MusicQueueService.StopsAtOnce(inChannel, moderator, starter));
+
+    [Theory]
     [InlineData(false, LoopMode.Off)]
     [InlineData(true, LoopMode.Queue)]
     public void Looping_the_queue_shows_without_a_player(bool loopQueue, LoopMode expected)

@@ -310,6 +310,10 @@ public class MusicQueueService : IHostedService
         {
             (count, reason) = (needed, $"{user.Mention} (a moderator) skipped it");
         }
+        else if (!listening.Contains(user.Id))
+        {
+            return MusicReply.Fail(DeafenedVoter);
+        }
         else
         {
             (count, var added) = AddVote(_votes, user, song?.Id, listening);
@@ -390,18 +394,27 @@ public class MusicQueueService : IHostedService
         }
     }
 
+    /// <summary>Why a deafened person can't vote: they can't hear the music, so they don't count toward the
+    /// votes.</summary>
+    private const string DeafenedVoter = "You're deafened, so you can't vote on the music - undeafen to have a say.";
+
     /// <summary>
-    /// Whether <paramref name="user"/> stopping the music goes through now. With 3 or more people listening, stopping
-    /// ends it for all of them, so it takes votes like a skip (more than half); with fewer, the person who started
-    /// it, or a moderator, it's at once. Returns null to stop now, or the reply about the vote.
+    /// Whether <paramref name="user"/> stopping the music goes through now (see <see cref="StopsAtOnce"/>); otherwise
+    /// it's a vote, like a skip: more than half the listeners. Returns null to stop now, or the reply about the vote.
     /// </summary>
     public MusicReply? VoteStop(SocketGuildUser user, MusicPlayer player)
     {
-        var listening = Listeners(user.Guild, player.VoiceChannelId);
-        if (listening.Count < 3 || Moderators.IsModerator(user) ||
-            _starters.TryGetValue(user.Guild.Id, out var starter) && starter == user.Id)
+        var inChannel = user.Guild.GetVoiceChannel(player.VoiceChannelId)?.ConnectedUsers.Count(u => !u.IsBot) ?? 0;
+        var starter = _starters.TryGetValue(user.Guild.Id, out var id) && id == user.Id;
+        if (StopsAtOnce(inChannel, Moderators.IsModerator(user), starter))
         {
             return null;
+        }
+
+        var listening = Listeners(user.Guild, player.VoiceChannelId);
+        if (!listening.Contains(user.Id))
+        {
+            return MusicReply.Fail(DeafenedVoter);
         }
 
         var needed = VotesNeeded(listening.Count);
@@ -416,6 +429,12 @@ public class MusicQueueService : IHostedService
                 with { Announce = false }
             : MusicReply.Fail($"You've already voted to stop ({count}/{needed}).");
     }
+
+    /// <summary>Whether a stop goes through without a vote: with fewer than 3 people in the channel (everyone in it,
+    /// deafened too, so deafening can't get round the vote), for whoever started the music, or for a moderator.
+    /// </summary>
+    public static bool StopsAtOnce(int inChannel, bool isModerator, bool isStarter)
+        => inChannel < 3 || isModerator || isStarter;
 
     /// <summary>Removes the song at <paramref name="position"/> in play order: your own, or anyone's for moderators.</summary>
     public async Task<MusicReply> RemoveAsync(SocketGuildUser user, int position)
@@ -503,11 +522,13 @@ public class MusicQueueService : IHostedService
     /// turn. Only their own songs move, so nobody else waits longer.</summary>
     public async Task<MusicReply> PlayNextAsync(SocketGuildUser user, int position)
     {
-        var (result, song, total, at) = await _store.MutateAsync(user.Guild.Id, state =>
+        var (result, song, total, at, already) = await _store.MutateAsync(user.Guild.Id, state =>
         {
             var count = state.Songs.Count;
+            var nextOfTheirs = MusicQueueRules.Order(state).FirstOrDefault(s => s.PickerId == user.Id)?.Id;
             var outcome = MusicQueueRules.PlayNextAt(state, position, user.Id, out var moved);
-            return (outcome, moved, count, moved is null ? -1 : MusicQueueRules.PositionOf(state, moved.Id));
+            return (outcome, moved, count, moved is null ? -1 : MusicQueueRules.PositionOf(state, moved.Id),
+                moved is not null && moved.Id == nextOfTheirs);
         });
 
         switch (result)
@@ -516,6 +537,12 @@ public class MusicQueueService : IHostedService
                 return MusicReply.Fail($"There's no song at position {position} - the queue has {total}.");
             case QueueRemoveResult.NotYours:
                 return MusicReply.Fail("That's someone else's song - you can only reorder your own.");
+        }
+
+        if (already)
+        {
+            return MusicReply.Fail($"{MusicFormatting.SongLink(song!)} is already the next of your songs - #{at} in " +
+                                   "the turns.");
         }
 
         RefreshMenu(user.Guild.Id);
@@ -790,8 +817,8 @@ public class MusicQueueService : IHostedService
             embed.AddField("Now playing", MusicFormatting.TrackLink(current.Track) +
                                           $" ({MusicFormatting.Length(current.Track!)})" +
                                           (song is null ? "" : $" - <@{song.PickerId}>'s pick") +
-                                          VotesLine(_votes, state.GuildId, song?.Id, "skip") +
-                                          VotesLine(_stopVotes, state.GuildId, song?.Id, "stop"));
+                                          VotesLine(_votes, state.GuildId, song?.Id, "⏭️", "skip") +
+                                          VotesLine(_stopVotes, state.GuildId, song?.Id, "⏹️", "stop"));
         }
         else
         {
@@ -830,10 +857,10 @@ public class MusicQueueService : IHostedService
     }
 
     /// <summary>"\n⏭️ 2 votes to skip" for the menu, when the song playing has any; otherwise "".</summary>
-    private static string VotesLine(ConcurrentDictionary<ulong, Votes> all, ulong guildId, Guid? songId, string what)
+    private static string VotesLine(ConcurrentDictionary<ulong, Votes> all, ulong guildId, Guid? songId, string icon,
+        string what)
     {
         var count = all.TryGetValue(guildId, out var votes) && votes.SongId == songId ? votes.Voters.Count : 0;
-        var icon = what == "stop" ? "⏹️" : "⏭️";
         return count > 0 ? $"\n{icon} {count} vote{(count == 1 ? "" : "s")} to {what}" : "";
     }
 

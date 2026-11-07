@@ -94,8 +94,9 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   `Music:SongsPerPerson` songs waiting (default 10), and the queue holds `Music:MaxQueueLength` (default 200).
 - **Vote skip:** a song is skipped once more than half the people listening vote (anyone deafened doesn't count,
   since they can't hear it). Whoever picked it, and moderators, skip it outright. The reply says what's on now.
-- **Stopping takes a vote too,** with 3 or more listening: more than half of them, since it ends the music for
-  everyone. With fewer, or for whoever started the music, or a moderator, it stops at once.
+- **Stopping takes a vote too,** with 3 or more people in the voice channel: more than half of those listening,
+  since it ends the music for everyone. With fewer, or for whoever started the music, or a moderator, it stops at
+  once. Someone deafened can't vote on skipping or stopping (they can't hear it), and doesn't count toward the votes.
 - **Your own order:** `/playnext` makes one of your songs the next of yours to play, and `/shuffle-mine` shuffles
   yours. Only your own songs move, so nobody else's turn comes any later.
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
@@ -117,7 +118,7 @@ Commands:
 - `/add query` or `/play query` (the same thing) — a song name (searches YouTube), or a YouTube song or playlist
   link. It joins the queue, and if nothing's playing and you're in a voice channel, the music starts there.
 - `/start` — plays the queue in your voice channel.
-- `/skip` (a vote), `/pause`, `/resume`, `/stop` (leaves voice; the queue's kept; a vote with 3+ listening),
+- `/skip` (a vote), `/pause`, `/resume`, `/stop` (leaves voice; the queue's kept; a vote with 3+ in voice),
   `/nowplaying`, `/queue [page]`.
 - `/remove position` (your own songs; moderators: anyone's), `/remove-mine`, `/clearqueue` (moderators),
   `/playnext position` and `/shuffle-mine` (your own songs),

@@ -96,7 +96,7 @@ public class MusicControls
             return MusicReply.Fail(error);
         }
 
-        // With 3 or more listening, it ends the music for all of them, so it takes a vote (see VoteStop).
+        // With 3 or more in the channel, it ends the music for all of them, so it takes a vote (see VoteStop).
         if (_queue.VoteStop(user, player) is { } vote)
         {
             _queue.RefreshMenu(user.Guild.Id);
