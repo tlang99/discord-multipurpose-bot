@@ -23,6 +23,7 @@ public sealed class ChatActionParserTests : IDisposable
     [InlineData("Put on... some lofi", "Put on some lofi")]
     [InlineData("Play Stay Fly.", "Play Stay Fly.")] // nothing to take out
     [InlineData("I love this, play it again", "I love this, play it again")] // "play" isn't first
+    [InlineData("Play!", "Play")] // nothing after it: no space left hanging
     public void A_pause_after_play_isnt_a_break(string heard, string read)
         => Assert.Equal(read, ChatActionParser.PauseAfterPlay(heard));
 

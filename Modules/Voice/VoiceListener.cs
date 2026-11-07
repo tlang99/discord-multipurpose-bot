@@ -8,13 +8,13 @@ using Lavalink4NET.Players;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModBot.Common;
-using ModBot.Hosting;
 using ModBot.Configuration;
 using ModBot.EventHandlers;
 using ModBot.Models;
 using ModBot.Modules.Music;
 using ModBot.Services.Chat;
 using ModBot.Services.Moderation;
+using ModBot.Services.Music;
 using ModBot.Services.Settings;
 using ModBot.Services.Voice;
 
@@ -1135,7 +1135,7 @@ public sealed class VoiceListener
         return played ? text : null;
     }
 
-    /// <summary>Volume for the music while the bot talks over it (1 = as normal).</summary>
+    /// <summary>How loud the music is while the bot talks over it, as a share of how loud it was.</summary>
     private const float DuckedVolume = 0.25f;
 
     /// <summary>
@@ -1145,7 +1145,7 @@ public sealed class VoiceListener
     /// </summary>
     private async Task DuckMusicAsync(Session session, bool down)
     {
-        if (!_musicBot.IsSeparate || session.TrackDucking(down) is not { } volume ||
+        if (!_musicBot.IsSeparate || !session.TrackDucking(down) ||
             MusicService.GetPlayer(_audio, session.Guild.Id) is not { } player ||
             player.VoiceChannelId != session.Channel.Id)
         {
@@ -1154,7 +1154,15 @@ public sealed class VoiceListener
 
         try
         {
-            await player.SetVolumeAsync(volume);
+            // Down to a share of whatever it was, then back to just that.
+            if (down)
+            {
+                session.VolumeBeforeDucking = player.Volume;
+            }
+
+            await player.SetVolumeAsync(down
+                ? player.Volume * DuckedVolume
+                : session.VolumeBeforeDucking ?? 1f);
         }
         catch (Exception ex)
         {
@@ -1359,12 +1367,13 @@ public sealed class VoiceListener
 
         private int _ducks;
 
-        /// <summary>One answer more (<paramref name="down"/>) or less talking over the music. Returns the volume to
-        /// set when that changes it (the first one turns it down, the last one back up), else null.</summary>
-        public float? TrackDucking(bool down)
-            => down
-                ? Interlocked.Increment(ref _ducks) == 1 ? DuckedVolume : null
-                : Interlocked.Decrement(ref _ducks) == 0 ? 1f : null;
+        /// <summary>One answer more (<paramref name="down"/>) or less talking over the music. True when that should
+        /// change the volume: the first one turns it down, the last one back up.</summary>
+        public bool TrackDucking(bool down)
+            => down ? Interlocked.Increment(ref _ducks) == 1 : Interlocked.Decrement(ref _ducks) == 0;
+
+        /// <summary>The music's volume before the bot turned it down, to put it back to.</summary>
+        public float? VolumeBeforeDucking { get; set; }
 
         /// <summary>What the bot's saying right now ("" when it isn't), for telling its own voice from someone
         /// talking over it.</summary>

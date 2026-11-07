@@ -17,6 +17,7 @@ using ModBot.Services.Chat;
 using ModBot.Services.ContentModeration;
 using ModBot.Services.Lfg;
 using ModBot.Services.Moderation;
+using ModBot.Services.Music;
 using ModBot.Services.News;
 using ModBot.Services.Search;
 using ModBot.Services.Storage;
@@ -115,9 +116,10 @@ builder.Services.AddSingleton<DiscordSocketClient>();
 
 // Music plays from a second bot account when Bot:MusicToken is set, so it doesn't take the main bot's voice connection
 // (which listening for "hey ModBot" needs). Without one, the main bot plays it. See MusicBot.
-var musicToken = builder.Configuration[$"{BotOptions.SectionName}:MusicToken"];
+var separateMusicBot = MusicBot.IsSeparateToken(
+    builder.Configuration[$"{BotOptions.SectionName}:MusicToken"], builder.Configuration[$"{BotOptions.SectionName}:Token"]);
 builder.Services.AddSingleton(sp => new MusicBot(sp.GetRequiredService<DiscordSocketClient>(),
-    string.IsNullOrWhiteSpace(musicToken) ? null : new DiscordSocketClient(MusicBot.ClientConfig)));
+    separateMusicBot ? new DiscordSocketClient(MusicBot.ClientConfig) : null));
 builder.Services.AddHostedService<MusicBotService>();
 
 builder.Services.AddSingleton(new InteractionServiceConfig

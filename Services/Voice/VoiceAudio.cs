@@ -46,18 +46,16 @@ public static class VoiceAudio
     /// download. Each note strikes quickly and dies away naturally, with a short fade at the end to keep it from
     /// clicking.
     /// </summary>
-    public static byte[] Chime() => TwoNotes(784.0, 1046.5);
+    public static byte[] Chime() => Notes(784.0, 1046.5);
 
     /// <summary>The "I'm done listening" chime, for when a conversation ends: <see cref="Chime"/> the other way round,
     /// falling (C6, then G5).</summary>
-    public static byte[] ExitChime() => TwoNotes(1046.5, 784.0);
+    public static byte[] ExitChime() => Notes(1046.5, 784.0);
 
     /// <summary>The "done" chime, for a request whose result you can hear (the music started, stopped or skipped):
     /// three notes, low, high, low (C6, E6, C6), a step above <see cref="Chime"/> so it's told apart from "I heard my
     /// name" and the closing chime.</summary>
     public static byte[] DoneChime() => Notes(1046.5, 1318.5, 1046.5);
-
-    private static byte[] TwoNotes(double first, double second) => Notes(first, second);
 
     /// <summary>Quick marimba-like notes in a row, the last one left to ring out.</summary>
     private static byte[] Notes(params double[] frequencies)

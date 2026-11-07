@@ -1,6 +1,6 @@
 using Discord;
 using Discord.WebSocket;
-using ModBot.Hosting;
+using ModBot.Services.Music;
 
 namespace ModBot.Tests;
 
@@ -11,7 +11,7 @@ public class MusicBotTests
     public void Without_a_music_account_the_main_bot_plays()
     {
         using var main = new DiscordSocketClient();
-        var music = new MusicBot(main, separate: null);
+        using var music = new MusicBot(main, separate: null);
 
         Assert.False(music.IsSeparate);
         Assert.Same(main, music.Client);
@@ -21,11 +21,10 @@ public class MusicBotTests
     public void With_one_it_plays_from_that_account()
     {
         using var main = new DiscordSocketClient();
-        using var separate = new DiscordSocketClient(MusicBot.ClientConfig);
-        var music = new MusicBot(main, separate);
+        using var music = new MusicBot(main, new DiscordSocketClient(MusicBot.ClientConfig));
 
         Assert.True(music.IsSeparate);
-        Assert.Same(separate, music.Client);
+        Assert.NotSame(main, music.Client);
     }
 
     [Fact]
@@ -33,12 +32,27 @@ public class MusicBotTests
     {
         // No privileged intents (members, presences, message content): it only joins voice.
         Assert.Equal(GatewayIntents.Guilds | GatewayIntents.GuildVoiceStates, MusicBot.ClientConfig.GatewayIntents);
-
-        using var separate = new DiscordSocketClient(MusicBot.ClientConfig);
-        using var main = new DiscordSocketClient();
-        var link = new MusicBot(main, separate).InviteLink;
-        var permissions = new GuildPermissions(ulong.Parse(link[(link.LastIndexOf('=') + 1)..]));
-        Assert.True(permissions is { ViewChannel: true, Connect: true, Speak: true });
-        Assert.Equal(3, permissions.ToList().Count);
+        Assert.True(MusicBot.InvitePermissions is { ViewChannel: true, Connect: true, Speak: true });
+        Assert.Equal(3, MusicBot.InvitePermissions.ToList().Count);
     }
+
+    [Fact]
+    public void Theres_no_invite_link_until_it_has_signed_in()
+    {
+        // The link needs the account's ID: a refused token mustn't hand out "client_id=".
+        using var main = new DiscordSocketClient();
+        using var music = new MusicBot(main, new DiscordSocketClient(MusicBot.ClientConfig));
+
+        Assert.False(music.IsSignedIn);
+        Assert.Null(music.InviteLink);
+    }
+
+    [Theory]
+    [InlineData("music-token", "main-token", true)]
+    [InlineData("main-token", "main-token", false)] // the same account twice would knock itself off
+    [InlineData(" main-token ", "main-token", false)]
+    [InlineData("", "main-token", false)]
+    [InlineData(null, "main-token", false)]
+    public void Only_a_different_token_makes_a_music_account(string? music, string main, bool separate)
+        => Assert.Equal(separate, MusicBot.IsSeparateToken(music, main));
 }

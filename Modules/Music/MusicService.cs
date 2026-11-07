@@ -8,9 +8,9 @@ using Lavalink4NET.Tracks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModBot.Common;
-using ModBot.Hosting;
 using ModBot.Configuration;
 using ModBot.Modules.Voice;
+using ModBot.Services.Music;
 
 namespace ModBot.Modules.Music;
 
@@ -147,19 +147,24 @@ public class MusicService
         }
 
         // Whoever plays the music needs to get in: the main bot, or the music account (which has to be in the server).
+        if (_bot.IsSeparate && !_bot.IsSignedIn)
+        {
+            // Still connecting, or its token was refused (the log says which).
+            return "My music player isn't connected right now - try again in a moment, or let a server admin know.";
+        }
+
         var player = _bot.IsSeparate ? _bot.In(user.Guild.Id) : user.Guild.CurrentUser;
         if (player is null)
         {
-            return $"My music player, {_bot.Client.CurrentUser?.Username ?? "the music bot"}, isn't in this server " +
-                   $"yet - a server admin can add it here: <{_bot.InviteLink}>";
+            return $"My music player, {_bot.Client.CurrentUser.Username}, isn't in this server yet - a server admin " +
+                   $"can add it here: <{_bot.InviteLink}>";
         }
 
-        var who = _bot.IsSeparate ? player.Mention : "I";
         var permissions = player.GetPermissions(player.Guild.GetVoiceChannel(voiceChannel.Id) ?? voiceChannel);
         if (!permissions.ViewChannel || !permissions.Connect || !permissions.Speak)
         {
-            return $"{(_bot.IsSeparate ? who + " needs" : "I need")} **View Channel**, **Connect**, and **Speak** in " +
-                   $"{voiceChannel.Mention} to play music there.";
+            return $"{(_bot.IsSeparate ? player.Mention + " needs" : "I need")} **View Channel**, **Connect**, and " +
+                   $"**Speak** in {voiceChannel.Mention} to play music there.";
         }
 
         // Move Members lets the bot join a full channel anyway; without it, joining would just time out.
