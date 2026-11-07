@@ -24,6 +24,10 @@ public static class MusicFormatting
     public static string Duration(TimeSpan duration)
         => duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss") : duration.ToString(@"m\:ss");
 
+    /// <summary>A wait as people say it: "about 12 min", or "under a minute".</summary>
+    public static string RoughWait(TimeSpan wait)
+        => wait < TimeSpan.FromMinutes(1) ? "under a minute" : $"about {(int)Math.Ceiling(wait.TotalMinutes)} min";
+
     public static string Length(LavalinkTrack track) => Length(track.IsLiveStream, track.Duration);
 
     public static string SongLength(QueuedSong song) => Length(song.IsLiveStream, song.Duration);

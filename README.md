@@ -96,8 +96,8 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   moderators, skip it outright.
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
   pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
-  **Add song** (a pop-up), **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and
-  **Remove mine** (a private list of your waiting songs: take out one, or all of them). The buttons keep working
+  **Add song** (a pop-up that works like `/play`: it also starts the music if nothing's playing and you're in voice),
+  **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and **Remove mine** (a private list of your waiting songs: take out one, or all of them). The buttons keep working
   across restarts. Running `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a

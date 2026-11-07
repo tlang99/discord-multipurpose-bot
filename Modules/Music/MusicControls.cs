@@ -64,7 +64,8 @@ public class MusicControls
 
         if (player.State == PlayerState.Paused)
         {
-            return MusicReply.Fail("Already paused - use `/resume` to continue.");
+            // Neutral, since it may have come from the menu's button, a command or the chatbot.
+            return MusicReply.Fail("Already paused.");
         }
 
         await player.PauseAsync();

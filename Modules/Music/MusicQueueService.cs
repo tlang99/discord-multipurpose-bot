@@ -151,10 +151,12 @@ public class MusicQueueService : IHostedService
             PickerName = user.DisplayName,
         }).ToList();
 
-        var (result, added, position) = await _store.MutateAsync(user.Guild.Id, state =>
+        var (result, added, position, wait, personFull) = await _store.MutateAsync(user.Guild.Id, state =>
         {
             var outcome = MusicQueueRules.Add(state, songs, user.Id, SongsPerPerson, MaxQueueLength, out var taken);
-            return (outcome, taken, taken.Count > 0 ? MusicQueueRules.PositionOf(state, taken[0].Id) : -1);
+            var first = taken.Count > 0 ? taken[0].Id : Guid.Empty;
+            return (outcome, taken, MusicQueueRules.PositionOf(state, first), MusicQueueRules.WaitBefore(state, first),
+                state.Songs.Count(s => s.PickerId == user.Id) >= SongsPerPerson);
         });
 
         switch (result)
@@ -166,9 +168,13 @@ public class MusicQueueService : IHostedService
                 return MusicReply.Fail($"The queue is full ({MaxQueueLength} songs).");
         }
 
+        // A playlist that didn't all fit says so plainly, so nobody thinks the rest are coming.
+        var cap = personFull ? $"each person can have {SongsPerPerson} waiting" : $"the queue holds {MaxQueueLength}";
         var what = lookup.IsPlaylist
-            ? $"**{added.Count}** songs from **{TextTools.Escape(playlistName!)}**" +
-              (added.Count < songs.Count ? $" (the most you can have waiting is {SongsPerPerson})" : "") +
+            ? (added.Count < songs.Count
+                  ? $"the first **{added.Count}** of {songs.Count} songs from **{TextTools.Escape(playlistName!)}** " +
+                    $"(the rest weren't added - {cap})"
+                  : $"**{added.Count}** songs from **{TextTools.Escape(playlistName!)}**") +
               (filtered > 0 ? $" (skipped {filtered} whose titles break the word filter)" : "")
             : $"{MusicFormatting.SongLink(added[0])} ({MusicFormatting.SongLength(added[0])})";
         var text = new StringBuilder($"➕ {user.Mention} added {what}");
@@ -182,7 +188,8 @@ public class MusicQueueService : IHostedService
         }
         else
         {
-            text.Append(position > 0 ? $" - #{position} in the turns." : ".");
+            var eta = idle ? null : TimeUntil(player!, wait);
+            text.Append(position > 0 ? $" - #{position} in the turns{(eta is null ? "" : $", {eta} away")}." : ".");
             if (idle)
             {
                 text.Append(" Nothing's playing yet: join a voice channel and press **Play** on the music menu " +
@@ -192,6 +199,20 @@ public class MusicQueueService : IHostedService
 
         RefreshMenu(user.Guild.Id);
         return MusicReply.Ok(text.ToString());
+    }
+
+    /// <summary>Roughly how long until a song plays, given how long the songs ahead of it last: what's left of the
+    /// current one plus those. Null when that can't be known (a live stream, or a song looping until skipped).</summary>
+    private static string? TimeUntil(MusicPlayer player, TimeSpan? songsAhead)
+    {
+        if (songsAhead is not { } ahead || player.CurrentItem?.Track is not { IsLiveStream: false } track ||
+            player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track)
+        {
+            return null;
+        }
+
+        var left = track.Duration - (player.Position?.Position ?? TimeSpan.Zero);
+        return MusicFormatting.RoughWait(ahead + (left > TimeSpan.Zero ? left : TimeSpan.Zero));
     }
 
     /// <summary>Starts the music: the bot joins <paramref name="user"/>'s voice channel and plays the next turn.</summary>
@@ -286,8 +307,9 @@ public class MusicQueueService : IHostedService
         if (count < needed)
         {
             RefreshMenu(user.Guild.Id);
-            return MusicReply.Ok($"🗳️ {user.Mention} voted to skip {MusicFormatting.TrackLink(current.Track)} " +
-                                 $"(**{count}/{needed}** - more than half the listeners skips it).") with { Announce = false };
+            // Short: how skipping works is on the menu, and this is read out again on every vote.
+            return MusicReply.Ok($"🗳️ Skip vote **{count}/{needed}** for {MusicFormatting.TrackLink(current.Track)}.")
+                with { Announce = false };
         }
 
         // Null when the song had already finished.

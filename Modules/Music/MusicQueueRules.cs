@@ -170,6 +170,18 @@ public static class MusicQueueRules
     public static int PositionOf(MusicQueueState state, Guid songId)
         => Order(state).FindIndex(s => s.Id == songId) is var index and >= 0 ? index + 1 : -1;
 
+    /// <summary>How long the songs ahead of this one in play order last together (not counting what's playing now),
+    /// or null if it's not waiting or a live stream ahead makes that unknowable.</summary>
+    public static TimeSpan? WaitBefore(MusicQueueState state, Guid songId)
+    {
+        var order = Order(state);
+        var index = order.FindIndex(s => s.Id == songId);
+        var ahead = order.Take(Math.Max(0, index)).ToList();
+        return index < 0 || ahead.Any(s => s.IsLiveStream)
+            ? null
+            : ahead.Aggregate(TimeSpan.Zero, (sum, s) => sum + s.Duration);
+    }
+
     /// <summary>Drops people with nothing waiting from the turns, so the list doesn't grow forever. Whoever played
     /// last stays until the turn moves on, since the next turn is worked out from where they are.</summary>
     private static void Prune(MusicQueueState state)
