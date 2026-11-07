@@ -156,6 +156,7 @@ public class MusicService
         var player = _bot.IsSeparate ? _bot.In(user.Guild.Id) : user.Guild.CurrentUser;
         if (player is null)
         {
+            // Signed in (checked above), so it has an ID and the invite link exists.
             return $"My music player, {_bot.Client.CurrentUser.Username}, isn't in this server yet - a server admin " +
                    $"can add it here: <{_bot.InviteLink}>";
         }

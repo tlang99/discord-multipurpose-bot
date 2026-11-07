@@ -53,8 +53,8 @@ public static class VoiceAudio
     public static byte[] ExitChime() => Notes(1046.5, 784.0);
 
     /// <summary>The "done" chime, for a request whose result you can hear (the music started, stopped or skipped):
-    /// three notes, low, high, low (C6, E6, C6), a step above <see cref="Chime"/> so it's told apart from "I heard my
-    /// name" and the closing chime.</summary>
+    /// three notes, low, high, low (C6, E6, C6; the last left to ring, as in every chime), a step above
+    /// <see cref="Chime"/> so it's told apart from "I heard my name" and the closing chime.</summary>
     public static byte[] DoneChime() => Notes(1046.5, 1318.5, 1046.5);
 
     /// <summary>Quick marimba-like notes in a row, the last one left to ring out.</summary>

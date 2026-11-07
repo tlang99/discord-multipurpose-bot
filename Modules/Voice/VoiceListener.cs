@@ -1164,8 +1164,12 @@ public sealed class VoiceListener
             }
             else if (session.VolumeBeforeDucking is { } before)
             {
+                // Unless the volume was changed meanwhile: then that's what it should stay at.
                 session.VolumeBeforeDucking = null;
-                await player.SetVolumeAsync(before);
+                if (Math.Abs(player.Volume - before * DuckedVolume) < 0.01f)
+                {
+                    await player.SetVolumeAsync(before);
+                }
             }
         }
         catch (Exception ex)
