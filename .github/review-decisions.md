@@ -28,6 +28,10 @@ Add to this list when the owner turns down a suggestion so it stops coming back.
   joins the queue, and the music starts if nothing's playing and the person is in voice.
 - **Moderator rule for music:** Move Members **or** Manage Messages.
 - **Skip votes don't name the voter.**
+- **A music action said by voice that worked is answered with the done chime, not words** ("Added Mr Brightside,
+  you're third up"), so it doesn't talk over the music. Failures are still said. Don't suggest speaking them.
+- **Stopping takes a vote with 3 or more listening** (more than half); with fewer, for whoever started the music, or
+  a moderator, it's at once. No undo button instead.
 - **Music code stays in `Modules/Music/`**, not moved into `Services/` behind interfaces. The same goes for
   `PollPoster`. This is an exception to the README's "business logic in Services/ behind interfaces".
 

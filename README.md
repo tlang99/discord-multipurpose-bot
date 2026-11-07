@@ -92,13 +92,19 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
 - **Turns:** songs play one from each person, in the order they first added one, round and round, so someone who
   adds ten songs doesn't hold everyone else up. Someone who adds later gets the next free turn. Each person can have
   `Music:SongsPerPerson` songs waiting (default 10), and the queue holds `Music:MaxQueueLength` (default 200).
-- **Vote skip:** a song is skipped once more than half the people in the voice channel vote. Whoever picked it, and
-  moderators, skip it outright.
+- **Vote skip:** a song is skipped once more than half the people listening vote (anyone deafened doesn't count,
+  since they can't hear it). Whoever picked it, and moderators, skip it outright. The reply says what's on now.
+- **Stopping takes a vote too,** with 3 or more listening: more than half of them, since it ends the music for
+  everyone. With fewer, or for whoever started the music, or a moderator, it stops at once.
+- **Your own order:** `/playnext` makes one of your songs the next of yours to play, and `/shuffle-mine` shuffles
+  yours. Only your own songs move, so nobody else's turn comes any later.
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
   pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
   **Add song** (a pop-up that works like `/play`: it also starts the music if nothing's playing and you're in voice),
-  **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and **Remove mine** (a private list of
-  your waiting songs: take out one, or all of them). The buttons keep working across restarts. Running `/music-menu` again replaces it.
+  **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing), then **Loop** (off, this song, or
+  the whole queue: each press moves to the next, and the menu says what's looping) and **Remove mine** (a private
+  list of your waiting songs: take out one, or all of them). The buttons keep working across restarts. Running
+  `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
   minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
@@ -111,9 +117,12 @@ Commands:
 - `/add query` or `/play query` (the same thing) — a song name (searches YouTube), or a YouTube song or playlist
   link. It joins the queue, and if nothing's playing and you're in a voice channel, the music starts there.
 - `/start` — plays the queue in your voice channel.
-- `/skip` (a vote), `/pause`, `/resume`, `/stop` (leaves voice; the queue's kept), `/nowplaying`, `/queue [page]`.
+- `/skip` (a vote), `/pause`, `/resume`, `/stop` (leaves voice; the queue's kept; a vote with 3+ listening),
+  `/nowplaying`, `/queue [page]`.
 - `/remove position` (your own songs; moderators: anyone's), `/remove-mine`, `/clearqueue` (moderators),
-  `/loop off|song|queue` (looping the queue puts finished songs back in for their picker; a skip still moves on).
+  `/playnext position` and `/shuffle-mine` (your own songs),
+  `/loop off|song|queue` (looping the queue puts finished songs back in for their picker; a skip still moves on;
+  it's saved, so it stays on until it's turned off, and `/stop` says so).
 
 Adding works from anywhere. Controlling playback (pause, stop, loop, voting) only works from the bot's voice
 channel, except for moderators (Move Members or Manage Messages), who can control it from anywhere. Only YouTube
@@ -343,9 +352,9 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
     channel, or the one they replied to.
   - **Music:** "@bot play mr brightside" (or "add…", "queue up…", "put … in the queue") adds a song and starts the
     music if it isn't playing, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
-    this song", "remove song 3", "remove mr brightside from the queue", "remove my songs", "start the music",
-    "where's the music menu?" and the rest of the music commands work by asking too, through the same code as the
-    slash commands (so a skip is a vote).
+    this song", "remove song 3", "remove mr brightside from the queue", "remove my songs", "play song 3 next",
+    "shuffle my songs", "start the music", "where's the music menu?" and the rest of the music commands work by
+    asking too, through the same code as the slash commands (so a skip is a vote).
     "Music session" wording works as well: starting one starts the music, leaving one takes out your songs.
     Plainly worded controls are read with fixed rules, without the model: a clause of the message has to be the
     command itself, so "this song sucks, skip it" skips but "I hate it when people skip songs" doesn't. Looser

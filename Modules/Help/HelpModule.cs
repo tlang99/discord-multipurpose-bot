@@ -87,8 +87,8 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "`/play` or `/add` - add a song name or YouTube link (any time, from anywhere); it starts the music " +
                 "in your voice channel if it isn't playing · `/start` - play the queue\n" +
                 "`/skip` - vote to skip (more than half the listeners; instant if it's your pick)\n" +
-                "`/pause` · `/resume` · `/stop` (the queue's kept) · `/loop`\n" +
-                "`/nowplaying` · `/queue` · `/remove` · `/remove-mine`\n" +
+                "`/pause` · `/resume` · `/stop` (the queue's kept; a vote with 3+ listening) · `/loop`\n" +
+                "`/nowplaying` · `/queue` · `/remove` · `/remove-mine` · `/playnext` · `/shuffle-mine`\n" +
                 "Or use the buttons on the pinned music menu. Controlling playback works from the bot's voice channel.");
         }
 

@@ -743,6 +743,10 @@ public partial class ChatHandler
                     : await _musicControls.RemoveAsync(asker, request.Position ?? 0);
             case MusicCommand.RemoveMine:
                 return await _musicControls.RemoveMineAsync(asker);
+            case MusicCommand.PlayNext:
+                return await _musicControls.PlayNextAsync(asker, request.Position ?? 0);
+            case MusicCommand.ShuffleMine:
+                return await _musicControls.ShuffleMineAsync(asker);
             case MusicCommand.ClearQueue:
                 return await _musicControls.ClearQueueAsync(asker);
 
