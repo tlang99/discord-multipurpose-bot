@@ -527,7 +527,9 @@ By default the chatbot uses Ollama running on the same machine as the bot. No ac
 
 If Ollama isn't running, the bot replies that it couldn't come up with an answer and logs why; everything else keeps
 working. The first question after Ollama has been idle for a while is slower, since it loads the model into memory
-first (`Chat:TimeoutSeconds`, default 120, allows for that).
+first (`Chat:TimeoutSeconds`, default 120, allows for that). Ollama keeps the model loaded for
+`Chat:KeepAliveMinutes` (default 5) after each question; longer keeps answers quick but holds on to graphics memory.
+In voice, the bot starts loading it as soon as it hears its name.
 
 **Using Ollama's cloud instead:** set `Chat:OllamaUrl` to `https://ollama.com`, set `Chat:Model` to a name from
 [ollama.com/api/tags](https://ollama.com/api/tags), and create an API key at

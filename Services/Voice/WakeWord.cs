@@ -78,7 +78,7 @@ public static class WakeWord
 
     /// <summary>Letters and digits only, lower case: "Mod-Bot," is "modbot". ("ModBot's" is "modbots", so "ModBot's so
     /// slow" isn't taken as a request.)</summary>
-    private static string Squash(string word)
+    internal static string Squash(string word)
     {
         var builder = new StringBuilder(word.Length);
         foreach (var c in word)

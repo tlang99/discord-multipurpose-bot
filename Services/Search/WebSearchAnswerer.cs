@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using Discord;
@@ -121,12 +122,41 @@ public partial class WebSearchAnswerer
 
         // The answer and the picture don't depend on each other, so they're fetched together (and both awaited, so a
         // failure in one never leaves the other running unobserved).
+        // The picture only gets as long as the answer takes, and a moment more: a slow site mustn't hold the answer
+        // up (in voice, it's said only once this returns).
         var top = results[0];
+        var clock = Stopwatch.StartNew();
+        using var pictureTime = new CancellationTokenSource();
         var answerTask = WriteAnswerAsync(guildId, serverName, botName, query, results, cancellationToken);
-        var imageTask = FindImageAsync(top.Url, cancellationToken);
-        await Task.WhenAll(answerTask, imageTask);
-        return new("", BuildEmbed(top, answerTask.Result, botName, imageTask.Result));
+        var imageTask = FindImageAsync(top.Url, pictureTime.Token, cancellationToken);
+        string? answer;
+        try
+        {
+            answer = await answerTask;
+        }
+        catch
+        {
+            // Cancelled: the picture's no use now, and mustn't be left failing unobserved.
+            await pictureTime.CancelAsync();
+            _ = imageTask.ContinueWith(t => t.Exception, TaskScheduler.Default);
+            throw;
+        }
+
+        var answeredIn = clock.ElapsedMilliseconds;
+        if (await Task.WhenAny(imageTask, Task.Delay(ImageGrace, cancellationToken)) != imageTask)
+        {
+            await pictureTime.CancelAsync();
+        }
+
+        var image = await imageTask; // null once cancelled
+        _logger.LogInformation("Web search answer in guild {GuildId}: written in {Answer} ms, picture {Picture} " +
+                               "after {Total} ms.", guildId, answeredIn, image is null ? "none" : "found",
+            clock.ElapsedMilliseconds);
+        return new("", BuildEmbed(top, answer, botName, image));
     }
+
+    /// <summary>How much longer than the answer the picture can take.</summary>
+    private static readonly TimeSpan ImageGrace = TimeSpan.FromMilliseconds(500);
 
     /// <summary>The model's answer from <paramref name="results"/>, or null if it couldn't be had.</summary>
     private async Task<string?> WriteAnswerAsync(ulong guildId, string serverName, string botName, string query,
@@ -162,9 +192,10 @@ public partial class WebSearchAnswerer
 
     /// <summary>The top result's preview image, or null; never holds the answer up for long, and never costs it: the
     /// picture is optional, so anything going wrong just means none.</summary>
-    private async Task<string?> FindImageAsync(string url, CancellationToken cancellationToken)
+    /// <param name="giveUp">Cancelled once the answer's ready and the picture's had long enough: then it's none.</param>
+    private async Task<string?> FindImageAsync(string url, CancellationToken giveUp, CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, giveUp);
         timeout.CancelAfter(ImageTimeout);
         try
         {

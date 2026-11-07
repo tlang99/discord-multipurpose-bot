@@ -52,9 +52,29 @@ public class OllamaChatService : IChatService
         return await SendAsync(request, cancellationToken);
     }
 
+    public async Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        // Ollama loads the model for a chat request with no messages, and answers nothing.
+        try
+        {
+            using var slot = await _limiter.AcquireAsync(cancellationToken);
+            using var response = await _httpClient.PostAsJsonAsync("api/chat",
+                new OllamaChatRequest(_options.Model, [], Stream: false, KeepAlive: KeepAlive), JsonOptions,
+                cancellationToken);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Only a head start: the real question reports any problem.
+        }
+    }
+
+    /// <summary>Chat:KeepAliveMinutes as Ollama wants it ("30m"), or null to leave Ollama's own default.</summary>
+    private string? KeepAlive => _options.KeepAliveMinutes > 0 ? $"{_options.KeepAliveMinutes}m" : null;
+
     private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken,
         TimeSpan? timeout = null)
     {
+        request = request with { KeepAlive = KeepAlive };
         // One slot per request, shared by chat and news, so a local Ollama isn't asked to do too much at once.
         using var slot = await _limiter.AcquireAsync(cancellationToken);
 
@@ -144,8 +164,10 @@ public class OllamaChatService : IChatService
 
     private record OllamaMessage(string Role, string Content);
 
+    /// <param name="KeepAlive">How long Ollama keeps the model loaded after this request (its own default is 5
+    /// minutes).</param>
     private record OllamaChatRequest(string Model, IReadOnlyList<OllamaMessage> Messages, bool Stream,
-        JsonElement? Format = null, OllamaRequestOptions? Options = null);
+        JsonElement? Format = null, OllamaRequestOptions? Options = null, string? KeepAlive = null);
 
     private record OllamaRequestOptions(double? Temperature = null);
 

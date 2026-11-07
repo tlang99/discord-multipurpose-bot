@@ -43,4 +43,18 @@ public class VoiceOptions
     /// <summary>The most of an answer read aloud, in characters (whole sentences, 50-2000), so the bot doesn't talk
     /// over people for long. Anything past it isn't said.</summary>
     public int MaxSpokenCharacters { get; set; } = 300;
+
+    /// <summary>
+    /// After an answer read aloud, anyone in the voice channel can say the next thing without the bot's name, until
+    /// nobody's said anything to it for this many seconds (0-60; 0 turns conversations off), or someone says
+    /// "thanks" or "that's all". A closing chime says it's over.
+    /// </summary>
+    public int ConversationSeconds { get; set; } = 10;
+
+    /// <summary>
+    /// Write each voice request (what was said after the bot's name, as speech-to-text heard it) to the log, for
+    /// working out why one wasn't understood. Off by default: the log otherwise never holds what anyone said. While
+    /// it's on, the line posted on joining voice says so. Nothing said without the bot's name is ever logged.
+    /// </summary>
+    public bool LogRequests { get; set; }
 }

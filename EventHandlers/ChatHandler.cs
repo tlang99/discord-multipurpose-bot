@@ -137,8 +137,11 @@ public partial class ChatHandler
     /// was heard is posted ("🎙️ @name: …") and the answer replies to it, as typed.</para>
     /// Returns the answer, or null if there was none.
     /// </summary>
+    /// <param name="earlier">In a voice conversation (see <see cref="VoiceConversation"/>): what was said and answered
+    /// so far, for the chatbot to follow on from. Its requests skip the cooldown: a back-and-forth is the point, and
+    /// each one waits for the last answer anyway.</param>
     public async Task<VoiceAnswer?> HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel,
-        string request, bool aloud)
+        string request, bool aloud, IReadOnlyList<ChatTurn>? earlier = null)
     {
         var guild = channel.Guild;
         if (!ChannelAccess.CanPost(guild.CurrentUser, channel))
@@ -159,7 +162,7 @@ public partial class ChatHandler
         // The cooldown is checked (and counted) here, before anything's posted: typed, a request during it gets a ⏳,
         // but said, there'd be nothing to put that on but a fresh post of what was heard. So it's just dropped, and a
         // chatty speaker or a noisy mic can't flood the channel.
-        if (IsOnCooldown(guild.Id, speaker.Id))
+        if (earlier is not { Count: > 0 } && IsOnCooldown(guild.Id, speaker.Id))
         {
             return null;
         }
@@ -183,7 +186,7 @@ public partial class ChatHandler
             }
         }
 
-        var said = new ChatRequest(channel, heard, speaker, request, request, Spoken: true);
+        var said = new ChatRequest(channel, heard, speaker, request, request, Spoken: true, Earlier: earlier);
         await RespondAsync(allowed, said);
         return said.Answer is { } answer ? new VoiceAnswer(answer, said.AnswerInChat) : null;
     }
@@ -234,8 +237,9 @@ public partial class ChatHandler
     /// <param name="Words">Just what they wrote (or said), for working out actions.</param>
     /// <param name="Question">What they wrote with a note for attachments, for the chatbot to answer.</param>
     /// <param name="Spoken">Said in voice: its cooldown was already counted before posting what was heard.</param>
+    /// <param name="Earlier">A voice conversation so far, oldest first (null for none).</param>
     private sealed record ChatRequest(SocketTextChannel Channel, IUserMessage? Message, IUser Author, string Words,
-        string Question, bool Spoken = false)
+        string Question, bool Spoken = false, IReadOnlyList<ChatTurn>? Earlier = null)
     {
         /// <summary>Answered by voice only: replies aren't posted, except an embed (a web search's).</summary>
         public bool Aloud => Message is null;
@@ -283,7 +287,7 @@ public partial class ChatHandler
 
     private async Task RespondAsync(Allowed allowed, ChatRequest request)
     {
-        var (channel, message, asker, words, question, _) = request;
+        var (channel, message, asker, words, question, _, earlier) = request;
         var (settings, server, isAdmin) = allowed;
         var guild = channel.Guild;
         var bot = guild.CurrentUser;
@@ -388,7 +392,7 @@ public partial class ChatHandler
                 {
                     var (prompt, speakers) = await BuildPromptAsync(channel, message, asker, guild, bot, question);
                     reply = await _chat.ReplyAsync(await BuildSystemPromptAsync(guild, bot),
-                        [new ChatTurn(ChatRole.User, prompt)]);
+                        [.. earlier ?? [], new ChatTurn(ChatRole.User, prompt)]);
                     reply = RemoveScriptedLines(reply, speakers);
                 }
             }

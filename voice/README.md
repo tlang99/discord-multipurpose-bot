@@ -30,14 +30,23 @@ misheard) and replies to that instead.
   request (so wait for it to finish before asking again). An answer that would have to wait more than 15 seconds
   behind another is posted instead. Needs **Speak**; turn it off for every server with `Voice:SpokenReplies`. After
   installing Piper, restart the bot.
+- **Conversations:** after an answer read aloud, anyone in the channel can say the next thing without "hey
+  ModBot" ("and what about tomorrow?"), and the bot remembers what was said and answered so far, in memory only.
+  It ends after `Voice:ConversationSeconds` (10 by default) with nobody saying anything once it's finished talking,
+  or when someone says "thanks", "that's all" or "never mind"; then a closing chime (the chime falling) says it's
+  back to waiting for its name, and the conversation is forgotten. While one is open, everything said in the
+  channel counts as a request, side chatter included.
 - An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
   history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
   posted there instead, as typed answers are.
 - Speech is turned into text, and answers into speech, **on the machine running the bot** (Whisper and Piper).
   Nothing is sent to any other service. (A web search sends only the search words to Ollama, as typed searches do.)
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
-  the bot's name, and thrown away. Only what's said after the name is acted on. The log notes that a voice
-  request happened, never what was said.
+  the bot's name, and thrown away. Only what's said after the name, or in a conversation with it (above), is acted
+  on. The log notes that a voice
+  request happened, never what was said, unless `Voice:LogRequests` is turned on to work out what it mishears;
+  then each request is logged as heard (never anything said without the bot's name), and the line posted on
+  joining says so.
 - Server settings (turning features on or off, news notifications) can't be changed by voice, only by typing: a
   friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
 - It only listens while the chatbot is on, since every request goes through it.
@@ -91,7 +100,9 @@ available").
 | `SpokenReplies` | `true` | Read answers to spoken requests aloud. Needs **Speak** and Piper. |
 | `PiperPath` | `voice/piper/piper.exe` | Piper's program. |
 | `SpeakingVoicePath` | `voice/models/en_US-kusal-medium.onnx` | The voice it speaks with; any [Piper voice](https://huggingface.co/rhasspy/piper-voices) works (keep its `.onnx.json` next to it). |
-| `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest is only in chat. |
+| `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest isn't said. |
+| `ConversationSeconds` | `10` | How long after its last answer anyone can reply without its name (0-60; `0` = no conversations). |
+| `LogRequests` | `false` | Write each voice request, as heard, to the log, to work out why one wasn't understood. The line posted on joining tells people. |
 
 ## Patched Discord.Net
 

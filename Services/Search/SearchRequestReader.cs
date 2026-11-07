@@ -43,7 +43,11 @@ public static partial class SearchRequestReader
     [GeneratedRegex(
         @"^\W*(?:(?:hey|ok|okay|please|pls|yo|can\s+you|could\s+you|would\s+you|will\s+you|go\s+ahead\s+and)[\s,]+)*" +
         @"(?:search(?:\s+(?:the\s+web|the\s+internet|online|google))?\s+for|search\s+(?:the\s+web|the\s+internet|online|google)" +
-        @"|web\s+search(?:\s+for)?|look\s+up(?!\s+(?:at|to|from|and|there|here)\b)|(?:search|google)" + NotARequest + ")" +
+        // "do a web search for", "run a quick search on"
+        @"|(?:do|run)\s+(?:a|another)\s+(?:quick\s+)?(?:(?:web|google|internet|online)\s+)?search(?:\s+(?:for|on|about))?" +
+        @"|web\s+search(?:\s+for)?|search\s+up|look\s+up(?!\s+(?:at|to|from|and|there|here)\b)|(?:search|google)" + NotARequest + ")" +
+        // "… and find", "… to see": joining words, not part of the search
+        @"(?:[\s,]+(?:and|to)\s+(?:find(?:\s+out)?|get|see|check(?:\s+out)?|pull\s+up|tell\s+(?:me|us)))?" +
         @"[\s:,]+(?<query>.+?)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex RequestRegex();

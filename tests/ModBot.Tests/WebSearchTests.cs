@@ -21,6 +21,13 @@ public class SearchRequestReaderTests
     [InlineData("hey, search: when does season 2 start?", "when does season 2 start?")]
     [InlineData("web search ollama pricing", "ollama pricing")]
     [InlineData("look up who won the cdl champs!", "who won the cdl champs")]
+    // As said in voice (speech-to-text's own words)
+    [InlineData("Do a web search and find the patch notes for Modern Warfare 4's update",
+        "the patch notes for Modern Warfare 4's update")]
+    [InlineData("can you do a quick search on the warzone map changes?", "the warzone map changes?")]
+    [InlineData("search up the season 2 patch notes", "the season 2 patch notes")]
+    [InlineData("search the web and find out when season 2 starts", "when season 2 starts")]
+    [InlineData("run a google search for best smg loadout", "best smg loadout")]
     public void Reads_the_search(string message, string query) => Assert.Equal(query, SearchRequestReader.Read(message));
 
     [Theory]
@@ -29,6 +36,8 @@ public class SearchRequestReaderTests
     [InlineData("I looked up the patch notes yesterday")]
     [InlineData("search for a squad")] // looking for a group: LFG's job
     [InlineData("search for 2 players for ranked")]
+    [InlineData("do a search for a squad")]
+    [InlineData("I did a web search and found nothing")]
     [InlineData("search")]
     [InlineData("look up")]
     [InlineData("search for")]

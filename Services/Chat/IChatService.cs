@@ -35,4 +35,8 @@ public interface IChatService
     /// <exception cref="ChatServiceException">The backend failed or returned nothing usable.</exception>
     Task<string> CompleteJsonAsync(string systemPrompt, string userMessage, string jsonSchema,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Gets the model ready to answer (a local Ollama loads it into memory, which takes seconds after it's been
+    /// idle), so the next question isn't kept waiting for that. Never throws: it's only a head start.</summary>
+    Task WarmUpAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

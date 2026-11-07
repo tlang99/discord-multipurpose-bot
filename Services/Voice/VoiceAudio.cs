@@ -46,11 +46,17 @@ public static class VoiceAudio
     /// download. Each note strikes quickly and dies away naturally, with a short fade at the end to keep it from
     /// clicking.
     /// </summary>
-    public static byte[] Chime()
+    public static byte[] Chime() => TwoNotes(784.0, 1046.5);
+
+    /// <summary>The "I'm done listening" chime, for when a conversation ends: <see cref="Chime"/> the other way round,
+    /// falling (C6, then G5).</summary>
+    public static byte[] ExitChime() => TwoNotes(1046.5, 784.0);
+
+    private static byte[] TwoNotes(double first, double second)
     {
         // A marimba's bar rings at its note plus faint overtones at 4x and 10x, which die away faster than the note.
         (double Ratio, double Level)[] overtones = [(4.0, 0.25), (10.0, 0.05)];
-        var samples = Note(784.0, 0.16, decay: 0.06, overtones).Concat(Note(1046.5, 0.32, decay: 0.10, overtones))
+        var samples = Note(first, 0.16, decay: 0.06, overtones).Concat(Note(second, 0.32, decay: 0.10, overtones))
             .ToArray();
         var peak = samples.Max(Math.Abs);
         return ToDiscord(samples, ChimeVolume / peak);
