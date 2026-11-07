@@ -25,8 +25,8 @@ misheard) and replies to that instead.
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
   off for every server with `Voice:Chime`). An action that worked (playing, skipping or stopping music, adding or
   removing a song, a reminder, an LFG or a poll) is answered with a three-note "done" chime (low, high, low) instead
-  of words, so it doesn't talk over the music. If it couldn't do it, it says why. Questions (what's playing, the queue, a web search, chat) are answered aloud. With `Voice:Chime` off, it says
-  what it did, as before.
+  of words, so it doesn't talk over the music. If it couldn't do it, it says why. Questions (what's playing, the
+  queue, a web search, chat) are answered aloud. With `Voice:Chime` off, it says what it did, as before.
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
   for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"), which cuts
