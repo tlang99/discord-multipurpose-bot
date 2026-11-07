@@ -86,7 +86,7 @@ public static partial class MusicCommandReader
             m => new(MusicCommand.Remove, int.Parse(m.Groups["n"].Value))),
         // One song by name: "remove mr brightside from the queue". Needs "from the queue" (or "out of"), so "take out
         // the trash" is just chat; "my songs" / "me" are caught above.
-        (Rx(@"(remove|delete|drop|take|pull)( out)?( my| the)?( song)? (?<title>.+?)( out)? (from|out of|off) (the|my) (queue|playlist)"),
+        (Rx(@"(remove|delete|drop|take)( out)?( my| the)?( song)? (?<title>.+?)( out)? (from|out of|off) (the|my) (queue|playlist)"),
             m => new(MusicCommand.Remove, Title: m.Groups["title"].Value)),
         (Rx(@"(clear|empty|wipe|clean out|clear out)( out)?( the)? (queue|playlist)"),
             _ => new(MusicCommand.ClearQueue)),
@@ -110,7 +110,9 @@ public static partial class MusicCommandReader
                 if (pattern.Match(clause) is { Success: true } match)
                 {
                     var request = read(match);
-                    if (request.Position is <= 0 or > 1000)
+                    // "Remove this song from the queue" names no song: that's for the model to work out.
+                    if (request.Position is <= 0 or > 1000 ||
+                        request.Title is { } title && NoTitleRegex().IsMatch(title))
                     {
                         continue;
                     }
@@ -148,6 +150,10 @@ public static partial class MusicCommandReader
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex SpacesRegex();
+
+    /// <summary>"this song", "it", "the current one": pointing at a song rather than naming it.</summary>
+    [GeneratedRegex(@"^(?:(?:this|that|the|it|current|playing|last|next|one|song|track|tune|thing|stuff|plug)\s*)+$")]
+    private static partial Regex NoTitleRegex();
 
     [GeneratedRegex(@"^(?:hey|hi|yo|ok|okay|alright|aight|lol|lmao|um+|uh+|so|now|please|pls|plz|can you|could you|would you|will you|can u|could u|would u|you can|go ahead and|just|kindly|bot|mate|bro|dude|i want you to|id like you to|i want to|i wanna|we want to|we wanna|lets|let us)\b\s*")]
     private static partial Regex LeadingFillerRegex();

@@ -330,17 +330,7 @@ public class MusicQueueService : IHostedService
             return (outcome, song, count);
         });
 
-        switch (result)
-        {
-            case QueueRemoveResult.NotFound:
-                return MusicReply.Fail($"There's no song at position {position} - the queue has {total}.");
-            case QueueRemoveResult.NotYours:
-                return MusicReply.Fail("That's someone else's song - you can only remove your own. (Vote to skip it " +
-                                       "when it comes on.)");
-        }
-
-        RefreshMenu(user.Guild.Id);
-        return MusicReply.Ok($"🗑️ Removed {MusicFormatting.SongLink(removed!)} from the queue.");
+        return Removed(user, result, removed, $"There's no song at position {position} - the queue has {total}.");
     }
 
     /// <summary>Removes one waiting song by its ID (from the "Remove mine" list), if it's still there and theirs.</summary>
@@ -383,7 +373,8 @@ public class MusicQueueService : IHostedService
             case QueueRemoveResult.NotFound:
                 return MusicReply.Fail(notFound);
             case QueueRemoveResult.NotYours:
-                return MusicReply.Fail("That's someone else's song - you can only remove your own.");
+                return MusicReply.Fail("That's someone else's song - you can only remove your own. (Vote to skip it " +
+                                       "when it comes on.)");
         }
 
         RefreshMenu(user.Guild.Id);

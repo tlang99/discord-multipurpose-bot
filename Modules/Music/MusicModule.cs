@@ -148,7 +148,9 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             .WithPlaceholder("Pick a song to take out");
         foreach (var (position, song) in songs.Take(24))
         {
-            pick.AddOption(TextTools.Truncate(song.Title, 100), song.Id.ToString(),
+            // A list choice can't be blank.
+            pick.AddOption(TextTools.Truncate(string.IsNullOrWhiteSpace(song.Title) ? "Unknown track" : song.Title, 100),
+                song.Id.ToString(),
                 $"#{position} in the queue · {MusicFormatting.SongLength(song)}");
         }
 
@@ -160,9 +162,12 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 
     [ComponentInteraction(MusicQueueService.MinePick)]
     public Task MinePickedAsync(string[] picked)
-        => ButtonAsync((user, _) => picked.FirstOrDefault() is { } choice && Guid.TryParse(choice, out var id)
-            ? _queue.RemoveSongAsync(user, id)
-            : _controls.RemoveMineAsync(user), alwaysPrivate: true);
+        => ButtonAsync((user, _) => picked.FirstOrDefault() switch
+        {
+            MusicQueueService.AllMine => _controls.RemoveMineAsync(user),
+            { } choice when Guid.TryParse(choice, out var id) => _queue.RemoveSongAsync(user, id),
+            _ => Task.FromResult(MusicReply.Fail("I couldn't tell which song that was - press Remove mine again.")),
+        }, alwaysPrivate: true);
 
     /// <summary>Runs a command and replies: publicly when it worked (everyone listening should know), privately when
     /// it didn't.</summary>

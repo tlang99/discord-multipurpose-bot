@@ -97,7 +97,8 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
   pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
   **Add song** (a pop-up), **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and
-  **Remove mine** (a private list of your waiting songs: take out one, or all of them). The buttons keep working across restarts. Running `/music-menu` again replaces it.
+  **Remove mine** (a private list of your waiting songs: take out one, or all of them). The buttons keep working
+  across restarts. Running `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
   minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
@@ -340,8 +341,9 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
     channel, or the one they replied to.
   - **Music:** "@bot add mr brightside" (or "queue up…", "put … in the queue") just queues a song, like `/add`;
     "play …" also starts the music, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
-    this song", "remove song 3", "remove mr brightside from the queue", "remove my songs", "start the music", "where's the music menu?" and the rest of
-    the music commands work by asking too, through the same code as the slash commands (so a skip is a vote).
+    this song", "remove song 3", "remove mr brightside from the queue", "remove my songs", "start the music",
+    "where's the music menu?" and the rest of the music commands work by asking too, through the same code as the
+    slash commands (so a skip is a vote).
     "Music session" wording works as well: starting one starts the music, leaving one takes out your songs.
     Plainly worded controls are read with fixed rules, without the model: a clause of the message has to be the
     command itself, so "this song sucks, skip it" skips but "I hate it when people skip songs" doesn't. Looser

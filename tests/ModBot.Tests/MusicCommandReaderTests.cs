@@ -70,6 +70,15 @@ public sealed class MusicCommandReaderTests
         => Assert.Equal(new MusicCommandRequest(MusicCommand.Remove, Title: title), MusicCommandReader.Read(message));
 
     [Theory]
+    [InlineData("remove this song from the queue")] // points at a song, doesn't name one: the model's job
+    [InlineData("take it out of the queue")]
+    [InlineData("remove the current one from the queue")]
+    [InlineData("pull the plug off the queue")]
+    [InlineData("I took the trash out")]
+    public void Doesnt_read_a_title_that_isnt_one(string message)
+        => Assert.Null(MusicCommandReader.Read(message)?.Title);
+
+    [Theory]
     [InlineData("remove my songs from the queue", MusicCommand.RemoveMine)]
     [InlineData("remove me from the queue", MusicCommand.RemoveMine)]
     [InlineData("remove 3 from the queue", MusicCommand.Remove)]

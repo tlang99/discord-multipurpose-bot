@@ -59,9 +59,7 @@ public class OllamaChatService : IChatService
     {
         // Only a local Ollama unloads models (on ollama.com it'd be a call for nothing), and only after it's been idle:
         // used within the keep-alive, it's still loaded.
-        var keptFor = TimeSpan.FromMinutes(_options.KeepAliveMinutes > 0 ? _options.KeepAliveMinutes : 5);
-        if (SearchOptions.IsOllamaCom(_options.OllamaUrl) ||
-            DateTime.UtcNow.Ticks - Interlocked.Read(ref _lastUsed) < (keptFor - TimeSpan.FromSeconds(30)).Ticks)
+        if (SearchOptions.IsOllamaCom(_options.OllamaUrl) || IsLikelyLoaded())
         {
             return;
         }
@@ -70,7 +68,7 @@ public class OllamaChatService : IChatService
         try
         {
             using var slot = await _limiter.AcquireAsync(cancellationToken);
-            if (DateTime.UtcNow.Ticks - Interlocked.Read(ref _lastUsed) < (keptFor - TimeSpan.FromSeconds(30)).Ticks)
+            if (IsLikelyLoaded())
             {
                 return; // a question (or another warm-up) loaded it while this one waited
             }
@@ -89,8 +87,20 @@ public class OllamaChatService : IChatService
         }
     }
 
+    /// <summary>Ollama's own keep-alive, used when Chat:KeepAliveMinutes leaves it to Ollama.</summary>
+    private const int OllamaDefaultKeepAliveMinutes = 5;
+
     /// <summary>Chat:KeepAliveMinutes as Ollama wants it ("30m"), or null to leave Ollama's own default.</summary>
     private string? KeepAlive => _options.KeepAliveMinutes > 0 ? $"{_options.KeepAliveMinutes}m" : null;
+
+    /// <summary>The model answered recently enough that it's still loaded (with half a minute to spare).</summary>
+    private bool IsLikelyLoaded()
+    {
+        var keptFor = TimeSpan.FromMinutes(_options.KeepAliveMinutes > 0
+            ? _options.KeepAliveMinutes
+            : OllamaDefaultKeepAliveMinutes);
+        return DateTime.UtcNow.Ticks - Interlocked.Read(ref _lastUsed) < (keptFor - TimeSpan.FromSeconds(30)).Ticks;
+    }
 
     private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken,
         TimeSpan? timeout = null)

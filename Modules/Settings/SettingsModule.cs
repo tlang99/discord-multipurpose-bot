@@ -126,9 +126,9 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
                 ? "🔁 Whole queue: finished songs go back in, so a lone song repeats. Turn it off with `/loop` " +
                   "(Off)" + await MusicCommandsWhereAsync()
                 : "Off (`/loop` repeats a song or the whole queue)")
-            .AddField("Voice follow-ups",DescribeFollowUps(server.VoiceFollowUpsFromAnyone) +
-                                          " (change with `/settings voice-follow-ups`)")
-            .AddField("LFG pings",$"{pingText}{(server.LfgPingRoleId is null && !server.LfgPingsOff ? " (default)" : "")}")
+            .AddField("Voice follow-ups", DescribeFollowUps(server.VoiceFollowUpsFromAnyone) +
+                " (change with `/settings voice-follow-ups`)")
+            .AddField("LFG pings", $"{pingText}{(server.LfgPingRoleId is null && !server.LfgPingsOff ? " (default)" : "")}")
             .AddField("LFG game", server.LfgGame is { IsEmpty: false } game
                 ? (game.Name.Length > 0 ? $"**{TextTools.Escape(game.Name)}** - " : "no name - ") +
                   $"{TextTools.Count(game.Playlists.Count, "playlist")}, {TextTools.Count(game.Ranks.Count, "rank")} " +
