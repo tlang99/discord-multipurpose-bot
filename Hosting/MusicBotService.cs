@@ -38,7 +38,7 @@ public sealed class MusicBotService(MusicBot music, IOptions<BotOptions> options
 
         try
         {
-            await client.LoginAsync(TokenType.Bot, _options.MusicToken);
+            await client.LoginAsync(TokenType.Bot, _options.MusicToken.Trim()); // env vars often end in a newline
             await client.StartAsync();
         }
         catch (Exception ex)

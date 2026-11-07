@@ -24,6 +24,7 @@ public sealed class ChatActionParserTests : IDisposable
     [InlineData("Play Stay Fly.", "Play Stay Fly.")] // nothing to take out
     [InlineData("I love this, play it again", "I love this, play it again")] // "play" isn't first
     [InlineData("Play!", "Play")] // nothing after it: no space left hanging
+    [InlineData("play-doh song", "play-doh song")] // a hyphen in a word isn't a pause
     public void A_pause_after_play_isnt_a_break(string heard, string read)
         => Assert.Equal(read, ChatActionParser.PauseAfterPlay(heard));
 

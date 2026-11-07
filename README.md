@@ -476,8 +476,8 @@ set BOT_TOKEN=<your-token>          # Windows cmd
 $env:BOT_TOKEN = "<your-token>"     # PowerShell
 ```
 
-Optional: a second bot account just for music, so music and listening for "hey ModBot" can run at once (see
-[voice/README.md](voice/README.md#music)). Set its token the same way, as `Bot:MusicToken` or `MUSIC_BOT_TOKEN`.
+Optional: a second bot account just for music, so music and listening for "hey ModBot" can run at once. Its
+setup is in [voice/README.md](voice/README.md#music).
 
 For faster iteration while developing, also set a test guild so slash commands register instantly instead of
 waiting up to an hour for global propagation:

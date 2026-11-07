@@ -1154,15 +1154,19 @@ public sealed class VoiceListener
 
         try
         {
-            // Down to a share of whatever it was, then back to just that.
+            // Down to a share of whatever it was; back up only if this did turn it down (music that started meanwhile
+            // is left as it is), and only once.
             if (down)
             {
-                session.VolumeBeforeDucking = player.Volume;
+                var before = player.Volume;
+                await player.SetVolumeAsync(before * DuckedVolume);
+                session.VolumeBeforeDucking = before;
             }
-
-            await player.SetVolumeAsync(down
-                ? player.Volume * DuckedVolume
-                : session.VolumeBeforeDucking ?? 1f);
+            else if (session.VolumeBeforeDucking is { } before)
+            {
+                session.VolumeBeforeDucking = null;
+                await player.SetVolumeAsync(before);
+            }
         }
         catch (Exception ex)
         {

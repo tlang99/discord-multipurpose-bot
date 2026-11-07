@@ -23,9 +23,9 @@ misheard) and replies to that instead.
 - **Voice auto-join needs Set Voice Channel Status**, since the status is how people joining later know it's
   listening: without it, the bot doesn't join by itself (`/voice listen` still works, without the status).
 - When it hears its name, it plays a short chime, so you know it caught it (needs **Speak** in the channel; turn it
-  off for every server with `Voice:Chime`). A request you can hear for yourself (the music starting, stopping, skipping,
-  pausing or resuming) is answered with a three-note "done" chime (low, high, low) instead of words, so it doesn't talk over the song; if
-  it couldn't do it, it says why. With `Voice:Chime` off, it says what it did, as before.
+  off for every server with `Voice:Chime`). Asking it to play, skip, stop, pause or resume the music, which you can
+  hear for yourself, is answered with a three-note "done" chime (low, high, low) instead of words, so it doesn't
+  talk over the song; if it couldn't do it, it says why. With `Voice:Chime` off, it says what it did, as before.
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
   for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"), which cuts

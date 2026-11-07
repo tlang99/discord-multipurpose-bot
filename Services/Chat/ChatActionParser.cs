@@ -201,10 +201,11 @@ public partial class ChatActionParser
     }
 
     /// <summary>"Play, stay fly." as "Play stay fly.": punctuation straight after a leading "play" / "put on" /
-    /// "queue" is a pause in speech, not a break in meaning.</summary>
+    /// "queue" is a pause in speech, not a break in meaning. A dash only counts with a space before it, so a word like
+    /// "play-doh" is left alone.</summary>
     public static string PauseAfterPlay(string message) => PauseAfterPlayRegex().Replace(message, "$1 ", 1).TrimEnd();
 
-    [GeneratedRegex(@"^(\W*(?:(?:hey|ok(?:ay)?|please|can\s+you|could\s+you)[\s,]+)*(?:play|put\s+on|queue(?:\s+up)?))\s*[,.:;!\-–]+\s*",
+    [GeneratedRegex(@"^(\W*(?:(?:hey|ok(?:ay)?|please|can\s+you|could\s+you)[\s,]+)*(?:play|put\s+on|queue(?:\s+up)?))(?:\s*[,.:;!]+|\s+[\-–]+)(?:\s+|$)",
         RegexOptions.IgnoreCase)]
     private static partial Regex PauseAfterPlayRegex();
 

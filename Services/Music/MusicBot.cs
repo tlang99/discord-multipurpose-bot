@@ -9,7 +9,7 @@ namespace ModBot.Services.Music;
 /// the Discord Developer Portal, invited to the server) joins voice for music instead, so music and listening can run
 /// at once. Nobody talks to it: commands, the menu and the chatbot all stay on the main bot, which drives it through
 /// Lavalink. Without the token, the main bot plays the music itself, and starting music stops the listening.
-/// Signed in and out by <see cref="Hosting.MusicBotService"/>.
+/// Signed in and out by MusicBotService (in Hosting).
 /// </summary>
 public sealed class MusicBot : IDisposable
 {
@@ -20,7 +20,18 @@ public sealed class MusicBot : IDisposable
     {
         _separate = separate;
         Client = separate ?? main;
+        if (separate is not null)
+        {
+            // Ready means its servers are loaded too: before that, it looks like it's in none of them.
+            separate.Ready += () =>
+            {
+                _ready = true;
+                return Task.CompletedTask;
+            };
+        }
     }
+
+    private volatile bool _ready;
 
     /// <summary>The client Lavalink joins voice with.</summary>
     public DiscordSocketClient Client { get; }
@@ -28,9 +39,10 @@ public sealed class MusicBot : IDisposable
     /// <summary>Music plays from its own account, so it doesn't take the main bot's voice connection.</summary>
     public bool IsSeparate => _separate is not null;
 
-    /// <summary>The music account has signed in (so it knows who it is and which servers it's in). False while it's
-    /// connecting, or if its token was refused.</summary>
-    public bool IsSignedIn => Client.CurrentUser is not null;
+    /// <summary>The music account is connected and has loaded its servers. False while it's signing in or
+    /// reconnecting, or if its token was refused.</summary>
+    public bool IsSignedIn
+        => _ready && Client.ConnectionState == ConnectionState.Connected && Client.CurrentUser is not null;
 
     /// <summary>The music account in <paramref name="guildId"/>, or null if it isn't in that server (or hasn't
     /// signed in).</summary>

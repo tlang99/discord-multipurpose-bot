@@ -547,7 +547,9 @@ public partial class ChatHandler
                     ? await _musicControls.PlayAsync(asker, musicChannel, play.Query)
                     : await _musicControls.AddAsync(asker, musicChannel, play.Query);
                 var where = result.Success && musicChannel.Id != channel.Id ? $" (music's in {musicChannel.Mention})" : "";
-                said.Heard = result.Success; // the song starting, or going in the queue: a chime says so in voice
+                // "Play" (not "add"): the song starting, or coming up next in turns, is what was asked for, so a chime
+                // says so in voice. An add is answered in words (where it went in the queue).
+                said.Heard = result.Success && play.StartPlaying;
                 return ((result.Text ?? "Done.") + where, result.SuppressEmbeds);
             }
 
