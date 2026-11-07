@@ -30,6 +30,36 @@ public class WakeWordTests
         => Assert.Equal("", WakeWord.FindRequest(Modules.Voice.VoiceListener.SpeechHint("ModBot"), Names));
 
     [Fact]
+    public void The_hint_takes_the_servers_own_words_and_an_echo_still_asks_nothing()
+    {
+        var hint = Modules.Voice.VoiceListener.SpeechHint("ModBot",
+            ["The Killers - Mr. Brightside (Official Video)", "Sam", "sam", "", "Call of Duty"]);
+
+        Assert.Contains("The Killers - Mr Brightside, Sam, Call of Duty. Hey ModBot.", hint); // no "(Official…)",
+        Assert.Equal("", WakeWord.FindRequest(hint, Names)); // no full stop mid-title, no repeats, no blanks
+    }
+
+    [Fact]
+    public void The_hint_keeps_only_whole_words_that_fit()
+    {
+        var many = Enumerable.Range(1, 40).Select(i => $"Player {i:00}").ToList();
+        var hint = Modules.Voice.VoiceListener.SpeechHint("ModBot", many);
+
+        Assert.True(hint.Length < Modules.Voice.VoiceListener.SpeechHint("ModBot").Length + 160);
+        Assert.Contains("Player 01", hint);
+        Assert.DoesNotContain("Player 40", hint);
+        Assert.EndsWith("Hey ModBot.", hint);
+    }
+
+    [Theory]
+    [InlineData("Sam", "Sam")]
+    [InlineData("xX_Sam_Xx", "xX Sam Xx")]
+    [InlineData("🎮 Jo 2", "Jo 2")]
+    [InlineData("🎮✨", null)]
+    public void Answers_name_the_asker_as_it_can_be_said(string displayName, string? said)
+        => Assert.Equal(said, Modules.Voice.VoiceListener.SpokenName(displayName));
+
+    [Fact]
     public void A_short_nickname_isnt_a_wake_word()
     {
         // "ok dj, that's enough" is just talk, so a two-letter nickname would go off all the time. The username still
@@ -676,6 +706,17 @@ public class VoiceConversationTests
         Assert.True(done.Length < VoiceAudio.Chime().Length * 2); // but still a quick chime
         Assert.NotEqual(VoiceAudio.ExitChime(), done);
         Assert.Equal(0, done.Length % VoiceAudio.FrameBytes);
+    }
+
+    [Fact]
+    public void The_not_right_now_chime_is_two_notes_unlike_the_others()
+    {
+        var busy = VoiceAudio.BusyChime();
+
+        Assert.Equal(VoiceAudio.Chime().Length, busy.Length); // two notes, like the wake and closing chimes
+        Assert.NotEqual(VoiceAudio.Chime(), busy);
+        Assert.NotEqual(VoiceAudio.ExitChime(), busy);
+        Assert.Equal(0, busy.Length % VoiceAudio.FrameBytes);
     }
 }
 

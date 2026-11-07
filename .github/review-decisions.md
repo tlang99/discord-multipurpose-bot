@@ -13,6 +13,8 @@ Add to this list when the owner turns down a suggestion so it stops coming back.
 - **Answers are spoken only, not posted.** A spoken answer longer than `Voice:MaxSpokenCharacters` is cut, and the
   cut is logged. The full answer isn't posted in chat. (It falls back to chat only when it can't speak.)
 - **The join line's privacy wording stays in full**, on every join, not shortened on later auto-joins.
+- **The closing chime plays at the end of every conversation**, even after a single question. That's by design:
+  don't suggest skipping it, or a setting to turn it off.
 - **Auto-join is opt-in** (its own feature) and needs Set Voice Channel Status.
 - **Anyone may start voice listening**, not just moderators.
 

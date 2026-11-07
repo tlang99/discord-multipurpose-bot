@@ -28,6 +28,12 @@ misheard) and replies to that instead.
   of words, so it doesn't talk over the music. A reminder is also posted in the voice channel's chat (with its time
   and how to cancel it), since nothing else would show it. If it couldn't do it, it says why. Questions (what's
   playing, the queue, a web search, chat) are answered aloud. With `Voice:Chime` off, it says what it did, as before.
+- Asked again too soon (within `Chat:CooldownSeconds` of your last question, or `Voice:FollowUpCooldownSeconds` in a
+  conversation), it plays two low falling notes: "heard you, but not right now". Wait a moment and ask again.
+- To spell things right, speech-to-text is told what to expect: gaming words, the bot's name, and this server's own
+  words (the next songs in the queue, the people in the channel, and its LFG game and playlists).
+- When more than one person has asked it something in the last 30 seconds, a spoken answer starts with the asker's
+  name ("Sam, it's 8 degrees…"), so everyone can tell whose it is.
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
   for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"), which cuts
@@ -43,7 +49,9 @@ misheard) and replies to that instead.
   once it's finished, or when they say "thanks", "goodbye", "that's all" or "stop" (anyone can, by name: "thanks
   ModBot"; even over the bot, or while it's still working on an answer: it stops talking, and answers on their way
   aren't said); then a closing chime (the chime falling) says it's back to waiting for its name, and the
-  conversation is forgotten. Replies skip the chatbot's usual wait between questions (`Chat:CooldownSeconds`),
+  conversation is forgotten. **"Stop" on its own** means "stop talking" while it's talking or a conversation is open,
+  and leaves the music playing; to stop the music then, say "stop the music". With no conversation open, "hey
+  ModBot, stop" goes to the chatbot like any request (and usually stops the music). Replies skip the chatbot's usual wait between questions (`Chat:CooldownSeconds`),
   but each person's are still at least `Voice:FollowUpCooldownSeconds` (5 by default) apart.
 - An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
   history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
@@ -68,8 +76,9 @@ misheard) and replies to that instead.
 
 Discord gives a bot one voice connection per server, and music (Lavalink) needs one to play. Two ways to run it:
 
-- **One bot (the default):** the bot listens only while no music is playing. Starting music stops the listening,
-  and it won't start listening while music plays. With voice auto-join on, it comes back once the music player
+- **One bot (the default):** the bot listens only while no music is playing. Starting music stops the listening
+  (first it says so, where it can speak: "I can't listen while the music's on, so use the music menu…"), and it
+  won't start listening while music plays. With voice auto-join on, it comes back once the music player
   leaves voice (`Music:IdleTimeoutSeconds` after the last song, or straight after `/stop`).
 - **A second bot account for music:** music and listening run at once. The second account only joins voice and
   plays: `/play`, the music menu and "hey ModBot, play …" all stay on the main bot. While the bot reads an answer
