@@ -6,6 +6,7 @@ using Lavalink4NET.Extensions;
 using Lavalink4NET.InactivityTracking.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -16,6 +17,7 @@ using ModBot.Services.Chat;
 using ModBot.Services.ContentModeration;
 using ModBot.Services.Lfg;
 using ModBot.Services.Moderation;
+using ModBot.Services.Music;
 using ModBot.Services.News;
 using ModBot.Services.Search;
 using ModBot.Services.Storage;
@@ -48,6 +50,7 @@ var missingAppSettings = !File.Exists(Path.Combine(builder.Environment.ContentRo
 foreach (var (variable, key) in new[]
 {
     ("BOT_TOKEN", $"{BotOptions.SectionName}:Token"),
+    ("MUSIC_BOT_TOKEN", $"{BotOptions.SectionName}:MusicToken"),
     ("SIGHTENGINE_API_USER", $"{SightengineOptions.SectionName}:ApiUser"),
     ("SIGHTENGINE_API_SECRET", $"{SightengineOptions.SectionName}:ApiSecret"),
     ("LAVALINK_PASSWORD", $"{MusicOptions.SectionName}:LavalinkPassword"),
@@ -110,6 +113,14 @@ builder.Services.AddSingleton(new DiscordSocketConfig
 });
 
 builder.Services.AddSingleton<DiscordSocketClient>();
+
+// Music plays from a second bot account when Bot:MusicToken is set, so it doesn't take the main bot's voice connection
+// (which listening for "hey ModBot" needs). Without one, the main bot plays it. See MusicBot.
+var separateMusicBot = MusicBot.IsSeparateToken(
+    builder.Configuration[$"{BotOptions.SectionName}:MusicToken"], builder.Configuration[$"{BotOptions.SectionName}:Token"]);
+builder.Services.AddSingleton(sp => new MusicBot(sp.GetRequiredService<DiscordSocketClient>(),
+    separateMusicBot ? new DiscordSocketClient(MusicBot.NewClientConfig()) : null));
+builder.Services.AddHostedService<MusicBotService>();
 
 builder.Services.AddSingleton(new InteractionServiceConfig
 {
@@ -176,6 +187,9 @@ builder.Services.AddHttpClient<INewsFeedReader, RssNewsFeedReader>(client =>
 // Music: Lavalink (a separate Java server, see lavalink/README.md) does the streaming; Lavalink4NET talks to it
 // and registers its own hosted services. If Lavalink isn't running, only the music commands fail.
 builder.Services.AddLavalink();
+// Lavalink joins voice through the music account (the main bot, unless there's a separate one).
+builder.Services.Replace(ServiceDescriptor.Singleton<Lavalink4NET.Clients.IDiscordClientWrapper>(sp =>
+    new Lavalink4NET.DiscordNet.DiscordClientWrapper(sp.GetRequiredService<MusicBot>().Client)));
 builder.Services.ConfigureLavalink(options =>
 {
     options.BaseAddress = new Uri(musicOptions.LavalinkUrl);

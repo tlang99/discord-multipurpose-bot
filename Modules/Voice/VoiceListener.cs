@@ -14,6 +14,7 @@ using ModBot.Models;
 using ModBot.Modules.Music;
 using ModBot.Services.Chat;
 using ModBot.Services.Moderation;
+using ModBot.Services.Music;
 using ModBot.Services.Settings;
 using ModBot.Services.Voice;
 
@@ -71,6 +72,8 @@ public sealed class VoiceListener
 
     private static readonly Lazy<byte[]> ExitChimeSound = new(VoiceAudio.ExitChime);
 
+    private static readonly Lazy<byte[]> DoneChimeSound = new(VoiceAudio.DoneChime);
+
     /// <summary>After the bot stops talking, it goes on ignoring what it hears for this long: its own voice can still be
     /// coming back through someone's mic.</summary>
     private static readonly TimeSpan EchoTail = TimeSpan.FromMilliseconds(500);
@@ -88,6 +91,9 @@ public sealed class VoiceListener
     private readonly ChatOptions _chatOptions;
     private readonly VoiceOptions _options;
     private readonly ILogger<VoiceListener> _logger;
+
+    /// <summary>Who plays the music: with its own account, music and listening don't compete for the connection.</summary>
+    private readonly MusicBot _musicBot;
     private readonly ConcurrentDictionary<ulong, Session> _sessions = new();
     private readonly ConcurrentDictionary<ulong, bool> _joining = new();
     private readonly KeyedLock<ulong> _startStop = new();
@@ -109,8 +115,9 @@ public sealed class VoiceListener
 
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, TextToSpeech voiceOut, IAudioService audio,
         Lazy<ChatHandler> chat, IChatService model, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
-        IOptions<VoiceOptions> options, ILogger<VoiceListener> logger)
+        IOptions<VoiceOptions> options, MusicBot musicBot, ILogger<VoiceListener> logger)
     {
+        _musicBot = musicBot;
         _client = client;
         _speech = speech;
         _voiceOut = voiceOut;
@@ -937,7 +944,14 @@ public sealed class VoiceListener
             var answer = await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request, aloud,
                 talking ? conversation.Earlier() : null);
             var answeredIn = timer.Elapsed;
-            if (answer is not null && aloud && conversation.Still(mark))
+            // An action that worked (a song, a reminder, an LFG, a poll): the "done" chime says so, rather than
+            // reading out what chat would show. (Nothing's said, so no conversation opens: the next request takes the
+            // name again.) If the chime can't be played, the answer's said (or posted) as usual instead, so it's
+            // never left unconfirmed.
+            var chimed = answer is { Heard: true } && aloud && _options.Chime && conversation.Still(mark) &&
+                         await PlayAsync(session, _ => Task.FromResult<byte[]?>(DoneChimeSound.Value), speech: false,
+                             couldntPlay: null, wait: true);
+            if (!chimed && answer is not null && aloud && conversation.Still(mark))
             {
                 answered = answer.Text;
                 spoken = await SpeakAsync(session, answer.Text, heardIn, answeredIn, hushes, couldntSay: answer.InChat
@@ -1093,16 +1107,68 @@ public sealed class VoiceListener
         }
 
         session.Saying = text;
-        var played = await PlayAsync(session, async token =>
+        var ducked = false;
+        var played = false;
+        try
         {
-            var timer = Stopwatch.StartNew();
-            var speech = await _voiceOut.SpeakAsync(text, token);
-            _logger.LogInformation("Voice answer in guild {GuildId}: speech-to-text {Heard} ms, answer {Answered} ms, " +
-                                   "text-to-speech {Voiced} ms.", session.Guild.Id, (int)heardIn.TotalMilliseconds,
-                (int)answeredIn.TotalMilliseconds, (int)timer.ElapsedMilliseconds);
-            return speech;
-        }, speech: true, couldntSay, hushed: hushes);
+            played = await PlayAsync(session, async token =>
+            {
+                var timer = Stopwatch.StartNew();
+                var speech = await _voiceOut.SpeakAsync(text, token);
+                _logger.LogInformation("Voice answer in guild {GuildId}: speech-to-text {Heard} ms, answer {Answered} ms, " +
+                                       "text-to-speech {Voiced} ms.", session.Guild.Id, (int)heardIn.TotalMilliseconds,
+                    (int)answeredIn.TotalMilliseconds, (int)timer.ElapsedMilliseconds);
+                // The answer's ready: turn the music down just before it's said.
+                ducked = true;
+                await DuckMusicAsync(session, down: true);
+                return speech;
+            }, speech: true, couldntSay, hushed: hushes);
+        }
+        finally
+        {
+            if (ducked)
+            {
+                await DuckMusicAsync(session, down: false);
+            }
+        }
+
         return played ? text : null;
+    }
+
+    /// <summary>
+    /// With music on its own account (<see cref="MusicBot"/>) playing in the same channel, turns it down while the
+    /// bot says an answer, and back up after. Answers can overlap (one waits on another), so it's counted: the music
+    /// comes back up once the last one's done.
+    /// </summary>
+    private async Task DuckMusicAsync(Session session, bool down)
+    {
+        if (!_musicBot.IsSeparate || !(down ? session.Ducking.Begin() : session.Ducking.End()) ||
+            MusicService.GetPlayer(_audio, session.Guild.Id) is not { } player ||
+            player.VoiceChannelId != session.Channel.Id)
+        {
+            return;
+        }
+
+        try
+        {
+            // Down to a share of whatever it was; back up only if this did turn it down (music that started meanwhile
+            // is left as it is), and only once.
+            if (down)
+            {
+                var before = player.Volume;
+                await player.SetVolumeAsync(MusicDucking.Lowered(before, _options.MusicDuckPercent));
+                session.Ducking.TurnedDown(before, player.Volume); // as the player has it, rounded or not
+            }
+            else if (session.Ducking.ToRestore(player.Volume) is { } before)
+            {
+                await player.SetVolumeAsync(before);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Only a nicety: the answer's said either way.
+            _logger.LogDebug(ex, "Couldn't change the music's volume in guild {GuildId}.", session.Guild.Id);
+        }
     }
 
     /// <summary>Makes a sound and plays it in the channel, without waiting for it (see <see cref="PlayAsync"/>).</summary>
@@ -1157,7 +1223,10 @@ public sealed class VoiceListener
         return played;
     }
 
-    private bool MusicIsPlaying(ulong guildId) => MusicService.GetPlayer(_audio, guildId) is not null;
+    /// <summary>Music has this bot's voice connection: it's playing, and from this account (not its own, see
+    /// <see cref="MusicBot"/>).</summary>
+    private bool MusicIsPlaying(ulong guildId)
+        => !_musicBot.IsSeparate && MusicService.GetPlayer(_audio, guildId) is not null;
 
     private async Task LeaveAsync(SocketVoiceChannel channel)
     {
@@ -1295,6 +1364,9 @@ public sealed class VoiceListener
 
         /// <summary>Counts <see cref="HushAsync"/> calls: an answer asked for before the latest isn't said.</summary>
         public int Hushes => Volatile.Read(ref _hushes);
+
+        /// <summary>Turning the music down while the bot talks over it, and back up after.</summary>
+        public MusicDucking Ducking { get; } = new();
 
         /// <summary>What the bot's saying right now ("" when it isn't), for telling its own voice from someone
         /// talking over it.</summary>

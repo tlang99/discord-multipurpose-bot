@@ -623,6 +623,17 @@ public class VoiceConversationTests
         Assert.NotEqual(VoiceAudio.Chime(), exit);
         Assert.Equal(0, exit.Length % VoiceAudio.FrameBytes);
     }
+
+    [Fact]
+    public void The_done_chime_matches_the_others_but_sounds_different()
+    {
+        var done = VoiceAudio.DoneChime();
+
+        Assert.True(done.Length > VoiceAudio.Chime().Length); // three notes to the others' two
+        Assert.True(done.Length < VoiceAudio.Chime().Length * 2); // but still a quick chime
+        Assert.NotEqual(VoiceAudio.ExitChime(), done);
+        Assert.Equal(0, done.Length % VoiceAudio.FrameBytes);
+    }
 }
 
 /// <summary>A goodbye said over the bot only counts by name: speech-to-text makes "Thank you." up out of its echo.</summary>

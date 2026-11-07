@@ -16,6 +16,28 @@ public sealed class ChatActionParserTests : IDisposable
         => new(chat, new ReminderService(_temp.Store, new FakeGuildSettings(), Options.Create(new ReminderOptions()),
             NullLogger<ReminderService>.Instance), NullLogger<ChatActionParser>.Instance);
 
+    [Theory]
+    [InlineData("Play, stay fly.", "Play stay fly.")] // a pause after "play", written down as a comma
+    [InlineData("play - mr brightside", "play mr brightside")]
+    [InlineData("Can you play, Hotel California?", "Can you play Hotel California?")]
+    [InlineData("Put on... some lofi", "Put on some lofi")]
+    [InlineData("Play Stay Fly.", "Play Stay Fly.")] // nothing to take out
+    [InlineData("I love this, play it again", "I love this, play it again")] // "play" isn't first
+    [InlineData("Play!", "Play")] // nothing after it: no space left hanging
+    [InlineData("play-doh song", "play-doh song")] // a hyphen in a word isn't a pause
+    public void A_pause_after_play_isnt_a_break(string heard, string read)
+        => Assert.Equal(read, ChatActionParser.PauseAfterPlay(heard));
+
+    [Fact]
+    public async Task The_model_is_asked_without_the_pause()
+    {
+        var chat = new FakeChat("""{"action":"none"}""");
+
+        await Parser(chat).ParseAsync("Play, stay fly.");
+
+        Assert.Equal("Message: Play stay fly.", chat.LastMessage);
+    }
+
     [Fact]
     public async Task Plain_music_controls_dont_ask_the_model()
     {
