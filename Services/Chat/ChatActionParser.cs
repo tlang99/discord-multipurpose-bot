@@ -11,8 +11,8 @@ namespace ModBot.Services.Chat;
 /// <summary>Something a chat message asked the bot to do.</summary>
 public abstract record ChatAction;
 
-/// <param name="StartPlaying">False for "add X to the queue": queue it without starting the music.</param>
-public record PlayMusicAction(string Query, bool StartPlaying = true) : ChatAction;
+/// <summary>Play or add a song: either way it joins the queue, and the music starts if it isn't playing.</summary>
+public record PlayMusicAction(string Query) : ChatAction;
 
 /// <param name="Players">Total squad size including the person asking, 2-6.</param>
 public record CreateLfgAction(int Players, LfgDetails Details) : ChatAction;
@@ -295,11 +295,9 @@ public partial class ChatActionParser
 
     private async Task<ChatAction> ReadSongAsync(string message, CancellationToken cancellationToken)
     {
-        // "Add X" / "queue X" builds up the queue; "play X" also starts the music if it isn't playing.
-        var start = !AddOnlyRegex().IsMatch(message);
         if (YouTubeLinkRegex().Match(message) is { Success: true } link)
         {
-            return new PlayMusicAction(link.Value, start);
+            return new PlayMusicAction(link.Value);
         }
 
         try
@@ -309,7 +307,7 @@ public partial class ChatActionParser
             var query = json.RootElement.GetProperty("query").GetString()?.Trim();
             if (!string.IsNullOrEmpty(query))
             {
-                return new PlayMusicAction(query.Length > 200 ? query[..200] : query, start);
+                return new PlayMusicAction(query.Length > 200 ? query[..200] : query);
             }
         }
         catch (Exception ex) when (ex is ChatServiceException or JsonException or KeyNotFoundException or InvalidOperationException)
@@ -322,10 +320,4 @@ public partial class ChatActionParser
 
     [GeneratedRegex(@"https?://(?:[\w-]+\.)*(?:youtube\.com|youtu\.be)/\S+", RegexOptions.IgnoreCase)]
     private static partial Regex YouTubeLinkRegex();
-
-    /// <summary>Asking to add or queue a song, rather than play it: "add X", "can you queue up X", "put X in the
-    /// queue".</summary>
-    [GeneratedRegex(@"^\W*(?:(?:hey|yo|ok|okay|please|pls|can you|could you|would you|will you)\s+)*(?:add|queue)\b|\b(?:to|in|on|into) the queue\b",
-        RegexOptions.IgnoreCase)]
-    private static partial Regex AddOnlyRegex();
 }

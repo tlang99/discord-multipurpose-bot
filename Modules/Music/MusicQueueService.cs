@@ -52,6 +52,14 @@ public class MusicQueueService : IHostedService
     /// <summary>Skip votes for the song playing in each server. In memory: they only matter for that one song.</summary>
     private readonly ConcurrentDictionary<ulong, SkipVotes> _votes = new();
 
+    /// <summary>The newest thing worth knowing (who added a song, a saved song that had to be skipped), shown on the
+    /// menu rather than posted, so the music channel stays quiet. In memory: it's only news until the next one.</summary>
+    private readonly ConcurrentDictionary<ulong, string> _menuNotes = new();
+
+    /// <summary>When the music last left voice in each server (/stop, the idle timeout, a disconnect), shown on the
+    /// menu while nothing's playing, so a bot that left on its own doesn't look like it crashed.</summary>
+    private readonly ConcurrentDictionary<ulong, DateTimeOffset> _leftVoiceAt = new();
+
     private const string MenuTitle = "🎶 Music queue";
 
     /// <summary>Keeping the menu at the bottom: wait for this long a quiet spell before reposting it...</summary>
@@ -101,10 +109,8 @@ public class MusicQueueService : IHostedService
 
     public Task<MusicQueueState> GetAsync(ulong guildId) => _store.GetAsync(guildId);
 
-    /// <summary>Adds songs for <paramref name="user"/>. With <paramref name="startIfIdle"/> (/play, "play X"), the
-    /// music also starts if nothing's playing and they're in a voice channel; otherwise the songs just wait.</summary>
-    public async Task<MusicReply> AddAsync(SocketGuildUser user, string query, ITextChannel fallbackChannel,
-        bool startIfIdle)
+    /// <summary>Adds songs for <paramref name="user"/>. The music also starts if nothing's playing and they're in a voice channel; otherwise the songs just wait.</summary>
+    public async Task<MusicReply> AddAsync(SocketGuildUser user, string query, ITextChannel fallbackChannel)
     {
         if (MusicService.CheckQuery(query) is { } badQuery)
         {
@@ -181,7 +187,7 @@ public class MusicQueueService : IHostedService
 
         var player = _music.GetPlayer(user.Guild.Id);
         var idle = player?.CurrentItem is null;
-        if (startIfIdle && idle && user.VoiceChannel is not null)
+        if (idle && user.VoiceChannel is not null)
         {
             var start = await StartAsync(user, fallbackChannel);
             text.Append(start.Success ? $". {start.Text}" : $". (Couldn't start the music: {start.Text})");
@@ -197,6 +203,7 @@ public class MusicQueueService : IHostedService
             }
         }
 
+        _menuNotes[user.Guild.Id] = $"➕ <@{user.Id}> added {what}.";
         RefreshMenu(user.Guild.Id);
         return MusicReply.Ok(text.ToString());
     }
@@ -535,6 +542,8 @@ public class MusicQueueService : IHostedService
             {
                 _logger.LogWarning("Dropping a saved song that can't be read: '{Title}' in guild {GuildId}.",
                     song.Title, player.GuildId);
+                _menuNotes[player.GuildId] = $"⚠️ Skipped {MusicFormatting.SongLink(song)} (<@{song.PickerId}>'s " +
+                                             "pick): its saved copy couldn't be read. Add it again to hear it.";
                 continue;
             }
 
@@ -585,6 +594,7 @@ public class MusicQueueService : IHostedService
     private Task OnPlayerClosedAsync(ulong guildId)
     {
         _votes.TryRemove(guildId, out _);
+        _leftVoiceAt[guildId] = DateTimeOffset.UtcNow;
         RefreshMenu(guildId);
         return Task.CompletedTask;
     }
@@ -662,13 +672,21 @@ public class MusicQueueService : IHostedService
         }
         else
         {
-            embed.WithDescription("Not playing right now. Add songs any time - they wait here. When you're ready, " +
-                                  "join a voice channel and press **Play**.");
+            var left = _leftVoiceAt.TryGetValue(state.GuildId, out var at)
+                ? $" (left voice <t:{at.ToUnixTimeSeconds()}:R>)"
+                : "";
+            embed.WithDescription($"Not playing right now{left}. Add songs any time - they wait here. When you're " +
+                                  "ready, join a voice channel and press **Play**.");
+        }
+
+        if (_menuNotes.TryGetValue(state.GuildId, out var note))
+        {
+            embed.AddField("Latest", note.Length <= 1024 ? note : note[..1023] + "…"); // a field's limit
         }
 
         var order = MusicQueueRules.Order(state);
         embed.AddField("Up next", order.Count == 0
-            ? "*Nothing yet - press **Add song**, use `/add`, or ask me.*"
+            ? "*Nothing yet - press **Add song**, use `/play`, or ask me.*"
             : FitField(order.Take(10).Select((s, i) => $"`{i + 1}.` {MusicFormatting.SongLink(s)} - <@{s.PickerId}>"),
                 order.Count, "\n"));
 

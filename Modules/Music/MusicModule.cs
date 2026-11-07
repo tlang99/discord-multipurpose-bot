@@ -42,10 +42,10 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
         [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] [MaxLength(200)] string query)
         => RunAsync((user, channel) => _controls.PlayAsync(user, channel, query), slow: true);
 
-    [SlashCommand("add", "Adds a song or playlist to the queue without starting the music.")]
+    [SlashCommand("add", "Adds a song or playlist to the queue, and starts the music if it isn't playing.")]
     public Task AddAsync(
         [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] [MaxLength(200)] string query)
-        => RunAsync((user, channel) => _controls.AddAsync(user, channel, query), slow: true);
+        => RunAsync((user, channel) => _controls.PlayAsync(user, channel, query), slow: true);
 
     [SlashCommand("start", "Starts playing the queue in your voice channel.")]
     public Task StartAsync() => RunAsync((user, channel) => _controls.StartAsync(user, channel), slow: true);

@@ -36,11 +36,7 @@ public class MusicControls
     /// <summary>Adds a song (or playlist) to the queue, and starts the music if nothing's playing and the person is
     /// in a voice channel.</summary>
     public Task<MusicReply> PlayAsync(SocketGuildUser user, ITextChannel channel, string query)
-        => _queue.AddAsync(user, query, channel, startIfIdle: true);
-
-    /// <summary>Adds a song to the queue without starting anything: for building it up first.</summary>
-    public Task<MusicReply> AddAsync(SocketGuildUser user, ITextChannel channel, string query)
-        => _queue.AddAsync(user, query, channel, startIfIdle: false);
+        => _queue.AddAsync(user, query, channel);
 
     public Task<MusicReply> StartAsync(SocketGuildUser user, ITextChannel channel) => _queue.StartAsync(user, channel);
 
