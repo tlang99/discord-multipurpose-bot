@@ -1,3 +1,5 @@
+using ModBot.Configuration;
+
 namespace ModBot.Services.Voice;
 
 /// <summary>The audio formats involved: what Discord gives the bot, and what speech-to-text (Whisper) wants.</summary>
@@ -39,7 +41,7 @@ public static class VoiceAudio
 
     /// <summary>The loudest the chimes get unless set otherwise (Voice:ChimeVolumePercent), as a share of full volume:
     /// soft, so they don't make anyone jump.</summary>
-    public const double ChimeVolume = 0.2;
+    public const double ChimeVolume = VoiceOptions.DefaultChimeVolumePercent / 100.0;
 
     /// <summary>
     /// The "I heard my name" chime, in Discord's format (48 kHz stereo 16-bit): two soft marimba-like notes rising (G5,
@@ -74,7 +76,7 @@ public static class VoiceAudio
 
     /// <summary>The share of full volume spoken replies are played at unless set otherwise
     /// (Voice:SpeechVolumePercent): a little under, so they don't clip or blare.</summary>
-    public const double SpeechVolume = 0.8;
+    public const double SpeechVolume = VoiceOptions.DefaultSpeechVolumePercent / 100.0;
 
     /// <summary>A volume setting, a percentage of full volume (0-100), as the share the chimes and
     /// <see cref="FromSpeech"/> take.</summary>

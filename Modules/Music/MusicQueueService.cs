@@ -109,7 +109,8 @@ public class MusicQueueService : IHostedService
 
     public Task<MusicQueueState> GetAsync(ulong guildId) => _store.GetAsync(guildId);
 
-    /// <summary>Adds songs for <paramref name="user"/>. The music also starts if nothing's playing and they're in a voice channel; otherwise the songs just wait.</summary>
+    /// <summary>Adds songs for <paramref name="user"/>. The music also starts if nothing's playing and they're in a
+    /// voice channel; otherwise the songs just wait.</summary>
     public async Task<MusicReply> AddAsync(SocketGuildUser user, string query, ITextChannel fallbackChannel)
     {
         if (MusicService.CheckQuery(query) is { } badQuery)
@@ -157,12 +158,12 @@ public class MusicQueueService : IHostedService
             PickerName = user.DisplayName,
         }).ToList();
 
-        var (result, added, position, wait, personFull) = await _store.MutateAsync(user.Guild.Id, state =>
+        var (result, added, position, wait, queueFull) = await _store.MutateAsync(user.Guild.Id, state =>
         {
             var outcome = MusicQueueRules.Add(state, songs, user.Id, SongsPerPerson, MaxQueueLength, out var taken);
             var first = taken.Count > 0 ? taken[0].Id : Guid.Empty;
             return (outcome, taken, MusicQueueRules.PositionOf(state, first), MusicQueueRules.WaitBefore(state, first),
-                state.Songs.Count(s => s.PickerId == user.Id) >= SongsPerPerson);
+                state.Songs.Count >= MaxQueueLength);
         });
 
         switch (result)
@@ -175,7 +176,8 @@ public class MusicQueueService : IHostedService
         }
 
         // A playlist that didn't all fit says so plainly, so nobody thinks the rest are coming.
-        var cap = personFull ? $"each person can have {SongsPerPerson} waiting" : $"the queue holds {MaxQueueLength}";
+        // A full queue is checked first: when both limits are hit at once, it's the one that stopped the rest.
+        var cap = queueFull ? $"the queue holds {MaxQueueLength}" : $"each person can have {SongsPerPerson} waiting";
         var what = lookup.IsPlaylist
             ? (added.Count < songs.Count
                   ? $"the first **{added.Count}** of {songs.Count} songs from **{TextTools.Escape(playlistName!)}** " +
@@ -557,6 +559,7 @@ public class MusicQueueService : IHostedService
     private Task OnTrackStartedAsync(MusicPlayer player, ITrackQueueItem item)
     {
         _votes.TryRemove(player.GuildId, out _);
+        _leftVoiceAt.TryRemove(player.GuildId, out _); // playing again: the last "left voice" time is old news
         RefreshMenu(player.GuildId);
         return Task.CompletedTask;
     }
