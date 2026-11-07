@@ -42,14 +42,14 @@ public sealed class SpeechToText : IDisposable
     /// <summary>A stretch at least this likely to hold no speech is noise, whatever words came out of it.</summary>
     private const float NoSpeechCutoff = 0.6f;
 
-    /// <summary>What was said, or "" if nothing could be made out.</summary>
+    /// <summary>What was said ("" if nothing could be made out), and how sure speech-to-text was of it.</summary>
     /// <param name="samples">16 kHz mono (see <see cref="VoiceAudio.ToWhisperSamples"/>).</param>
     /// <param name="expect">Words it should expect, so they come out spelled right (the bot's name, game terms).</param>
-    public async Task<string> TranscribeAsync(float[] samples, string expect, CancellationToken cancellationToken)
+    public async Task<Transcript> TranscribeAsync(float[] samples, string expect, CancellationToken cancellationToken)
     {
         if (Problem is not null)
         {
-            return "";
+            return Transcript.None;
         }
 
         await _one.WaitAsync(cancellationToken);
@@ -67,15 +67,17 @@ public sealed class SpeechToText : IDisposable
                     _logger.LogWarning(ex, "Couldn't load the speech-to-text model at {Path}.", _modelPath);
                     _loadProblem = $"The speech-to-text model at {_options.ModelPath} wouldn't load: run " +
                                    "voice/setup.ps1 again (it replaces a damaged download).";
-                    return "";
+                    return Transcript.None;
                 }
             }
             await using var processor = _factory.CreateBuilder()
                 .WithLanguage("en")
                 .WithPrompt(expect)
+                .WithProbabilities() // so each stretch says how sure it was (logged for wake words)
                 .Build();
 
             var parts = new List<string>();
+            float confidence = 1, noSpeech = 0;
             await foreach (var segment in processor.ProcessAsync(samples, cancellationToken))
             {
                 // Speech-to-text makes words up out of noise (a breath, a keyboard, a game in the background): often
@@ -89,9 +91,11 @@ public sealed class SpeechToText : IDisposable
                 }
 
                 parts.Add(segment.Text.Trim());
+                confidence = Math.Min(confidence, segment.Probability);
+                noSpeech = Math.Max(noSpeech, segment.NoSpeechProbability);
             }
 
-            return string.Join(' ', parts).Trim();
+            return parts.Count == 0 ? Transcript.None : new(string.Join(' ', parts).Trim(), confidence, noSpeech);
         }
         finally
         {
@@ -140,4 +144,12 @@ public sealed class SpeechToText : IDisposable
         _factory?.Dispose();
         _one.Dispose();
     }
+}
+
+/// <summary>What speech-to-text heard.</summary>
+/// <param name="Confidence">How sure it was of the words, 0-1 (its least sure stretch).</param>
+/// <param name="NoSpeech">How likely it thought the audio held no speech at all, 0-1 (its most doubtful stretch).</param>
+public sealed record Transcript(string Text, float Confidence, float NoSpeech)
+{
+    public static readonly Transcript None = new("", 0, 1);
 }

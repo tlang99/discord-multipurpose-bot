@@ -19,6 +19,7 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     private readonly List<ChatTurn> _turns = [];
     private volatile bool _open;
     private int _busy;
+    private int _epoch;
     private DateTimeOffset _lastActivity;
     private string _lastSaid = "";
 
@@ -33,28 +34,52 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
         }
     }
 
-    /// <summary>A request is being answered: the conversation stays open at least until <see cref="Answered"/>.</summary>
-    public void Asking(DateTimeOffset now)
+    /// <summary>Open, or a request is being answered that may open one: a goodbye counts now.</summary>
+    public bool IsActive
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _open || _busy > 0;
+            }
+        }
+    }
+
+    /// <summary>A request is being answered: the conversation stays open at least until <see cref="Answered"/>.
+    /// Returns a mark to pass to <see cref="Answered"/> and <see cref="Still"/>.</summary>
+    public int Asking(DateTimeOffset now)
     {
         lock (_lock)
         {
             _busy++;
             _lastActivity = now;
+            return _epoch;
+        }
+    }
+
+    /// <summary>Whether the conversation a request was asked in (<paramref name="mark"/>, from <see cref="Asking"/>)
+    /// hasn't been ended since: after a goodbye, answers still on their way are dropped.</summary>
+    public bool Still(int mark)
+    {
+        lock (_lock)
+        {
+            return mark == _epoch;
         }
     }
 
     /// <summary>The request from <see cref="Asking"/> is done. With an answer, the conversation opens (or carries on),
     /// and remembers it: <paramref name="said"/> is what was read aloud, for telling the bot's own voice from a
     /// reply.</summary>
-    public void Answered(DateTimeOffset now, string? asker, string? request, string? answer, string? said)
+    public void Answered(int mark, DateTimeOffset now, string? asker, string? request, string? answer, string? said)
     {
         lock (_lock)
         {
             _busy = Math.Max(0, _busy - 1);
             _lastActivity = now;
-            if (asker is null || request is null || answer is null)
+            if (asker is null || request is null || answer is null || mark != _epoch)
             {
-                return; // nothing was answered: an open conversation carries on, but none starts
+                return; // nothing was answered (or it was said goodbye to since): no conversation starts
             }
 
             _open = true;
@@ -105,18 +130,22 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
         }
     }
 
-    /// <summary>Ends it now ("thanks"); true if one was open.</summary>
+    /// <summary>Ends it now ("thanks"), along with any answers still on their way; true if it was active (see
+    /// <see cref="IsActive"/>).</summary>
     public bool End()
     {
         lock (_lock)
         {
-            return EndLocked();
+            var active = _open || _busy > 0;
+            EndLocked();
+            return active;
         }
     }
 
     private bool EndLocked()
     {
         var was = _open;
+        _epoch++;
         _open = false;
         _turns.Clear();
         _lastSaid = "";
@@ -146,23 +175,43 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
         return words.Count(saidWords.Contains) >= words.Count * 0.7;
     }
 
-    /// <summary>"Thanks", "that's all", "never mind": the whole of what was said is a goodbye, so the conversation
-    /// ends instead of the bot answering it. The bot's name at the end ("thanks, ModBot") doesn't count.</summary>
-    public static bool IsGoodbye(string request, IEnumerable<string> names)
+    /// <summary>"Thanks", "that's all", "goodbye", "stop": the whole of what was said is a goodbye, so the conversation
+    /// ends (and the bot stops talking) instead of answering it. The bot's name in it ("thanks, ModBot", "ModBot,
+    /// bye") doesn't count.</summary>
+    public static bool IsGoodbye(string request, IEnumerable<string> names) => IsGoodbye(request, names, out _);
+
+    /// <inheritdoc cref="IsGoodbye(string, IEnumerable{string})"/>
+    /// <param name="named">Whether the bot's name was in it: over the bot, only a goodbye said to it by name counts,
+    /// since speech-to-text turns unclear audio into "Thank you." all too often.</param>
+    public static bool IsGoodbye(string request, IEnumerable<string> names, out bool named)
     {
+        named = false;
         var words = request.Replace('’', '\'').Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ToList();
         var squashed = names.Select(WakeWord.Squash).Where(n => n.Length > 0).ToHashSet();
-        // The name, split over up to three words ("Mod Bot").
-        for (var take = Math.Min(3, words.Count); take > 0; take--)
+        // The name, wherever it is, split over up to three words ("Mod Bot").
+        for (var at = 0; at < words.Count; at++)
         {
-            if (squashed.Contains(string.Concat(words.TakeLast(take).Select(WakeWord.Squash))))
+            for (var take = Math.Min(3, words.Count - at); take > 0; take--)
             {
-                words.RemoveRange(words.Count - take, take);
-                break;
+                if (squashed.Contains(string.Concat(words.Skip(at).Take(take).Select(WakeWord.Squash))))
+                {
+                    words.RemoveRange(at, take);
+                    named = true;
+                    at--;
+                    break;
+                }
             }
         }
 
         return GoodbyeRegex().IsMatch(string.Join(' ', words));
+    }
+
+    /// <summary>Whether <paramref name="heard"/> is in what the bot's saying (<paramref name="saying"/>): heard over the
+    /// bot, "bye!" is likely its own "bye!" coming back through a mic, not someone saying it.</summary>
+    public static bool Repeats(string saying, string heard)
+    {
+        var words = string.Concat(Words(heard));
+        return words.Length > 0 && string.Concat(Words(saying)).Contains(words, StringComparison.Ordinal);
     }
 
     private static List<string> Words(string text)
@@ -171,8 +220,9 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     [GeneratedRegex(
         @"^\W*(?:(?:ok(?:ay)?|alright|all\s+right|cool|great|perfect|awesome|nice|got\s+it|sounds\s+good|no|nope)[\s,.!]+)*" +
         @"(?:thanks?(?:\s+you)?|thank\s+you|thx|cheers|that'?s\s+(?:all|it|everything)|never\s*mind|forget\s+it|" +
-        @"(?:we'?re|i'?m)\s+(?:done|good|all\s+set)|nothing(?:\s+else)?|bye|goodbye|see\s+ya|later)" +
-        @"(?:[\s,]+(?:so\s+much|a\s+lot|man|dude|bro|buddy|for\s+(?:that|the\s+help)|that'?s\s+(?:all|it)))*\W*$",
+        @"(?:we'?re|i'?m)\s+(?:done|good|all\s+set)|nothing(?:\s+else)?|good\s*bye|bye(?:[\s-]+bye)?|see\s+ya|later|" +
+        @"stop(?:\s+talking)?|shut\s+up|be\s+quiet|(?:that'?s\s+)?enough)" +
+        @"(?:[\s,.!]+(?:so\s+much|a\s+lot|man|dude|bro|buddy|for\s+(?:that|the\s+help)|that'?s\s+(?:all|it)|bye|goodbye))*\W*$",
         RegexOptions.IgnoreCase)]
     private static partial Regex GoodbyeRegex();
 
