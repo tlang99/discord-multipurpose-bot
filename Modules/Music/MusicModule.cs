@@ -189,11 +189,11 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             return;
         }
 
-        // A list holds 25 choices; the history keeps 20.
+        // A list holds 25 choices, more than the history keeps (MusicQueueRules.HistoryLength).
         var pick = new SelectMenuBuilder()
             .WithCustomId(MusicQueueService.HistoryPick)
             .WithPlaceholder("Pick a song to add again");
-        foreach (var song in history.Take(25))
+        foreach (var song in history)
         {
             var title = string.IsNullOrWhiteSpace(song.Title) ? "Unknown track" : song.Title; // a choice can't be blank
             pick.AddOption(TextTools.Truncate(title, 100),

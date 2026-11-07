@@ -145,13 +145,18 @@ public static partial class MusicCommandReader
     ];
 
     /// <summary>The music control <paramref name="message"/> plainly asks for, or null.</summary>
+    /// <summary>What can end a message, or come before a trailing "thanks".</summary>
+    private static readonly char[] EndPunctuation = ['.', ',', '!', '?', ' '];
+
     public static MusicCommandRequest? Read(string message)
     {
         // Lowercase, no apostrophes ("what's" -> "whats"), and clauses split at punctuation and "and"/"then".
         var text = message.ToLowerInvariant().Replace("'", "").Replace("’", "");
 
-        // A time has a colon in it ("skip to 1:30"), which splitting into clauses would cut in two: checked whole.
-        if (SeekRegex().Match(Trim(text.TrimEnd('.', '!', '?'))) is { Success: true } seek &&
+        // A time has a colon in it ("skip to 1:30"), which splitting into clauses would cut in two: checked whole,
+        // without the punctuation around fillers ("skip to 1:30, thanks" is "skip to 1:30" once "thanks" is off).
+        var whole = Trim(text.TrimEnd(EndPunctuation)).TrimEnd(EndPunctuation);
+        if (SeekRegex().Match(whole) is { Success: true } seek &&
             TextTools.ParseTime(seek.Groups["t"].Value) is { } at)
         {
             return new MusicCommandRequest(MusicCommand.Seek, At: at);

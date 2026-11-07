@@ -147,8 +147,7 @@ public class MusicControls
             }
         }
 
-        var was = (await _queue.GetAsync(user.Guild.Id)).VolumePercent;
-        var now = MusicQueueRules.ClampVolume(to ?? was + by);
+        var (was, now) = await _queue.SetVolumeAsync(user.Guild.Id, saved => to ?? saved + by, player);
         if (now == was)
         {
             return MusicReply.Fail(by > 0 && now == MusicQueueRules.MaxVolume
@@ -158,7 +157,6 @@ public class MusicControls
                     : $"The volume's already {now}%.");
         }
 
-        await _queue.SetVolumeAsync(user.Guild.Id, now, player);
         return MusicReply.Ok($"{(now < was ? "🔉" : "🔊")} {user.Mention} set the volume to **{now}%**.",
             suppressEmbeds: false) with { Announce = false };
     }

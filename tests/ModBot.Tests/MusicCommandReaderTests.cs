@@ -133,6 +133,7 @@ public sealed class MusicCommandReaderTests
     [InlineData("hey can you jump ahead to 2:05 please", 125)]
     [InlineData("play it from 45", 45)]
     [InlineData("seek to 1:02:03.", 3723)]
+    [InlineData("skip to 1:30, thanks", 90)]
     public void Reads_a_jump_in_the_song_with_its_time(string message, int seconds)
         => Assert.Equal(new MusicCommandRequest(MusicCommand.Seek, At: TimeSpan.FromSeconds(seconds)),
             MusicCommandReader.Read(message));

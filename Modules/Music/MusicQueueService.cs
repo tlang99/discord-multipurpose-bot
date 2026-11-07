@@ -770,15 +770,28 @@ public class MusicQueueService : IHostedService
     }
 
     /// <summary>Sets the server's volume (kept for next time) and, if the music's playing, the player's.</summary>
-    public async Task SetVolumeAsync(ulong guildId, int percent, MusicPlayer? player)
+    /// <param name="change">The new volume from the saved one: worked out as it's saved, so two presses of 🔊 at once
+    /// make two steps, not one. Returns what it was and what it is now (the same if nothing changed).</param>
+    public async Task<(int Was, int Now)> SetVolumeAsync(ulong guildId, Func<int, int> change, MusicPlayer? player)
     {
-        await _store.MutateAsync(guildId, state => state.VolumePercent = percent);
-        if (player is not null)
+        var (was, now) = await _store.MutateAsync(guildId, state =>
         {
-            await player.SetVolumeAsync(percent / 100f);
+            var before = state.VolumePercent;
+            state.VolumePercent = MusicQueueRules.ClampVolume(change(before));
+            return (before, state.VolumePercent);
+        });
+
+        if (now != was)
+        {
+            if (player is not null)
+            {
+                await player.SetVolumeAsync(now / 100f);
+            }
+
+            RefreshMenu(guildId);
         }
 
-        RefreshMenu(guildId);
+        return (was, now);
     }
 
     /// <summary>Goes back to the song before this one: it plays now, and the song that was playing goes back at the
@@ -801,14 +814,17 @@ public class MusicQueueService : IHostedService
             }
 
             await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.GoBack(state, current));
-            // A looped song would otherwise carry on looping the one gone back to.
+            // A looped song would otherwise carry on looping the one gone back to, so the loop's turned off, and the
+            // reply says so. (Only the song loop: looping the queue is saved separately and stays as it is.)
+            var wasLooping = player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track;
             player.RepeatMode = Lavalink4NET.Players.Queued.TrackRepeatMode.None;
             await player.PlayAsync(new QueueTrackItem(track, MusicQueueRules.Copy(previous)), enqueue: false);
             return MusicReply.Ok($"⏮️ {user.Mention} went back to {MusicFormatting.SongLink(previous)}." +
                                  (current is null
                                      ? ""
                                      : $" {MusicFormatting.SongLink(current)} is back in the queue, next of " +
-                                       $"<@{current.PickerId}>'s songs."));
+                                       $"<@{current.PickerId}>'s songs.") +
+                                 (wasLooping ? " (Looping the song is off now.)" : ""));
         });
 
         RefreshMenu(user.Guild.Id);
