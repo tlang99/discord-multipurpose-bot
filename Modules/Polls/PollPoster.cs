@@ -134,6 +134,9 @@ public partial class PollPoster
 
     /// <summary>Ends the bot's poll in <paramref name="message"/> early, if <paramref name="user"/> asked for it or is
     /// a moderator. Returns what happened, for the person.</summary>
+    /// <summary>How a reply that ended a poll starts (and one that didn't, doesn't).</summary>
+    public const string EndedText = "Ended the poll.";
+
     public async Task<string> EndAsync(IGuildUser user, IUserMessage message)
     {
         var bot = await user.Guild.GetCurrentUserAsync();
@@ -163,7 +166,7 @@ public partial class PollPoster
         }
 
         // Discord posts the results under the poll itself.
-        return $"Ended the poll. [Results]({MessageTools.Link(user.GuildId, message.Channel.Id, message.Id)})";
+        return $"{EndedText} [Results]({MessageTools.Link(user.GuildId, message.Channel.Id, message.Id)})";
     }
 
     /// <summary>

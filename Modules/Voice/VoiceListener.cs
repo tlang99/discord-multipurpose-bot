@@ -946,8 +946,9 @@ public sealed class VoiceListener
             var answeredIn = timer.Elapsed;
             if (answer is { Heard: true } && aloud && _options.Chime && conversation.Still(mark))
             {
-                // The music starting, stopping or skipping says it worked: a chime confirms it, without talking over
-                // the song. (Nothing's said, so no conversation opens: the next request takes the name again.)
+                // An action that worked (a song, a reminder, an LFG, a poll): the "done" chime says so, rather than
+                // reading out what chat would show. (Nothing's said, so no conversation opens: the next request takes
+                // the name again.)
                 await PlayAsync(session, _ => Task.FromResult<byte[]?>(DoneChimeSound.Value), speech: false,
                     couldntPlay: null, wait: true);
             }

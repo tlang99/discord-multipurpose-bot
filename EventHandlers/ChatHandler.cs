@@ -127,7 +127,7 @@ public partial class ChatHandler
 
     /// <summary>An answer to a spoken request: what to say (after the word filter), and whether it's in chat already
     /// (a web search's embed, or an answer that couldn't be said aloud).</summary>
-    /// <param name="Heard">Done, and audibly so (see <see cref="ChatRequest.Heard"/>): confirm with a chime, not
+    /// <param name="Heard">An action that worked (see <see cref="ChatRequest.Heard"/>): confirm with a chime, not
     /// the words.</param>
     public sealed record VoiceAnswer(string Text, bool InChat, bool Heard = false);
 
@@ -253,8 +253,9 @@ public partial class ChatHandler
         /// <summary>Whether the answer was posted in chat too.</summary>
         public bool AnswerInChat { get; set; }
 
-        /// <summary>Done, and the people in voice can hear that it was (the music started, stopped or skipped):
-        /// said in voice, a confirmation chime answers it instead of reading the reply out.</summary>
+        /// <summary>An action that worked (a song played, a reminder set, an LFG or poll posted): said in voice, the
+        /// "done" chime answers it instead of reading the reply out. Not set for chat, or for what was asked about
+        /// (what's playing, the queue, a search), whose answer is the point.</summary>
         public bool Heard { get; set; }
     }
 
@@ -434,11 +435,12 @@ public partial class ChatHandler
                         var music = await RunMusicControlAsync(action, (SocketGuildUser)asker, channel,
                             request.Spoken);
                         (text, suppressEmbeds, embed) = (music.Text ?? "", music.SuppressEmbeds, music.Embed);
-                        // Said in voice, a change you can hear is its own answer: a chime, not the words.
+                        // Done is answered with a chime in voice; what was asked about (what's on, the queue, the menu)
+                        // is said.
                         request.Heard = music.Success && action is MusicControlAction
                         {
-                            Request.Command: MusicCommand.Skip or MusicCommand.Stop or MusicCommand.Pause or
-                            MusicCommand.Resume or MusicCommand.Start,
+                            Request.Command: not (MusicCommand.NowPlaying or MusicCommand.ShowQueue or
+                            MusicCommand.ShowMenu),
                         };
                     }
                     else if (action is WebSearchAction search)
@@ -547,9 +549,7 @@ public partial class ChatHandler
                     ? await _musicControls.PlayAsync(asker, musicChannel, play.Query)
                     : await _musicControls.AddAsync(asker, musicChannel, play.Query);
                 var where = result.Success && musicChannel.Id != channel.Id ? $" (music's in {musicChannel.Mention})" : "";
-                // "Play" (not "add"): the song starting, or coming up next in turns, is what was asked for, so a chime
-                // says so in voice. An add is answered in words (where it went in the queue).
-                said.Heard = result.Success && play.StartPlaying;
+                said.Heard = result.Success; // done: a chime says so in voice
                 return ((result.Text ?? "Done.") + where, result.SuppressEmbeds);
             }
 
@@ -569,6 +569,7 @@ public partial class ChatHandler
 
                 // No note from chat: free text on a public card is left to /lfg.
                 var result = await _lfgPoster.PostAsync(asker, lfgChannel, lfg.Players, lfg.Details, note: null);
+                said.Heard = result.Success;
                 return result.Success && result.CardLink is not null
                     ? ($"{result.Message}\n[Go to your LFG in #{lfgChannel.Name}]({result.CardLink}) - use `/lfg` " +
                        "if you want to add a note.", true)
@@ -586,6 +587,7 @@ public partial class ChatHandler
                 var result = await _reminders.CreateAtAsync(guild.Id, channel.Id, asker.Id, reminder.DueAt,
                     reminder.Text, applyWordFilter: !TextFilter.IsExempt(asker),
                     sourceMessageId: requestMessageId);
+                said.Heard = result.Success;
                 return (result.Message, false);
             }
 
@@ -599,7 +601,9 @@ public partial class ChatHandler
                 }
 
                 // The poll is the answer; only a problem gets a reply of its own.
-                return (await _polls.PostReplyAsync(asker, channel, draft, request, poll.FromModel) ?? "", false);
+                var problem = await _polls.PostReplyAsync(asker, channel, draft, request, poll.FromModel);
+                said.Heard = problem is null;
+                return (problem ?? "", false);
             }
 
             case UnclearPollAction:
@@ -607,9 +611,13 @@ public partial class ChatHandler
                         "should we play? ranked, casual or zombies\", or use `/poll`.", false);
 
             case EndPollAction end:
+            {
                 // The reply's own target, which is there even when Discord doesn't attach the message itself.
-                return (await _polls.EndRequestedAsync(asker, channel, request?.Reference?.MessageId.ToNullable(),
-                    end.SaidMine), true);
+                var ended = await _polls.EndRequestedAsync(asker, channel, request?.Reference?.MessageId.ToNullable(),
+                    end.SaidMine);
+                said.Heard = ended.StartsWith(PollPoster.EndedText, StringComparison.Ordinal);
+                return (ended, true);
+            }
 
             case UnclearSongAction:
                 return ("I couldn't tell which song you want - try \"play <song name>\", or use `/play`.", false);
