@@ -747,6 +747,29 @@ public partial class ChatHandler
                 return await _musicControls.PlayNextAsync(asker, request.Position ?? 0);
             case MusicCommand.ShuffleMine:
                 return await _musicControls.ShuffleMineAsync(asker);
+            case MusicCommand.VolumeDown:
+                return await _musicControls.VolumeAsync(asker, by: -MusicControls.VolumeStep);
+            case MusicCommand.VolumeUp:
+                return await _musicControls.VolumeAsync(asker, by: MusicControls.VolumeStep);
+            case MusicCommand.SetVolume:
+                return await _musicControls.VolumeAsync(asker, to: request.Volume);
+            case MusicCommand.Seek:
+                return await _musicControls.SeekAsync(asker, request.At ?? TimeSpan.Zero);
+            case MusicCommand.Restart:
+                return await _musicControls.SeekAsync(asker, TimeSpan.Zero);
+            case MusicCommand.Previous:
+                return await _musicControls.BackAsync(asker);
+            case MusicCommand.ShowHistory:
+                return await _musicControls.HistoryAsync(asker);
+
+            case MusicCommand.PlayAgain:
+            {
+                // Like any add: "Now playing" goes where music does, wherever the request was made.
+                var music = await _serverSettings.MusicChannelAsync(guild);
+                return music.Or(channel) is { } musicChannel
+                    ? await _musicControls.AgainAsync(asker, musicChannel)
+                    : MusicReply.Fail(music.Missing("Music goes"));
+            }
             case MusicCommand.ClearQueue:
                 return await _musicControls.ClearQueueAsync(asker);
 

@@ -4,6 +4,27 @@ namespace ModBot.Common;
 
 public static class TextTools
 {
+    /// <summary>A point in a song as people write it: "1:30", "1:02:03", or plain seconds ("90"). Null if it isn't
+    /// one (or is past 12 hours, longer than any song).</summary>
+    public static TimeSpan? ParseTime(string? text)
+    {
+        var parts = (text ?? "").Trim().Split(':');
+        if (parts.Length > 3 || parts.Any(p => p.Length is 0 or > 5 || !p.All(char.IsAsciiDigit)))
+        {
+            return null;
+        }
+
+        // Every part after the first is under 60 ("1:75" isn't a time).
+        var numbers = parts.Select(int.Parse).ToArray();
+        if (numbers.Skip(1).Any(n => n >= 60))
+        {
+            return null;
+        }
+
+        var seconds = numbers.Aggregate(0L, (total, n) => total * 60 + n);
+        return seconds <= 12 * 3600 ? TimeSpan.FromSeconds(seconds) : null;
+    }
+
     /// <summary>Letters and digits only, lower case: "Mod-Bot," is "modbot", "Mr. Brightside" is "mrbrightside".
     /// For matching what's said or typed loosely.</summary>
     public static string Squash(string text)

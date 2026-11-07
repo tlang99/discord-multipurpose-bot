@@ -101,6 +101,49 @@ public sealed class MusicCommandReaderTests
         => Assert.Equal(new MusicCommandRequest(MusicCommand.PlayNext, position), MusicCommandReader.Read(message));
 
     [Theory]
+    [InlineData("turn it down", MusicCommand.VolumeDown)]
+    [InlineData("can you make it quieter please", MusicCommand.VolumeDown)]
+    [InlineData("its too loud", MusicCommand.VolumeDown)]
+    [InlineData("turn the music up a bit", MusicCommand.VolumeUp)]
+    [InlineData("louder", MusicCommand.VolumeUp)]
+    [InlineData("restart this song", MusicCommand.Restart)]
+    [InlineData("start the song over", MusicCommand.Restart)]
+    [InlineData("go back to the start", MusicCommand.Restart)]
+    [InlineData("go back", MusicCommand.Previous)]
+    [InlineData("play the previous song", MusicCommand.Previous)]
+    [InlineData("play that again", MusicCommand.PlayAgain)]
+    [InlineData("queue the last song again", MusicCommand.PlayAgain)]
+    [InlineData("what was that song?", MusicCommand.ShowHistory)]
+    [InlineData("show me the recently played songs", MusicCommand.ShowHistory)]
+    [InlineData("play again", MusicCommand.Resume)] // still unpausing, as before
+    [InlineData("turn the music off", MusicCommand.Stop)] // still a stop, not a volume
+    public void Reads_volume_going_back_and_history(string message, MusicCommand expected)
+        => Assert.Equal(expected, MusicCommandReader.Read(message)?.Command);
+
+    [Theory]
+    [InlineData("volume 50", 50)]
+    [InlineData("set the volume to 70%", 70)]
+    [InlineData("volume 0", 0)]
+    public void Reads_a_volume_to_set(string message, int volume)
+        => Assert.Equal(new MusicCommandRequest(MusicCommand.SetVolume, Volume: volume),
+            MusicCommandReader.Read(message));
+
+    [Theory]
+    [InlineData("skip to 1:30", 90)]
+    [InlineData("hey can you jump ahead to 2:05 please", 125)]
+    [InlineData("play it from 45", 45)]
+    [InlineData("seek to 1:02:03.", 3723)]
+    public void Reads_a_jump_in_the_song_with_its_time(string message, int seconds)
+        => Assert.Equal(new MusicCommandRequest(MusicCommand.Seek, At: TimeSpan.FromSeconds(seconds)),
+            MusicCommandReader.Read(message));
+
+    [Theory]
+    [InlineData("skip 2")] // no "to": not a jump
+    [InlineData("volume 99999999999")]
+    public void Not_a_jump_or_a_volume(string message)
+        => Assert.False(MusicCommandReader.Read(message) is { Command: MusicCommand.Seek or MusicCommand.SetVolume });
+
+    [Theory]
     [InlineData("play 99999999999 next")]
     [InlineData("remove 99999999999999999999")]
     public void A_number_too_big_for_a_place_is_passed_over(string message)

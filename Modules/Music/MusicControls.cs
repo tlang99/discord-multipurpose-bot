@@ -129,6 +129,102 @@ public class MusicControls
         return await LoopAsync(user, next); // which redraws the menu, button and all
     }
 
+    /// <summary>How much the menu's 🔉 🔊 buttons and "turn it down" / "up" change the volume by.</summary>
+    public const int VolumeStep = 10;
+
+    /// <summary>Sets the volume to <paramref name="to"/> percent, or changes it by <paramref name="by"/>. Kept for the
+    /// server between sessions. While the music plays, it's for the people listening (like pause); with nothing
+    /// playing, it's just a setting for next time, so anyone may.</summary>
+    public async Task<MusicReply> VolumeAsync(SocketGuildUser user, int? to = null, int by = 0)
+    {
+        MusicPlayer? player = null;
+        if (_music.GetPlayer(user.Guild.Id) is not null)
+        {
+            (player, var error) = GetControllable(user);
+            if (player is null)
+            {
+                return MusicReply.Fail(error);
+            }
+        }
+
+        var was = (await _queue.GetAsync(user.Guild.Id)).VolumePercent;
+        var now = MusicQueueRules.ClampVolume(to ?? was + by);
+        if (now == was)
+        {
+            return MusicReply.Fail(by > 0 && now == MusicQueueRules.MaxVolume
+                ? $"It's already as loud as it goes ({now}%)."
+                : by < 0 && now == 0
+                    ? "It's already silent (0%)."
+                    : $"The volume's already {now}%.");
+        }
+
+        await _queue.SetVolumeAsync(user.Guild.Id, now, player);
+        return MusicReply.Ok($"{(now < was ? "🔉" : "🔊")} {user.Mention} set the volume to **{now}%**.",
+            suppressEmbeds: false) with { Announce = false };
+    }
+
+    /// <summary>Jumps to <paramref name="to"/> in the song that's playing (zero restarts it).</summary>
+    public async Task<MusicReply> SeekAsync(SocketGuildUser user, TimeSpan to)
+    {
+        var (player, error) = GetControllable(user);
+        if (player is null)
+        {
+            return MusicReply.Fail(error);
+        }
+
+        if (player.CurrentItem?.Track is not { } track)
+        {
+            return MusicReply.Fail("Nothing's playing right now.");
+        }
+
+        if (track.IsLiveStream || !track.IsSeekable)
+        {
+            return MusicReply.Fail("This one's a live stream (or can't be jumped around in), so there's nowhere to " +
+                                   "go.");
+        }
+
+        if (to >= track.Duration)
+        {
+            return MusicReply.Fail($"That's past the end - {MusicFormatting.TrackLink(track)} is " +
+                                   $"{MusicFormatting.Length(track)} long.");
+        }
+
+        await player.SeekAsync(to);
+        return MusicReply.Ok(to == TimeSpan.Zero
+            ? $"⏪ {user.Mention} restarted {MusicFormatting.TrackLink(track)}."
+            : $"⏩ {user.Mention} jumped to {MusicFormatting.Duration(to)} in {MusicFormatting.TrackLink(track)}.",
+            suppressEmbeds: false);
+    }
+
+    /// <summary>Goes back to the song before this one (see <see cref="MusicQueueService.BackAsync"/>).</summary>
+    public async Task<MusicReply> BackAsync(SocketGuildUser user)
+    {
+        var (player, error) = GetControllable(user);
+        return player is null ? MusicReply.Fail(error) : await _queue.BackAsync(user, player);
+    }
+
+    /// <summary>"Play that again": the newest song in the history, or the one picked from the History list.</summary>
+    public Task<MusicReply> AgainAsync(SocketGuildUser user, ITextChannel channel, Guid? songId = null)
+        => _queue.AgainAsync(user, channel, songId);
+
+    /// <summary>The recently played songs, newest first, as a list to read.</summary>
+    public async Task<MusicReply> HistoryAsync(SocketGuildUser user)
+    {
+        var history = await _queue.HistoryAsync(user.Guild.Id);
+        if (history.Count == 0)
+        {
+            return MusicReply.Fail("Nothing's been played yet.");
+        }
+
+        var lines = history.Take(10).Select((s, i) => $"`{i + 1}.` {MusicFormatting.SongLink(s)} - <@{s.PickerId}>");
+        return new(true, null, new EmbedBuilder()
+            .WithColor(Colors.Music)
+            .WithTitle("Recently played")
+            .WithDescription(string.Join('\n', lines))
+            .WithFooter("Newest first · \"play that again\" adds the newest, or pick one from the menu's History")
+            .Build());
+    }
+
     public Task<MusicReply> PlayNextAsync(SocketGuildUser user, int position) => _queue.PlayNextAsync(user, position);
 
     public Task<MusicReply> ShuffleMineAsync(SocketGuildUser user) => _queue.ShuffleMineAsync(user);

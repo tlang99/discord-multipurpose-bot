@@ -25,6 +25,13 @@ public class MusicQueueState
 
     /// <summary>Finished songs go back in the queue (for their picker) rather than being used up.</summary>
     public bool LoopQueue { get; set; }
+
+    /// <summary>How loud the music plays, as a percentage (100 = as the song is). Kept between sessions.</summary>
+    public int VolumePercent { get; set; } = 100;
+
+    /// <summary>The songs played most recently, newest first (the one playing now, if any, is first), for "play that
+    /// again", going back, and the menu's History list.</summary>
+    public List<QueuedSong> History { get; set; } = [];
 }
 
 public class QueuedSong

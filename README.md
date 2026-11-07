@@ -99,13 +99,23 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   once. Someone deafened can't vote on skipping or stopping (they can't hear it), and doesn't count toward the votes.
 - **Your own order:** `/playnext` makes one of your songs the next of yours to play, and `/shuffle-mine` shuffles
   yours. Only your own songs move, so nobody else's turn comes any later.
+- **Volume:** `/volume 0-150` (100 is the song as it is), the menu's 🔉 🔊 buttons (10 at a time), or "turn it
+  down" / "louder" / "volume 50". It's kept for the server between sessions, and the menu shows it when it isn't
+  100. The dip while ModBot talks over the music is taken from whatever it's set to.
+- **History:** the last 20 songs played are kept. The menu's **History** button lists them privately to add one
+  again for yourself; "play that again" (or `/playagain`) adds the newest, and "what was that song?" (or
+  `/history`) lists them.
+- **Seek and go back:** `/seek 1:30` (or "skip to 1:30") jumps within the song, `/restart` (or "restart this
+  song") starts it over, and `/previous` (the menu's **Back**, or "go back") plays the song before this one. The
+  song that was playing goes back at the front of its picker's songs, so nothing's lost, and going back doesn't use
+  up anyone's turn. Like pause, these are for anyone in the bot's voice channel, or a moderator.
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
   pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
   **Add song** (a pop-up that works like `/play`: it also starts the music if nothing's playing and you're in voice),
-  **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing), then **Loop** (off, this song, or
-  the whole queue: each press moves to the next, and the menu says what's looping) and **Remove mine** (a private
-  list of your waiting songs: take out one, or all of them). The buttons keep working across restarts. Running
-  `/music-menu` again replaces it.
+  **Play** (or **Back**, **Vote skip**, **Pause**/**Resume** and **Stop** while playing), then **Loop** (off, this
+  song, or the whole queue: each press moves to the next, and the menu says what's looping), 🔉 🔊 (volume),
+  **History** and **Remove mine** (a private list of your waiting songs: take out one, or all of them). The buttons
+  keep working across restarts. Running `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
   minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
@@ -121,7 +131,8 @@ Commands:
 - `/skip` (a vote), `/pause`, `/resume`, `/stop` (leaves voice; the queue's kept; a vote with 3+ in voice),
   `/nowplaying`, `/queue [page]`.
 - `/remove position` (your own songs; moderators: anyone's), `/remove-mine`, `/clearqueue` (moderators),
-  `/playnext position` and `/shuffle-mine` (your own songs),
+  `/playnext position` and `/shuffle-mine` (your own songs), `/volume percent`, `/seek time`, `/restart`,
+  `/previous`, `/history`, `/playagain`,
   `/loop off|song|queue` (looping the queue puts finished songs back in for their picker; a skip still moves on;
   it's saved, so it stays on until it's turned off, and `/stop` says so).
 
@@ -354,8 +365,9 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
   - **Music:** "@bot play mr brightside" (or "add…", "queue up…", "put … in the queue") adds a song and starts the
     music if it isn't playing, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
     this song", "remove song 3", "remove mr brightside from the queue", "remove my songs", "play song 3 next",
-    "shuffle my songs", "start the music", "where's the music menu?" and the rest of the music commands work by
-    asking too, through the same code as the slash commands (so a skip is a vote).
+    "shuffle my songs", "turn it down", "skip to 1:30", "go back", "play that again", "what was that song?",
+    "start the music", "where's the music menu?" and the rest of the music commands work by asking too, through
+    the same code as the slash commands (so a skip is a vote).
     "Music session" wording works as well: starting one starts the music, leaving one takes out your songs.
     Plainly worded controls are read with fixed rules, without the model: a clause of the message has to be the
     command itself, so "this song sucks, skip it" skips but "I hate it when people skip songs" doesn't. Looser

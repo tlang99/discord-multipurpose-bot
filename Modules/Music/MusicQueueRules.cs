@@ -47,11 +47,7 @@ public static class MusicQueueRules
 
         added = songs.Take(room).ToList();
         state.Songs.AddRange(added);
-        if (!state.Participants.Contains(pickerId))
-        {
-            state.Participants.Add(pickerId);
-        }
-
+        Join(state, pickerId);
         return QueueAddResult.Added;
     }
 
@@ -79,19 +75,66 @@ public static class MusicQueueRules
     /// <summary>Puts a song that just finished back at the end of its picker's songs (for looping the queue).</summary>
     public static void Requeue(MusicQueueState state, QueuedSong song)
     {
-        state.Songs.Add(new QueuedSong
+        state.Songs.Add(Copy(song));
+        Join(state, song.PickerId);
+    }
+
+    /// <summary>Puts a song that was cut off (by going back to the one before) at the front of its picker's songs, so
+    /// it plays on their next turn and nothing is lost. It can take them one over their cap: it was already theirs.
+    /// </summary>
+    public static void PutBackFirst(MusicQueueState state, QueuedSong song)
+    {
+        InsertFirstOfTheirs(state, Copy(song));
+        Join(state, song.PickerId);
+    }
+
+    /// <summary>How many played songs are remembered for History, "play that again" and going back.</summary>
+    public const int HistoryLength = 20;
+
+    /// <summary>Notes that <paramref name="song"/> has started playing: it goes first in the history (an earlier play
+    /// of the same song moves up rather than showing twice), which keeps the newest <see cref="HistoryLength"/>.
+    /// </summary>
+    public static void RecordPlayed(MusicQueueState state, QueuedSong song)
+    {
+        state.History.RemoveAll(s => s.Track == song.Track);
+        state.History.Insert(0, Copy(song));
+        if (state.History.Count > HistoryLength)
         {
-            Track = song.Track,
-            Title = song.Title,
-            Uri = song.Uri,
-            Duration = song.Duration,
-            IsLiveStream = song.IsLiveStream,
-            PickerId = song.PickerId,
-            PickerName = song.PickerName,
-        });
-        if (!state.Participants.Contains(song.PickerId))
+            state.History.RemoveRange(HistoryLength, state.History.Count - HistoryLength);
+        }
+    }
+
+    /// <summary>The loudest the music can be set, as a percentage: past it, songs distort.</summary>
+    public const int MaxVolume = 150;
+
+    /// <summary>A volume someone asked for, kept between silent and <see cref="MaxVolume"/>.</summary>
+    public static int ClampVolume(int percent) => Math.Clamp(percent, 0, MaxVolume);
+
+    /// <summary>A new copy of <paramref name="song"/> (a new ID), for <paramref name="pickerId"/> if given, else its
+    /// own picker: the same song, queued again.</summary>
+    public static QueuedSong Copy(QueuedSong song, ulong? pickerId = null, string? pickerName = null) => new()
+    {
+        Track = song.Track,
+        Title = song.Title,
+        Uri = song.Uri,
+        Duration = song.Duration,
+        IsLiveStream = song.IsLiveStream,
+        PickerId = pickerId ?? song.PickerId,
+        PickerName = pickerName ?? song.PickerName,
+    };
+
+    /// <summary>Puts <paramref name="song"/> before the rest of its picker's songs: the one they play next.</summary>
+    private static void InsertFirstOfTheirs(MusicQueueState state, QueuedSong song)
+    {
+        var first = state.Songs.FindIndex(s => s.PickerId == song.PickerId);
+        state.Songs.Insert(first < 0 ? state.Songs.Count : first, song);
+    }
+
+    private static void Join(MusicQueueState state, ulong pickerId)
+    {
+        if (!state.Participants.Contains(pickerId))
         {
-            state.Participants.Add(song.PickerId);
+            state.Participants.Add(pickerId);
         }
     }
 
@@ -119,8 +162,7 @@ public static class MusicQueueRules
         {
             var moving = song!;
             state.Songs.Remove(moving);
-            var firstOfTheirs = state.Songs.FindIndex(s => s.PickerId == userId);
-            state.Songs.Insert(firstOfTheirs < 0 ? state.Songs.Count : firstOfTheirs, moving);
+            InsertFirstOfTheirs(state, moving);
         }
 
         return result;

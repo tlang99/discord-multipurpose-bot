@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ModBot.Common;
 
 namespace ModBot.Services.Chat;
 
@@ -31,11 +32,32 @@ public enum MusicCommand
 
     /// <summary>Shuffle the person's own waiting songs.</summary>
     ShuffleMine,
+
+    /// <summary>Turn the music down a step, or up a step, or to Volume.</summary>
+    VolumeDown,
+    VolumeUp,
+    SetVolume,
+
+    /// <summary>Jump to At in the song that's playing; Restart jumps to the start.</summary>
+    Seek,
+    Restart,
+
+    /// <summary>Go back to the song before this one.</summary>
+    Previous,
+
+    /// <summary>Add the song played most recently to the queue again.</summary>
+    PlayAgain,
+
+    /// <summary>Show the songs played lately ("what was that song?").</summary>
+    ShowHistory,
 }
 
 /// <param name="Position">For remove and play next: the song's place in the queue.</param>
 /// <param name="Title">For remove: words from the song's title, instead of its place.</param>
-public record MusicCommandRequest(MusicCommand Command, int? Position = null, string? Title = null);
+/// <param name="Volume">For set volume: the percentage.</param>
+/// <param name="At">For seek: where in the song.</param>
+public record MusicCommandRequest(MusicCommand Command, int? Position = null, string? Title = null, int? Volume = null,
+    TimeSpan? At = null);
 
 /// <summary>
 /// Spots plainly worded music controls in a chat message ("skip this", "pause", "show the queue", "start the music")
@@ -65,6 +87,24 @@ public static partial class MusicCommandReader
             m => new(MusicCommand.PlayNext, Number(m))),
         (Rx(@"(shuffle|mix up|randomi[sz]e)( all)? my (songs|picks|tracks|stuff)( in the queue)?"),
             _ => new(MusicCommand.ShuffleMine)),
+
+        // Volume. "Turn the music off" is a stop, below; these only go down, up, or to a number.
+        (Rx(@"(turn|crank|bring)( it| this| that| the music| the volume| the song)? down( a (bit|little|notch))?|(turn|crank|bring) down( the)? (music|volume|song)|(make it |a (bit|little) )?quieter|volume down|lower( the)? (volume|music)|(its|thats) too loud"),
+            _ => new(MusicCommand.VolumeDown)),
+        (Rx(@"(turn|crank|bring)( it| this| that| the music| the volume| the song)? up( a (bit|little|notch))?|(turn|crank|bring) up( the)? (music|volume|song)|(make it |a (bit|little) )?louder|volume up|raise( the)? (volume|music)|(its|thats|i cant hear it,?) too quiet"),
+            _ => new(MusicCommand.VolumeUp)),
+        (Rx(@"(set |put |turn )?(the )?(music |song )?volume (to |at )?(?<n>\d+)( ?%| percent)?"),
+            m => new(MusicCommand.SetVolume, Volume: Number(m))),
+
+        // Before resume ("play again" there means unpause): these are the song played before, or once more.
+        (Rx(@"(restart|replay)( this| the| current| that)?( song| track| one)?|start (this|the|that)( song| track| one)? (over|again|from the (start|beginning|top))|play (this|it|that)( song| one)? from the (start|beginning|top)|(go )?back to the (start|beginning)( of (this|the) song)?"),
+            _ => new(MusicCommand.Restart)),
+        (Rx(@"(go|skip) back( a song| one| to the (last|previous) (song|one|track))?|(play )?(the )?previous( song| track| one)?|back to the (last|previous) (song|one|track)"),
+            _ => new(MusicCommand.Previous)),
+        (Rx(@"(play|queue|add) (that|this|it)( song| track| one)? again|(play|queue|add)( the)? (last|previous) (song|track|one) again|one more time|again please"),
+            _ => new(MusicCommand.PlayAgain)),
+        (Rx(@"(what|which) (was|were) (that|the last|the previous|the) (song|track|one|songs)( called| before| just now)?|(show|list|see|view)( me| us)?( the)? (history|song history|recent songs|recently played( songs)?|last (few )?songs)|whats? (been|was) (played|playing)( (lately|before|earlier))?|what did (we|you) (just )?(play|listen to)|recently played"),
+            _ => new(MusicCommand.ShowHistory)),
 
         (Rx(@"(vote )?skip( to the next one| to the next song)?( (this|it|that|the|current))?( (song|track|one|tune))?|vote to skip( (this|it|that))?( (song|track|one))?|next( (song|track|one))?|play the next (song|track|one)"),
             _ => new(MusicCommand.Skip)),
@@ -109,6 +149,14 @@ public static partial class MusicCommandReader
     {
         // Lowercase, no apostrophes ("what's" -> "whats"), and clauses split at punctuation and "and"/"then".
         var text = message.ToLowerInvariant().Replace("'", "").Replace("’", "");
+
+        // A time has a colon in it ("skip to 1:30"), which splitting into clauses would cut in two: checked whole.
+        if (SeekRegex().Match(Trim(text.TrimEnd('.', '!', '?'))) is { Success: true } seek &&
+            TextTools.ParseTime(seek.Groups["t"].Value) is { } at)
+        {
+            return new MusicCommandRequest(MusicCommand.Seek, At: at);
+        }
+
         foreach (var rawClause in ClauseSplitRegex().Split(text))
         {
             var clause = Trim(rawClause);
@@ -123,7 +171,7 @@ public static partial class MusicCommandReader
                 {
                     var request = read(match);
                     // "Remove this song from the queue" names no song: that's for the model to work out.
-                    if (request.Position is <= 0 or > 1000 ||
+                    if (request.Position is <= 0 or > 1000 || request.Volume is < 0 or > 1000 ||
                         request.Title is { } title && NoTitleRegex().IsMatch(title))
                     {
                         continue;
@@ -154,9 +202,9 @@ public static partial class MusicCommandReader
         return clause;
     }
 
-    /// <summary>The song number a rule matched ("n"), or 0 if it's too big to be one ("play 99999999999 next"), which
-    /// Read then passes over like any place that isn't in the queue.</summary>
-    private static int Number(Match match) => int.TryParse(match.Groups["n"].Value, out var n) ? n : 0;
+    /// <summary>The number a rule matched ("n"), or -1 if it's too big to be one ("play 99999999999 next"), which
+    /// Read then passes over like any place that isn't in the queue (or volume no one could mean).</summary>
+    private static int Number(Match match) => int.TryParse(match.Groups["n"].Value, out var n) ? n : -1;
 
     private static Regex Rx(string pattern)
         => new($"^(?:{pattern})$", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, TimeSpan.FromMilliseconds(100));
@@ -176,4 +224,9 @@ public static partial class MusicCommandReader
 
     [GeneratedRegex(@"\s*\b(?:please|pls|plz|for me|for us|now|thanks|thank you|thx|ty|already|real quick|quick|rn|right now|mate|bro|dude)$")]
     private static partial Regex TrailingFillerRegex();
+
+    /// <summary>"Skip to 1:30", "jump ahead to 2:05", "play it from 45": a time ("t") in the song that's playing.
+    /// Needs "to" or "from", so "skip 2" isn't a jump.</summary>
+    [GeneratedRegex(@"^(?:seek|skip|jump|go|fast forward|rewind|scrub)(?: ahead| forward| back)? to (?:the )?#?(?<t>\d{1,5}(?::\d{1,2}){0,2})(?: in (?:this|the) (?:song|track))?$|^(?:start|play)(?: it| this| that| the song)? (?:from|at) (?<t>\d{1,5}(?::\d{1,2}){0,2})$", RegexOptions.ExplicitCapture)]
+    private static partial Regex SeekRegex();
 }

@@ -34,6 +34,13 @@ public class MusicQueueService : IHostedService
     public const string ResumeButton = ButtonPrefix + ":resume";
     public const string StopButton = ButtonPrefix + ":stop";
     public const string LoopButton = ButtonPrefix + ":loop";
+    public const string VolumeDownButton = ButtonPrefix + ":vol-down";
+    public const string VolumeUpButton = ButtonPrefix + ":vol-up";
+    public const string BackButton = ButtonPrefix + ":back";
+    public const string HistoryButton = ButtonPrefix + ":history";
+
+    /// <summary>The History list's select menu: picking a song adds it again.</summary>
+    public const string HistoryPick = ButtonPrefix + ":history-pick";
     public const string MineButton = ButtonPrefix + ":mine";
 
     /// <summary>The private list "Remove mine" opens: one of your songs, or all of them.</summary>
@@ -168,6 +175,43 @@ public class MusicQueueService : IHostedService
             PickerName = user.DisplayName,
         }).ToList();
 
+        return await QueueSongsAsync(user, songs, lookup.IsPlaylist ? playlistName : null, filtered, fallbackChannel);
+    }
+
+    /// <summary>Adds a song from the server's history for <paramref name="user"/>, as if they'd asked for it: "play
+    /// that again" (the newest) or one picked from the History list (by <paramref name="songId"/>).</summary>
+    public async Task<MusicReply> AgainAsync(SocketGuildUser user, ITextChannel fallbackChannel, Guid? songId = null)
+    {
+        var history = (await _store.GetAsync(user.Guild.Id)).History;
+        if ((songId is { } id ? history.FirstOrDefault(s => s.Id == id) : history.FirstOrDefault()) is not { } song)
+        {
+            return MusicReply.Fail(history.Count == 0
+                ? "Nothing's been played yet, so there's nothing to play again."
+                : "That song isn't in the history any more.");
+        }
+
+        // As when it was first added, its title follows the word filter for whoever adds it now.
+        if (TextFilter.AppliesToBotPost(user) &&
+            TextFilter.FindViolation(song.Title, await _settings.GetAsync(user.Guild.Id)) is not null)
+        {
+            return MusicReply.Fail("That song's title breaks this server's word filter, so it can't go in the queue.");
+        }
+
+        return await QueueSongsAsync(user, [MusicQueueRules.Copy(song, user.Id, user.DisplayName)], null, 0,
+            fallbackChannel);
+    }
+
+    /// <summary>The music's recent history, newest first, for the History list.</summary>
+    public async Task<IReadOnlyList<QueuedSong>> HistoryAsync(ulong guildId)
+        => (await _store.GetAsync(guildId)).History;
+
+    /// <summary>Puts <paramref name="songs"/> in the queue for <paramref name="user"/> (as many as fit their cap), says
+    /// where they landed, and starts the music if nothing's playing and they're in voice.</summary>
+    /// <param name="playlistName">The playlist they came from, or null for a single song.</param>
+    /// <param name="filtered">How many of the playlist were left out for breaking the word filter.</param>
+    private async Task<MusicReply> QueueSongsAsync(SocketGuildUser user, List<QueuedSong> songs, string? playlistName,
+        int filtered, ITextChannel fallbackChannel)
+    {
         var (result, added, position, wait, limit) = await _store.MutateAsync(user.Guild.Id, state =>
         {
             // Read before the add: which limit a playlist that doesn't all fit was stopped by.
@@ -191,11 +235,11 @@ public class MusicQueueService : IHostedService
         var cap = limit == QueueAddResult.QueueFull
             ? $"the queue holds {MaxQueueLength}"
             : $"each person can have {SongsPerPerson} waiting";
-        var what = lookup.IsPlaylist
+        var what = playlistName is not null
             ? (added.Count < songs.Count
-                  ? $"the first **{added.Count}** of {songs.Count} songs from **{TextTools.Escape(playlistName!)}** " +
+                  ? $"the first **{added.Count}** of {songs.Count} songs from **{TextTools.Escape(playlistName)}** " +
                     $"(the rest weren't added - {cap})"
-                  : $"**{added.Count}** songs from **{TextTools.Escape(playlistName!)}**") +
+                  : $"**{added.Count}** songs from **{TextTools.Escape(playlistName)}**") +
               (filtered > 0 ? $" (skipped {filtered} whose titles break the word filter)" : "")
             : $"{MusicFormatting.SongLink(added[0])} ({MusicFormatting.SongLength(added[0])})";
         var text = new StringBuilder($"➕ {user.Mention} added {what}");
@@ -262,6 +306,9 @@ public class MusicQueueService : IHostedService
         {
             return MusicReply.Fail(joinError);
         }
+
+        // At the server's own volume, kept from last time.
+        await player.SetVolumeAsync((await _store.GetAsync(user.Guild.Id)).VolumePercent / 100f);
 
         // Someone else may have started it while the bot was joining (then it's playing already, and isn't theirs).
         var (started, first) = await _music.WithPlaybackLockAsync(user.Guild.Id, async () =>
@@ -699,13 +746,67 @@ public class MusicQueueService : IHostedService
         return null;
     }
 
-    private Task OnTrackStartedAsync(MusicPlayer player, ITrackQueueItem item)
+    private async Task OnTrackStartedAsync(MusicPlayer player, ITrackQueueItem item)
     {
         _votes.TryRemove(player.GuildId, out _);
         _stopVotes.TryRemove(player.GuildId, out _);
         _leftVoiceAt.TryRemove(player.GuildId, out _); // playing again: the last "left voice" time is old news
+        if (item is QueueTrackItem { Song: var song })
+        {
+            await _store.MutateAsync(player.GuildId, state => MusicQueueRules.RecordPlayed(state, song));
+        }
+
         RefreshMenu(player.GuildId);
-        return Task.CompletedTask;
+    }
+
+    /// <summary>Sets the server's volume (kept for next time) and, if the music's playing, the player's.</summary>
+    public async Task SetVolumeAsync(ulong guildId, int percent, MusicPlayer? player)
+    {
+        await _store.MutateAsync(guildId, state => state.VolumePercent = percent);
+        if (player is not null)
+        {
+            await player.SetVolumeAsync(percent / 100f);
+        }
+
+        RefreshMenu(guildId);
+    }
+
+    /// <summary>Goes back to the song before this one: it plays now, and the song that was playing goes back at the
+    /// front of its picker's songs, so it isn't lost. It doesn't use up anyone's turn.</summary>
+    public async Task<MusicReply> BackAsync(SocketGuildUser user, MusicPlayer player)
+    {
+        var current = (player.CurrentItem as QueueTrackItem)?.Song;
+        var history = (await _store.GetAsync(user.Guild.Id)).History;
+        // The newest one that isn't the song playing (which is in the history too, first).
+        if (history.FirstOrDefault(s => s.Track != current?.Track) is not { } previous)
+        {
+            return MusicReply.Fail("There's no song before this one yet.");
+        }
+
+        if (!LavalinkTrack.TryParse(previous.Track, null, out var track))
+        {
+            return MusicReply.Fail("I couldn't read the saved copy of the last song. Add it again by name.");
+        }
+
+        await _music.WithPlaybackLockAsync(user.Guild.Id, async () =>
+        {
+            if (current is not null)
+            {
+                await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.PutBackFirst(state, current));
+            }
+
+            // A looped song would otherwise carry on looping the one gone back to.
+            player.RepeatMode = Lavalink4NET.Players.Queued.TrackRepeatMode.None;
+            await player.PlayAsync(new QueueTrackItem(track, MusicQueueRules.Copy(previous)), enqueue: false);
+            return true;
+        });
+
+        RefreshMenu(user.Guild.Id);
+        return MusicReply.Ok($"⏮️ {user.Mention} went back to {MusicFormatting.SongLink(previous)}." +
+                             (current is null
+                                 ? ""
+                                 : $" {MusicFormatting.SongLink(current)} is back in the queue, next of " +
+                                   $"<@{current.PickerId}>'s songs."));
     }
 
     private Task OnTrackEndedAsync(MusicPlayer player, ITrackQueueItem item, TrackEndReason reason)
@@ -809,18 +910,20 @@ public class MusicQueueService : IHostedService
             .WithFooter($"One song each in turn · up to {SongsPerPerson} waiting each · skipping and stopping take " +
                         "votes from the listeners");
 
-        // Looping shows plainly (it's saved, so it can still be on from last time) - the Loop button changes it.
-        var loop = LoopOf(state, player) switch
+        // Looping and the volume show plainly (both are saved, so they can still be set from last time); the Loop and
+        // 🔉 🔊 buttons change them.
+        var volume = state.VolumePercent;
+        var status = LoopOf(state, player) switch
         {
             LoopMode.Song => "\n🔂 Looping this song.",
             LoopMode.Queue => "\n🔁 Looping the queue: finished songs go back in.",
             _ => "",
-        };
+        } + (volume == 100 ? "" : $"\n{(volume < 100 ? "🔉" : "🔊")} Volume {volume}%.");
 
         if (player?.CurrentItem is { } current)
         {
             embed.WithDescription((player.State == PlayerState.Paused ? "⏸️ Paused" : "▶️ Playing") +
-                                  $" in <#{player.VoiceChannelId}>.{loop}");
+                                  $" in <#{player.VoiceChannelId}>.{status}");
             var song = (current as QueueTrackItem)?.Song;
             embed.AddField("Now playing", MusicFormatting.TrackLink(current.Track) +
                                           $" ({MusicFormatting.Length(current.Track!)})" +
@@ -834,7 +937,7 @@ public class MusicQueueService : IHostedService
                 ? $" (left voice <t:{at.ToUnixTimeSeconds()}:R>)"
                 : "";
             embed.WithDescription($"Not playing right now{left}. Add songs any time - they wait here. When you're " +
-                                  $"ready, join a voice channel and press **Play**.{loop}");
+                                  $"ready, join a voice channel and press **Play**.{status}");
         }
 
         if (_menuNotes.TryGetValue(state.GuildId, out var note))
@@ -890,6 +993,7 @@ public class MusicQueueService : IHostedService
         }
         else
         {
+            builder.WithButton("Back", BackButton, ButtonStyle.Secondary, new Emoji("⏮️"));
             builder.WithButton("Vote skip", SkipButton, ButtonStyle.Primary, new Emoji("⏭️"));
             builder = player.State == PlayerState.Paused
                 ? builder.WithButton("Resume", ResumeButton, ButtonStyle.Secondary, new Emoji("▶️"))
@@ -897,12 +1001,15 @@ public class MusicQueueService : IHostedService
             builder.WithButton("Stop", StopButton, ButtonStyle.Danger, new Emoji("⏹️"));
         }
 
-        // A second row: five buttons fill the first while the music plays.
+        // A second row: five buttons (a row's most) fill the first while the music plays.
         var loop = LoopOf(state, player);
         return builder
             .WithButton($"Loop: {loop switch { LoopMode.Song => "song", LoopMode.Queue => "queue", _ => "off" }}",
                 LoopButton, loop == LoopMode.Off ? ButtonStyle.Secondary : ButtonStyle.Primary,
                 new Emoji(loop == LoopMode.Song ? "🔂" : "🔁"), row: 1)
+            .WithButton(null, VolumeDownButton, ButtonStyle.Secondary, new Emoji("🔉"), row: 1)
+            .WithButton(null, VolumeUpButton, ButtonStyle.Secondary, new Emoji("🔊"), row: 1)
+            .WithButton("History", HistoryButton, ButtonStyle.Secondary, new Emoji("🕘"), row: 1)
             .WithButton("Remove mine", MineButton, ButtonStyle.Secondary, new Emoji("🗑️"), row: 1)
             .Build();
     }

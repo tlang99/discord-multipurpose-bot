@@ -1,3 +1,4 @@
+using ModBot.Common;
 using ModBot.Models;
 using ModBot.Modules.Music;
 using ModBot.Services.Storage;
@@ -270,6 +271,71 @@ public sealed class MusicQueueRulesTests
         Assert.Equal(["a1", "a2", "a3", "a4", "a5"], order.Where(t => t.StartsWith('a')).Order().ToList());
         Assert.Equal(0, MusicQueueRules.ShuffleMine(state, Cara, Random.Shared));
     }
+
+    [Fact]
+    public void History_keeps_the_newest_first_without_repeats_and_only_so_many()
+    {
+        var state = new MusicQueueState();
+        for (var i = 1; i <= MusicQueueRules.HistoryLength + 5; i++)
+        {
+            MusicQueueRules.RecordPlayed(state, Song(Alice, $"s{i}"));
+        }
+
+        MusicQueueRules.RecordPlayed(state, Song(Bob, "s10")); // played again: moves up, isn't listed twice
+
+        Assert.Equal(MusicQueueRules.HistoryLength, state.History.Count);
+        Assert.Equal("s10", state.History[0].Title);
+        Assert.Equal($"s{MusicQueueRules.HistoryLength + 5}", state.History[1].Title);
+        Assert.Single(state.History, s => s.Title == "s10");
+    }
+
+    [Fact]
+    public void A_song_cut_off_by_going_back_plays_on_its_pickers_next_turn()
+    {
+        var state = new MusicQueueState();
+        Add(state, Alice, "a2");
+        Add(state, Bob, "b1");
+
+        MusicQueueRules.PutBackFirst(state, Song(Alice, "a1"));
+
+        Assert.Equal(["a1", "b1", "a2"], Titles(MusicQueueRules.Order(state)));
+    }
+
+    [Fact]
+    public void A_song_played_again_is_a_new_copy_for_whoever_asked()
+    {
+        var original = Song(Alice, "mr brightside");
+        var again = MusicQueueRules.Copy(original, Bob, "Bob");
+
+        Assert.NotEqual(original.Id, again.Id);
+        Assert.Equal((Bob, "Bob", "mr brightside", "mr brightside"),
+            (again.PickerId, again.PickerName, again.Title, again.Track));
+    }
+
+    [Theory]
+    [InlineData(-10, 0)]
+    [InlineData(70, 70)]
+    [InlineData(999, MusicQueueRules.MaxVolume)]
+    public void Volume_stays_between_silent_and_the_most(int asked, int set)
+        => Assert.Equal(set, MusicQueueRules.ClampVolume(asked));
+
+    [Theory]
+    [InlineData("1:30", 90)]
+    [InlineData("90", 90)]
+    [InlineData("0", 0)]
+    [InlineData("1:02:03", 3723)]
+    [InlineData(" 2:05 ", 125)]
+    public void Times_in_a_song_read_as_people_write_them(string text, int seconds)
+        => Assert.Equal(TimeSpan.FromSeconds(seconds), TextTools.ParseTime(text));
+
+    [Theory]
+    [InlineData("1:75")]
+    [InlineData("abc")]
+    [InlineData("1::30")]
+    [InlineData("")]
+    [InlineData("99999")]
+    [InlineData("1:2:3:4")]
+    public void Things_that_arent_times_arent(string text) => Assert.Null(TextTools.ParseTime(text));
 
     [Theory]
     [InlineData(1, false, false, true)] // alone, or with one other: no vote
