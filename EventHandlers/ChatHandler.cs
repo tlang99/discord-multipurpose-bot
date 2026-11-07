@@ -257,6 +257,10 @@ public partial class ChatHandler
         /// "done" chime answers it instead of reading the reply out. Not set for chat, or for what was asked about
         /// (what's playing, the queue, a search), whose answer is the point.</summary>
         public bool Heard { get; set; }
+
+        /// <summary>Answered aloud, but posted too: what the request made, when nothing else would show it (a
+        /// reminder's time, and how to cancel it).</summary>
+        public bool PostAnyway { get; set; }
     }
 
     /// <summary>True (after a ⏳ on the message) if the asker has to wait. Counts the request otherwise.</summary>
@@ -588,6 +592,14 @@ public partial class ChatHandler
                     reminder.Text, applyWordFilter: !TextFilter.IsExempt(asker),
                     sourceMessageId: requestMessageId);
                 said.Heard = result.Success;
+                if (said.Aloud && result.Success)
+                {
+                    // Said in voice, nothing would show what was set (the chime only says it was): post it in the voice
+                    // channel's chat, with whose it is, so the time can be checked and it can be cancelled.
+                    said.PostAnyway = true;
+                    return ($"🎙️ {asker.Mention} {result.Message}", false);
+                }
+
                 return (result.Message, false);
             }
 
@@ -908,7 +920,7 @@ public partial class ChatHandler
         string? spoken = null)
     {
         request.Answer = spoken ?? (text.Length > 0 ? text : embed?.Description);
-        if (request.Aloud && embed is null)
+        if (request.Aloud && embed is null && !request.PostAnyway)
         {
             return;
         }
