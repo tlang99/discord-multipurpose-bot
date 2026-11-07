@@ -201,9 +201,16 @@ public class MusicQueueService : IHostedService
             fallbackChannel);
     }
 
-    /// <summary>The music's recent history, newest first, for the History list.</summary>
+    /// <summary>The music's recent history, newest first, for the History list and /history. Titles that break the
+    /// server's word filter as it is now (it may have changed since they played) are left out, since the list is
+    /// shown to people.</summary>
     public async Task<IReadOnlyList<QueuedSong>> HistoryAsync(ulong guildId)
-        => (await _store.GetAsync(guildId)).History;
+    {
+        var settings = await _settings.GetAsync(guildId);
+        return (await _store.GetAsync(guildId)).History
+            .Where(s => TextFilter.FindViolation(s.Title, settings) is null)
+            .ToList();
+    }
 
     /// <summary>Puts <paramref name="songs"/> in the queue for <paramref name="user"/> (as many as fit their cap), says
     /// where they landed, and starts the music if nothing's playing and they're in voice.</summary>
@@ -307,14 +314,19 @@ public class MusicQueueService : IHostedService
             return MusicReply.Fail(joinError);
         }
 
-        // At the server's own volume, kept from last time.
-        await player.SetVolumeAsync((await _store.GetAsync(user.Guild.Id)).VolumePercent / 100f);
-
-        // Someone else may have started it while the bot was joining (then it's playing already, and isn't theirs).
+        // Someone else may have started it while the bot was joining (then it's playing already, and isn't theirs:
+        // its volume, maybe changed or dipped since, is left alone).
         var (started, first) = await _music.WithPlaybackLockAsync(user.Guild.Id, async () =>
-            player.CurrentItem is not null ? (true, null) : await PlayNextLockedAsync(player) is { } song
-                ? (true, song)
-                : (false, (QueuedSong?)null));
+        {
+            if (player.CurrentItem is not null)
+            {
+                return (true, (QueuedSong?)null);
+            }
+
+            // At the server's own volume, kept from last time. (This is the one place music starts from nothing.)
+            await player.SetVolumeAsync((await _store.GetAsync(user.Guild.Id)).VolumePercent / 100f);
+            return await PlayNextLockedAsync(player) is { } song ? (true, song) : (false, null);
+        });
         if (!started)
         {
             return MusicReply.Fail("There's nothing in the queue yet - add some songs first.");
