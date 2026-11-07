@@ -425,7 +425,8 @@ public partial class ChatHandler
                     }
                     else if (action is MusicControlAction or UnclearMusicAction)
                     {
-                        var music = await RunMusicControlAsync(action, (SocketGuildUser)asker, channel);
+                        var music = await RunMusicControlAsync(action, (SocketGuildUser)asker, channel,
+                            request.Spoken);
                         (text, suppressEmbeds, embed) = (music.Text ?? "", music.SuppressEmbeds, music.Embed);
                     }
                     else if (action is WebSearchAction search)
@@ -460,7 +461,9 @@ public partial class ChatHandler
                 // The action and how it went, never the reply text: replies repeat what people asked ("I'll remind you
                 // to..."), and what people say to the bot stays out of the log files.
                 _logger.LogInformation("Chat action {Action} for {User} ({UserId}) in #{Channel}: {Outcome}.",
-                    action.GetType().Name.Replace("Action", ""), asker.Username, asker.Id,
+                    action is MusicControlAction { Request.Command: var command }
+                        ? $"MusicControl ({command})"
+                        : action.GetType().Name.Replace("Action", ""), asker.Username, asker.Id,
                     channel.Name, outcome);
 
                 // A posted poll is its own answer (it's a reply to the request); every other action replies.
@@ -620,6 +623,9 @@ public partial class ChatHandler
         [MusicCommand.Stop] = "stop the music",
         [MusicCommand.ClearQueue] = "clear the queue",
         [MusicCommand.RemoveMine] = "remove my songs",
+        // Looping the queue stays on until someone turns it off, so a wrong guess would repeat songs for days.
+        [MusicCommand.LoopSong] = "loop this song",
+        [MusicCommand.LoopQueue] = "loop the queue",
     };
 
     /// <summary>
@@ -627,12 +633,23 @@ public partial class ChatHandler
     /// so the same rules apply (be in the bot's voice channel to control it, skips are votes, only your own songs are
     /// yours to remove).
     /// </summary>
-    private async Task<MusicReply> RunMusicControlAsync(ChatAction action, SocketGuildUser asker, SocketTextChannel channel)
+    /// <param name="spoken">Said in voice: looping isn't turned on that way (see below).</param>
+    private async Task<MusicReply> RunMusicControlAsync(ChatAction action, SocketGuildUser asker,
+        SocketTextChannel channel, bool spoken)
     {
         if (action is not MusicControlAction { Request: var request } control)
         {
             return MusicReply.Fail("I couldn't tell what you want me to do with the music. Try \"skip\", \"pause\", " +
                                    "\"show the queue\" or \"start the music\" - or see `/help`.");
+        }
+
+        // In voice, "repeat that" / "repeat everything" is far more often "say it again" than looping, and the bot
+        // only listens while no music plays, so a loop turned on there would just wait, unnoticed, to repeat songs
+        // later. Turning looping off still works.
+        if (spoken && request.Command is MusicCommand.LoopSong or MusicCommand.LoopQueue)
+        {
+            return MusicReply.Fail("I don't turn looping on by voice, since \"repeat that\" sounds just like it. " +
+                                   "Use `/loop` or the music menu.");
         }
 
         // A skip from a member is just one vote, but a moderator's skips go through outright, so the model's guess
@@ -668,7 +685,9 @@ public partial class ChatHandler
             case MusicCommand.LoopOff:
                 return await _musicControls.LoopAsync(asker, LoopMode.Off);
             case MusicCommand.Remove:
-                return await _musicControls.RemoveAsync(asker, request.Position ?? 0);
+                return request.Title is { } title
+                    ? await _musicControls.RemoveTitledAsync(asker, title)
+                    : await _musicControls.RemoveAsync(asker, request.Position ?? 0);
             case MusicCommand.RemoveMine:
                 return await _musicControls.RemoveMineAsync(asker);
             case MusicCommand.ClearQueue:

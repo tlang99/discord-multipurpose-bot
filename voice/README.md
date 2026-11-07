@@ -32,13 +32,15 @@ misheard) and replies to that instead.
   before asking again). An answer that would have to wait more than 15 seconds
   behind another is posted instead. Needs **Speak**; turn it off for every server with `Voice:SpokenReplies`. After
   installing Piper, restart the bot.
-- **Conversations:** after an answer read aloud, anyone in the channel can say the next thing without "hey
-  ModBot" ("and what about tomorrow?"), and the bot remembers what was said and answered so far, in memory only.
-  It ends after `Voice:ConversationSeconds` (10 by default) with nobody saying anything once it's finished talking,
-  or when someone says "thanks", "goodbye", "that's all" or "stop" (even over the bot, or while it's still working
-  on an answer: it stops talking, and answers on their way aren't said); then a closing chime (the chime falling) says it's
-  back to waiting for its name, and the conversation is forgotten. While one is open, everything said in the
-  channel counts as a request, side chatter included.
+- **Conversations:** after an answer read aloud, whoever said "hey ModBot" can say the next thing without the name
+  ("and what about tomorrow?"), and the bot remembers what was said and answered so far, in memory only. Anyone else
+  still says the name, and then the conversation is with them. `/settings voice-follow-ups` lets anyone in the
+  channel reply without the name instead (then everything said while it's open counts as a request, side chatter
+  included). It ends after `Voice:ConversationSeconds` (10 by default) with nobody it's talking with saying anything
+  once it's finished, or when they say "thanks", "goodbye", "that's all" or "stop" (anyone can, by name: "thanks
+  ModBot"; even over the bot, or while it's still working on an answer: it stops talking, and answers on their way
+  aren't said); then a closing chime (the chime falling) says it's back to waiting for its name, and the
+  conversation is forgotten.
 - An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
   history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
   posted there instead, as typed answers are.
@@ -47,8 +49,8 @@ misheard) and replies to that instead.
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
   the bot's name, and thrown away. Only what's said after the name, or in a conversation with it (above), is acted
   on. The log notes that a voice request happened, never what was said, unless `Voice:LogRequests` is turned on to
-  work out what it mishears: then each request is logged as heard, which in a conversation is everything said in
-  the channel, and the line posted on joining says so. Nothing else is ever logged.
+  work out what it mishears: then each request is logged as heard (in a conversation open to anyone, that's
+  everything said in the channel), and the line posted on joining says so. Nothing else is ever logged.
 - Server settings (turning features on or off, news notifications) can't be changed by voice, only by typing: a
   friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
 - It only listens while the chatbot is on, since every request goes through it.

@@ -35,6 +35,12 @@ public class MusicQueueService : IHostedService
     public const string StopButton = ButtonPrefix + ":stop";
     public const string MineButton = ButtonPrefix + ":mine";
 
+    /// <summary>The private list "Remove mine" opens: one of your songs, or all of them.</summary>
+    public const string MinePick = ButtonPrefix + ":mine-pick";
+
+    /// <summary>The <see cref="MinePick"/> choice for all of them.</summary>
+    public const string AllMine = "all";
+
     private readonly IMusicQueueStore _store;
     private readonly IGuildSettingsStore _settings;
     private readonly MusicService _music;
@@ -337,6 +343,61 @@ public class MusicQueueService : IHostedService
         return MusicReply.Ok($"🗑️ Removed {MusicFormatting.SongLink(removed!)} from the queue.");
     }
 
+    /// <summary>Removes one waiting song by its ID (from the "Remove mine" list), if it's still there and theirs.</summary>
+    public async Task<MusicReply> RemoveSongAsync(SocketGuildUser user, Guid songId)
+    {
+        var moderator = Moderators.IsModerator(user);
+        var (result, removed) = await _store.MutateAsync(user.Guild.Id, state =>
+            (MusicQueueRules.Remove(state, songId, user.Id, moderator, out var song), song));
+        return Removed(user, result, removed, "That song isn't waiting any more - it may have played already.");
+    }
+
+    /// <summary>Removes the waiting song whose title has <paramref name="title"/> in it ("remove mr brightside from
+    /// the queue"): one of theirs, or anyone's for a moderator. Several matching ones aren't guessed between.</summary>
+    public async Task<MusicReply> RemoveTitledAsync(SocketGuildUser user, string title)
+    {
+        var moderator = Moderators.IsModerator(user);
+        var (result, removed, matches) = await _store.MutateAsync(user.Guild.Id, state =>
+        {
+            var found = MusicQueueRules.FindByTitle(state, title, user.Id, moderator);
+            if (found.Count != 1)
+            {
+                return (QueueRemoveResult.NotFound, (QueuedSong?)null, found.Count);
+            }
+
+            return (MusicQueueRules.Remove(state, found[0].Id, user.Id, moderator, out var song), song, 1);
+        });
+
+        return matches > 1
+            ? MusicReply.Fail($"{matches} of {(moderator ? "the" : "your")} waiting songs match that - say its " +
+                              "number from `/queue` (\"remove 3\"), or use the music menu's Remove mine.")
+            : Removed(user, result, removed, moderator
+                ? "No waiting song has that in its title. See `/queue`."
+                : "None of your waiting songs has that in its title. See `/queue`.");
+    }
+
+    private MusicReply Removed(SocketGuildUser user, QueueRemoveResult result, QueuedSong? song, string notFound)
+    {
+        switch (result)
+        {
+            case QueueRemoveResult.NotFound:
+                return MusicReply.Fail(notFound);
+            case QueueRemoveResult.NotYours:
+                return MusicReply.Fail("That's someone else's song - you can only remove your own.");
+        }
+
+        RefreshMenu(user.Guild.Id);
+        return MusicReply.Ok($"🗑️ Removed {MusicFormatting.SongLink(song!)} from the queue.");
+    }
+
+    /// <summary>The person's waiting songs, in play order (with their place in it), for the "Remove mine" list.
+    /// </summary>
+    public async Task<List<(int Position, QueuedSong Song)>> SongsOfAsync(ulong guildId, ulong userId)
+        => MusicQueueRules.Order(await _store.GetAsync(guildId))
+            .Select((song, index) => (index + 1, song))
+            .Where(s => s.song.PickerId == userId)
+            .ToList();
+
     public async Task<MusicReply> RemoveMineAsync(SocketGuildUser user)
     {
         var removed = await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.RemoveAllFor(state, user.Id));
@@ -367,6 +428,9 @@ public class MusicQueueService : IHostedService
         RefreshMenu(user.Guild.Id);
         return MusicReply.Ok($"🧹 {user.Mention} cleared {removed} song(s) from the queue.");
     }
+
+    /// <summary>Whether finished songs go back in the queue (/loop queue); it stays on until turned off.</summary>
+    public async Task<bool> LoopsQueueAsync(ulong guildId) => (await _store.GetAsync(guildId)).LoopQueue;
 
     public async Task SetLoopQueueAsync(ulong guildId, bool on)
     {

@@ -446,11 +446,12 @@ public class VoiceConversationTests
     private static readonly string[] Names = ["ModBot"];
     private static readonly DateTimeOffset Start = new(2026, 11, 6, 20, 0, 0, TimeSpan.Zero);
     private static readonly TimeSpan Quiet = TimeSpan.FromSeconds(10);
+    private const ulong Bloo = 1, Other = 2;
 
     private static VoiceConversation Answered(DateTimeOffset at)
     {
         var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(at);
+        var mark = conversation.Asking(at, Bloo);
         conversation.Answered(mark, at, "b1gbloo", "what's the weather?", "Sunny and 72.", "Sunny and 72.");
         return conversation;
     }
@@ -470,7 +471,7 @@ public class VoiceConversationTests
     public void A_request_with_no_answer_doesnt_open_one()
     {
         var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(Start);
+        var mark = conversation.Asking(Start, Bloo);
         conversation.Answered(mark, Start, null, null, null, null);
 
         Assert.False(conversation.IsOpen);
@@ -494,11 +495,45 @@ public class VoiceConversationTests
     public void Doesnt_end_while_someone_talks_or_a_request_is_answered()
     {
         var conversation = Answered(Start);
-        conversation.Heard(Start.AddSeconds(9));
+        conversation.Heard(Start.AddSeconds(9), Bloo);
         Assert.False(conversation.TryEndQuiet(Start.AddSeconds(15), Start));
 
-        conversation.Asking(Start.AddSeconds(16));
+        conversation.Asking(Start.AddSeconds(16), Bloo);
         Assert.False(conversation.TryEndQuiet(Start.AddSeconds(60), Start)); // still answering
+    }
+
+    [Fact]
+    public void Only_whoever_asked_can_follow_up()
+    {
+        var conversation = Answered(Start);
+
+        Assert.True(conversation.Hears(Bloo));
+        Assert.False(conversation.Hears(Other));
+        conversation.Heard(Start.AddSeconds(9), Other); // others chatting don't keep it open
+        Assert.True(conversation.TryEndQuiet(Start.AddSeconds(10), Start));
+        Assert.False(conversation.Hears(Bloo)); // ended
+    }
+
+    [Fact]
+    public void Whoever_says_the_name_next_takes_over()
+    {
+        var conversation = Answered(Start);
+        var mark = conversation.Asking(Start.AddSeconds(2), Other);
+        conversation.Answered(mark, Start.AddSeconds(3), "jynx", "and tomorrow?", "Rain.", "Rain.");
+
+        Assert.True(conversation.Hears(Other));
+        Assert.False(conversation.Hears(Bloo));
+    }
+
+    [Fact]
+    public void The_server_can_let_anyone_follow_up()
+    {
+        var conversation = new VoiceConversation(Quiet);
+        var mark = conversation.Asking(Start, Bloo, anyone: true);
+        conversation.Answered(mark, Start, "b1gbloo", "weather?", "Sunny.", "Sunny.");
+
+        Assert.True(conversation.Hears(Other));
+        Assert.False(new VoiceConversation(Quiet).Hears(Bloo)); // nothing open, nobody follows up
     }
 
     [Fact]
@@ -507,7 +542,7 @@ public class VoiceConversationTests
         var conversation = Answered(Start);
         for (var i = 0; i < 10; i++)
         {
-            var mark = conversation.Asking(Start);
+            var mark = conversation.Asking(Start, Bloo);
             conversation.Answered(mark, Start, "b1gbloo", $"question {i}", $"answer {i}", $"answer {i}");
         }
 
@@ -523,7 +558,7 @@ public class VoiceConversationTests
     public void Tells_its_own_voice_from_a_reply(string heard, string said, bool echo)
     {
         var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(Start);
+        var mark = conversation.Asking(Start, Bloo);
         conversation.Answered(mark, Start, "b1gbloo", "weather?", said, said);
 
         Assert.Equal(echo, conversation.IsEcho(heard));
@@ -556,7 +591,7 @@ public class VoiceConversationTests
     public void A_goodbye_said_while_answering_drops_the_answer_and_opens_nothing()
     {
         var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(Start);
+        var mark = conversation.Asking(Start, Bloo);
         Assert.True(conversation.IsActive); // a goodbye counts while the first answer's on its way
 
         Assert.True(conversation.End());

@@ -4,8 +4,9 @@ using ModBot.Services.Chat;
 namespace ModBot.Services.Voice;
 
 /// <summary>
-/// A back-and-forth with the bot in voice: after it answers someone who said its name, anyone in the channel can say
-/// the next thing without the name, until nobody's said anything to it for a while (or someone says "thanks"). Holds
+/// A back-and-forth with the bot in voice: after it answers someone who said its name, they (or, if the server chose
+/// it, anyone in the channel) can say the next thing without the name, until nobody's said anything to it for a while
+/// (or someone says "thanks"). Whoever said the name last is the one it's talking with. Holds
 /// what was said and answered meanwhile, in memory only, so a follow-up ("and what about tomorrow?") makes sense;
 /// it's forgotten when the conversation ends. Safe to use from several threads.
 /// </summary>
@@ -20,6 +21,8 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     private volatile bool _open;
     private int _busy;
     private int _epoch;
+    private ulong _with;
+    private bool _anyone;
     private DateTimeOffset _lastActivity;
     private string _lastSaid = "";
 
@@ -46,15 +49,30 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
         }
     }
 
-    /// <summary>A request is being answered: the conversation stays open at least until <see cref="Answered"/>.
-    /// Returns a mark to pass to <see cref="Answered"/> and <see cref="Still"/>.</summary>
-    public int Asking(DateTimeOffset now)
+    /// <summary>A request from <paramref name="asker"/> is being answered: the conversation stays open at least until
+    /// <see cref="Answered"/>, and it's with them now. Returns a mark to pass to <see cref="Answered"/> and
+    /// <see cref="Still"/>.</summary>
+    /// <param name="anyone">Whether anyone in the channel can follow up without the name, not just the asker (the
+    /// server's choice, /settings voice-follow-ups).</param>
+    public int Asking(DateTimeOffset now, ulong asker, bool anyone = false)
     {
         lock (_lock)
         {
             _busy++;
             _lastActivity = now;
+            _with = asker;
+            _anyone = anyone;
             return _epoch;
+        }
+    }
+
+    /// <summary>Whether <paramref name="userId"/> can talk to the bot without its name now: a conversation is open (or
+    /// its first answer is on its way), and it's with them, or with anyone.</summary>
+    public bool Hears(ulong userId)
+    {
+        lock (_lock)
+        {
+            return (_open || _busy > 0) && (_anyone || _with == userId);
         }
     }
 
@@ -93,8 +111,9 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
         }
     }
 
-    /// <summary>Someone's talking (it keeps an open conversation from ending mid-sentence).</summary>
-    public void Heard(DateTimeOffset now)
+    /// <summary><paramref name="userId"/> is talking: if it's someone the bot <see cref="Hears"/>, it keeps an open
+    /// conversation from ending mid-sentence (others chatting meanwhile don't keep it open).</summary>
+    public void Heard(DateTimeOffset now, ulong userId)
     {
         if (!_open)
         {
@@ -103,7 +122,7 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
 
         lock (_lock)
         {
-            if (_open && now > _lastActivity)
+            if (_open && (_anyone || _with == userId) && now > _lastActivity)
             {
                 _lastActivity = now;
             }

@@ -52,6 +52,11 @@ public class ServerSettings
     /// in (/settings voice-channel).</summary>
     public ChannelChoice AutoJoinChannel { get; set; } = new();
 
+    /// <summary>In voice, after the bot answers, anyone in the channel can say the next thing without its name, not
+    /// just whoever asked (/settings voice-follow-ups). Off by default: with several people talking, the bot would
+    /// answer their chatter with each other.</summary>
+    public bool VoiceFollowUpsFromAnyone { get; set; }
+
     /// <summary>The role new LFG posts ping. Null uses the default (<c>Lfg:PingRoleName</c>, made by /lfg-setup).</summary>
     public ulong? LfgPingRoleId { get; set; }
 

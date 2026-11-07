@@ -28,7 +28,8 @@ public enum MusicCommand
 }
 
 /// <param name="Position">For remove: the song's place in the queue.</param>
-public record MusicCommandRequest(MusicCommand Command, int? Position = null);
+/// <param name="Title">For remove: words from the song's title, instead of its place.</param>
+public record MusicCommandRequest(MusicCommand Command, int? Position = null, string? Title = null);
 
 /// <summary>
 /// Spots plainly worded music controls in a chat message ("skip this", "pause", "show the queue", "start the music")
@@ -83,6 +84,10 @@ public static partial class MusicCommandReader
 
         (Rx(@"(remove|delete|take out|drop)( song| track| number| no| the song at( position)?)? #?(?<n>\d+)( out)?( from the queue| out of the queue)?|take( song| number)? #?(?<n>\d+) out( of the queue)?"),
             m => new(MusicCommand.Remove, int.Parse(m.Groups["n"].Value))),
+        // One song by name: "remove mr brightside from the queue". Needs "from the queue" (or "out of"), so "take out
+        // the trash" is just chat; "my songs" / "me" are caught above.
+        (Rx(@"(remove|delete|drop|take|pull)( out)?( my| the)?( song)? (?<title>.+?)( out)? (from|out of|off) (the|my) (queue|playlist)"),
+            m => new(MusicCommand.Remove, Title: m.Groups["title"].Value)),
         (Rx(@"(clear|empty|wipe|clean out|clear out)( out)?( the)? (queue|playlist)"),
             _ => new(MusicCommand.ClearQueue)),
     ];

@@ -62,6 +62,25 @@ public sealed class MusicCommandReaderTests
     }
 
     [Theory]
+    [InlineData("remove mr brightside from the queue", "mr brightside")]
+    [InlineData("can you take hotel california out of the queue?", "hotel california")]
+    [InlineData("remove my song never gonna give you up from the queue", "never gonna give you up")]
+    [InlineData("take the song bohemian rhapsody off the playlist", "bohemian rhapsody")]
+    public void Reads_a_song_to_remove_by_name(string message, string title)
+        => Assert.Equal(new MusicCommandRequest(MusicCommand.Remove, Title: title), MusicCommandReader.Read(message));
+
+    [Theory]
+    [InlineData("remove my songs from the queue", MusicCommand.RemoveMine)]
+    [InlineData("remove me from the queue", MusicCommand.RemoveMine)]
+    [InlineData("remove 3 from the queue", MusicCommand.Remove)]
+    public void Removing_all_or_by_number_still_wins(string message, MusicCommand expected)
+    {
+        var read = MusicCommandReader.Read(message);
+        Assert.Equal(expected, read?.Command);
+        Assert.Null(read?.Title);
+    }
+
+    [Theory]
     [InlineData("i hate it when people skip songs")]
     [InlineData("do you like this song?")]
     [InlineData("what music do you like?")]

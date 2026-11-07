@@ -53,7 +53,7 @@ public class VoiceOptions
 
     /// <summary>
     /// Write each voice request (as speech-to-text heard it) to the log, for working out why one wasn't understood:
-    /// what was said after the bot's name, and in a conversation, whatever anyone says. Off by default: the log
+    /// what was said after the bot's name, and in a conversation, the replies. Off by default: the log
     /// otherwise never holds what anyone said. While it's on, the line posted on joining voice says so.
     /// </summary>
     public bool LogRequests { get; set; }

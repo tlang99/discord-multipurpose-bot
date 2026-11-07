@@ -98,6 +98,34 @@ public sealed class MusicQueueRulesTests
     }
 
     [Fact]
+    public void Removes_one_song_by_id_only_if_its_yours()
+    {
+        var state = new MusicQueueState();
+        Add(state, Alice, "a1", "a2");
+        Add(state, Bob, "b1");
+        var a2 = state.Songs.Single(s => s.Title == "a2").Id;
+        var b1 = state.Songs.Single(s => s.Title == "b1").Id;
+
+        Assert.Equal(QueueRemoveResult.NotYours, MusicQueueRules.Remove(state, b1, Alice, false, out _));
+        Assert.Equal(QueueRemoveResult.Removed, MusicQueueRules.Remove(state, a2, Alice, false, out var removed));
+        Assert.Equal("a2", removed!.Title);
+        Assert.Equal(["a1", "b1"], Titles(state.Songs)); // only that one
+        Assert.Equal(QueueRemoveResult.NotFound, MusicQueueRules.Remove(state, a2, Alice, false, out _));
+    }
+
+    [Fact]
+    public void Finds_your_songs_by_part_of_the_title()
+    {
+        var state = new MusicQueueState();
+        Add(state, Alice, "Mr. Brightside (Official Video)", "Hotel California");
+        Add(state, Bob, "Mr Brightside - Live");
+
+        Assert.Equal(["Mr. Brightside (Official Video)"], Titles(MusicQueueRules.FindByTitle(state, "mr brightside", Alice, false)));
+        Assert.Equal(2, MusicQueueRules.FindByTitle(state, "brightside", Alice, true).Count); // a moderator: anyone's
+        Assert.Empty(MusicQueueRules.FindByTitle(state, "!!", Alice, false));
+    }
+
+    [Fact]
     public void Remove_all_takes_only_that_persons_songs()
     {
         var state = new MusicQueueState();

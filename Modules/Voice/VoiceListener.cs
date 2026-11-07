@@ -350,7 +350,7 @@ public sealed class VoiceListener
     /// should know.</param>
     public static string ListeningLine(string name, bool logsRequests = false)
         => $"🎙️ Listening for \"hey {name}\". Speech is turned into text on the bot's own computer, only what's said " +
-           $"after my name, or anything said in the moments after I answer, is used, and no audio is kept." +
+           $"after my name, or a reply in the moments after I answer, is used, and no audio is kept." +
            (logsRequests ? " What's said to me is written to the bot's log, to fix what I mishear." : "") +
            $" \"Hey {name}, stop listening\" sends me away.";
 
@@ -719,7 +719,7 @@ public sealed class VoiceListener
 
                     speech.Write(frame.Payload);
                     lastHeard = DateTime.UtcNow;
-                    session.Conversation.Heard(DateTimeOffset.UtcNow); // don't end a conversation mid-sentence
+                    session.Conversation.Heard(DateTimeOffset.UtcNow, userId); // don't end one mid-sentence
                     if (speech.Length < longest)
                     {
                         continue;
@@ -808,16 +808,21 @@ public sealed class VoiceListener
         var conversation = session.Conversation;
         var request = WakeWord.FindRequest(text, names);
 
+        // Whether the bot's talking with this person (or, as the server chose, with anyone): they can go on without
+        // its name.
+        var hearsThem = conversation.Hears(userId);
+
         // "Thanks ModBot", "goodbye", "stop": ends the conversation, and cuts the bot off if it's talking, whoever's
-        // question it's answering. Heard over the bot, it has to name the bot ("thanks ModBot", not a "Thank you." that
-        // speech-to-text made up from its echo), and mustn't be the bot's own words coming back.
+        // question it's answering. Said by name, anyone's counts; a plain "thanks" only from someone it's talking
+        // with (others in the channel thank each other too). Heard over the bot, it has to name the bot ("thanks
+        // ModBot", not a "Thank you." that speech-to-text made up from its echo), and mustn't be its own words.
         var maybeGoodbye = request ?? WakeWord.Tidy(text);
         if ((overBot || session.IsTalking || conversation.IsActive) && maybeGoodbye.Length > 0 &&
             VoiceConversation.IsGoodbye(maybeGoodbye, names, out var nameInIt))
         {
             // "Hey ModBot, stop" (said after its name), or "thanks ModBot" (its name in it).
             var named = request is not null || nameInIt;
-            if (!overBot || (named && !VoiceConversation.Repeats(session.Saying, maybeGoodbye)))
+            if (overBot ? named && !VoiceConversation.Repeats(session.Saying, maybeGoodbye) : named || hearsThem)
             {
                 await GoodbyeAsync(session);
                 return;
@@ -864,9 +869,9 @@ public sealed class VoiceListener
                     session.Channel.Name, text);
             }
         }
-        else if (inConversation)
+        else if (inConversation && hearsThem)
         {
-            // In a conversation, whatever's said is said to the bot (its own voice coming back is dropped above).
+            // In a conversation, whatever they say is said to the bot (its own voice coming back is dropped above).
             request = WakeWord.Tidy(text);
         }
         else
@@ -904,7 +909,9 @@ public sealed class VoiceListener
         // Only a spoken back-and-forth is a conversation: answered in chat, people can just type.
         var talking = aloud && ConversationLength > TimeSpan.Zero;
         // Marks to tell, when the answer's ready, whether someone has said goodbye since: then it isn't said.
-        var mark = conversation.Asking(DateTimeOffset.UtcNow);
+        // The conversation is with whoever asked last; the server can open it to anyone (/settings voice-follow-ups).
+        var anyone = talking && (await _settings.GetAsync(session.Guild.Id)).VoiceFollowUpsFromAnyone;
+        var mark = conversation.Asking(DateTimeOffset.UtcNow, speaker.Id, anyone);
         var hushes = session.Hushes;
         string? answered = null, spoken = null;
         try

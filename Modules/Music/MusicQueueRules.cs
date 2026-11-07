@@ -111,6 +111,43 @@ public static class MusicQueueRules
         return QueueRemoveResult.Removed;
     }
 
+    /// <summary>Removes one waiting song, by its ID, if it's <paramref name="userId"/>'s (or they're a moderator).
+    /// </summary>
+    public static QueueRemoveResult Remove(MusicQueueState state, Guid songId, ulong userId, bool isModerator,
+        out QueuedSong? removed)
+    {
+        removed = state.Songs.FirstOrDefault(s => s.Id == songId);
+        if (removed is null)
+        {
+            return QueueRemoveResult.NotFound;
+        }
+
+        if (removed.PickerId != userId && !isModerator)
+        {
+            removed = null;
+            return QueueRemoveResult.NotYours;
+        }
+
+        state.Songs.Remove(removed);
+        Prune(state);
+        return QueueRemoveResult.Removed;
+    }
+
+    /// <summary>Waiting songs whose title has <paramref name="title"/> in it, in play order: <paramref name="userId"/>'s
+    /// own, or anyone's for a moderator.</summary>
+    public static List<QueuedSong> FindByTitle(MusicQueueState state, string title, ulong userId, bool isModerator)
+    {
+        var words = Squash(title);
+        return words.Length == 0
+            ? []
+            : Order(state).Where(s => (s.PickerId == userId || isModerator) && Squash(s.Title).Contains(words,
+                StringComparison.Ordinal)).ToList();
+    }
+
+    /// <summary>Lowercase letters and digits only, so "Mr. Brightside" finds "Mr Brightside (Official Video)".</summary>
+    private static string Squash(string text)
+        => string.Concat(text.ToLowerInvariant().Where(char.IsLetterOrDigit));
+
     /// <summary>Removes all of a person's waiting songs; returns how many.</summary>
     public static int RemoveAllFor(MusicQueueState state, ulong userId)
     {
