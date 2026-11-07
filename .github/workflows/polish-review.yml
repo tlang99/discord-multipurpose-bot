@@ -198,9 +198,10 @@ jobs:
     permissions:
       contents: read
       issues: write
-    # One post at a time across every run, so two never both open the same issue.
+    # One post at a time per area across every run, so two never both open the same issue. Per area, because GitHub
+    # keeps only one waiting job per group and cancels the older one, so a shared group could drop an area's post.
     concurrency:
-      group: polish-review-post
+      group: polish-review-post-${{ matrix.id }}
       cancel-in-progress: false
     strategy:
       fail-fast: false

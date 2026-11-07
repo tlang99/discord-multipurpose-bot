@@ -240,10 +240,11 @@ jobs:
     permissions:
       contents: read
       issues: write
-    # One post at a time across every run (two runs started close together would otherwise both find no issue and
-    # both open one). A post is quick, so waiting costs nothing.
+    # One post at a time per area across every run (two runs started close together would otherwise both find no
+    # issue and both open one). Per area, because GitHub keeps only one waiting job per group and cancels the older
+    # one, so a shared group could drop an area's post. A post is quick, so waiting costs nothing.
     concurrency:
-      group: full-review-post
+      group: full-review-post-${{ matrix.id }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
