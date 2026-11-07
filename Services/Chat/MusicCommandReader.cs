@@ -128,7 +128,7 @@ public static partial class MusicCommandReader
         (Rx(@"(start|open|begin|make|create|kick off|set up|run|host|do|have)( up)?( a| the| us a| our| another| a new)?( new)? (music |song |listening )?session|(start|begin|kick off|play)( the| our)? (music|songs|playlist|queue)( now)?|start playing( (the|our) (songs|queue|playlist))?( now)?|(lets go|go ahead), start( it| the music)?"),
             _ => new(MusicCommand.Start)),
 
-        (Rx(@"stop( (the|this|that))?( (music|song|track|playing|player))?( and leave)?|(leave|disconnect from|disconnect|get out of)( the)?( voice( channel| chat)?| vc| call)|turn( the)? music off|turn off( the)? music|shut( the)? music off|shut off( the)? music"),
+        (Rx(@"stop( (the|this|that))?( (music|song|songs|track|playing|player|tunes))?( and leave)?|stop playing( (this|that|it|the music|music|songs|the song|this song))?|(leave|disconnect from|disconnect|get out of)( the)?( voice( channel| chat)?| vc| call)|turn( the| this| that)? (music|song|it|this|that) off|turn off( the| this)? (music|song)|shut( the| this| that)? (music|song|it) off|shut off( the)? music|kill( the| this)? (music|song|tunes)|end( the| this)? music|no more music|enough music"),
             _ => new(MusicCommand.Stop)),
 
         (Rx(@"whats? (this|the) (song|track)( called)?|what (song|track) is (this|playing|on)( right now| now)?|whats? (playing|on)( right now| now)?|now playing|what are (we|you) (listening to|playing)( right now| now)?"),

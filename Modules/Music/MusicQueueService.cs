@@ -388,8 +388,7 @@ public class MusicQueueService : IHostedService
         {
             RefreshMenu(user.Guild.Id);
             // Short: how skipping works is on the menu, and this is read out again on every vote.
-            return MusicReply.Ok($"🗳️ Skip vote **{count}/{needed}** for {MusicFormatting.TrackLink(current.Track)}.")
-                with { Announce = false };
+            return MusicReply.Vote($"🗳️ Skip vote **{count}/{needed}** for {MusicFormatting.TrackLink(current.Track)}.");
         }
 
         // Null when the song had already finished; otherwise the song that played next, if any.
@@ -492,8 +491,7 @@ public class MusicQueueService : IHostedService
         }
 
         return added
-            ? MusicReply.Ok($"🗳️ Stop vote **{count}/{needed}**: more than half the listeners stops the music.")
-                with { Announce = false }
+            ? MusicReply.Vote($"🗳️ Stop vote **{count}/{needed}**: more than half the listeners stops the music.")
             : MusicReply.Fail($"You've already voted to stop ({count}/{needed}).");
     }
 

@@ -72,7 +72,7 @@ public sealed class ChatActionParserTests : IDisposable
         // The fake answers both calls (the request check and the pick) with the same JSON.
         var chat = new FakeChat("""{"action":"music_control","command":"stop"}""");
 
-        var action = await Parser(chat).ParseAsync("ugh i'm so done with this, kill the tunes");
+        var action = await Parser(chat).ParseAsync("ugh i'm so done with this, make the noise go away");
 
         Assert.Equal(new MusicControlAction(new MusicCommandRequest(MusicCommand.Stop), FromModel: true), action);
     }

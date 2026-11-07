@@ -446,12 +446,15 @@ public partial class ChatHandler
                             request.Spoken);
                         (text, suppressEmbeds, embed) = (music.Text ?? "", music.SuppressEmbeds, music.Embed);
                         // Done is answered with a chime in voice; what was asked about (what's on, the queue, the menu)
-                        // is said.
-                        request.Heard = music.Success && action is MusicControlAction
+                        // is said, and so is a vote that hasn't passed yet (a chime would sound like it had).
+                        request.Heard = music is { Success: true, Pending: false } && action is MusicControlAction
                         {
                             Request.Command: not (MusicCommand.NowPlaying or MusicCommand.ShowQueue or
                             MusicCommand.ShowMenu),
                         };
+                        // The log says whether it went through, so a refusal ("say it plainly", "join the
+                        // channel") can be told from a stop that worked.
+                        outcome = !music.Success ? "refused" : music.Pending ? "vote counted" : outcome;
                     }
                     else if (action is WebSearchAction search)
                     {
