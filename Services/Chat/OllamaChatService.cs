@@ -22,6 +22,9 @@ public class OllamaChatService : IChatService
     private readonly ChatRequestLimiter _limiter;
     private readonly ChatOptions _options;
 
+    /// <summary>When the model last answered (ticks, UTC): within the keep-alive since, it's still loaded.</summary>
+    private long _lastUsed;
+
     public OllamaChatService(HttpClient httpClient, ChatRequestLimiter limiter, IOptions<ChatOptions> options)
     {
         _httpClient = httpClient;
@@ -52,9 +55,57 @@ public class OllamaChatService : IChatService
         return await SendAsync(request, cancellationToken);
     }
 
+    public async Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        // Only a local Ollama unloads models (on ollama.com it'd be a call for nothing), and only after it's been idle:
+        // used within the keep-alive, it's still loaded.
+        if (SearchOptions.IsOllamaCom(_options.OllamaUrl) || IsLikelyLoaded())
+        {
+            return;
+        }
+
+        // Ollama loads the model for a chat request with no messages, and answers nothing.
+        try
+        {
+            using var slot = await _limiter.AcquireAsync(cancellationToken);
+            if (IsLikelyLoaded())
+            {
+                return; // a question (or another warm-up) loaded it while this one waited
+            }
+
+            using var response = await _httpClient.PostAsJsonAsync("api/chat",
+                new OllamaChatRequest(_options.Model, [], Stream: false, KeepAlive: KeepAlive), JsonOptions,
+                cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                Interlocked.Exchange(ref _lastUsed, DateTime.UtcNow.Ticks);
+            }
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Only a head start: the real question reports any problem.
+        }
+    }
+
+    /// <summary>Ollama's own keep-alive, used when Chat:KeepAliveMinutes leaves it to Ollama.</summary>
+    private const int OllamaDefaultKeepAliveMinutes = 5;
+
+    /// <summary>Chat:KeepAliveMinutes as Ollama wants it ("30m"), or null to leave Ollama's own default.</summary>
+    private string? KeepAlive => _options.KeepAliveMinutes > 0 ? $"{_options.KeepAliveMinutes}m" : null;
+
+    /// <summary>The model answered recently enough that it's still loaded (with half a minute to spare).</summary>
+    private bool IsLikelyLoaded()
+    {
+        var keptFor = TimeSpan.FromMinutes(_options.KeepAliveMinutes > 0
+            ? _options.KeepAliveMinutes
+            : OllamaDefaultKeepAliveMinutes);
+        return DateTime.UtcNow.Ticks - Interlocked.Read(ref _lastUsed) < (keptFor - TimeSpan.FromSeconds(30)).Ticks;
+    }
+
     private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken,
         TimeSpan? timeout = null)
     {
+        request = request with { KeepAlive = KeepAlive };
         // One slot per request, shared by chat and news, so a local Ollama isn't asked to do too much at once.
         using var slot = await _limiter.AcquireAsync(cancellationToken);
 
@@ -104,6 +155,7 @@ public class OllamaChatService : IChatService
 
             // Reasoning models put their thinking in message.thinking, separately, so content is just the answer.
             var reply = payload?.Message?.Content?.Trim();
+            Interlocked.Exchange(ref _lastUsed, DateTime.UtcNow.Ticks); // the model's loaded now
             if (string.IsNullOrEmpty(reply))
             {
                 throw new ChatServiceException("Ollama returned an empty reply.");
@@ -144,8 +196,10 @@ public class OllamaChatService : IChatService
 
     private record OllamaMessage(string Role, string Content);
 
+    /// <param name="KeepAlive">How long Ollama keeps the model loaded after this request (its own default is 5
+    /// minutes).</param>
     private record OllamaChatRequest(string Model, IReadOnlyList<OllamaMessage> Messages, bool Stream,
-        JsonElement? Format = null, OllamaRequestOptions? Options = null);
+        JsonElement? Format = null, OllamaRequestOptions? Options = null, string? KeepAlive = null);
 
     private record OllamaRequestOptions(double? Temperature = null);
 

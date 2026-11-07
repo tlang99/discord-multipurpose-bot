@@ -28,7 +28,8 @@ public enum MusicCommand
 }
 
 /// <param name="Position">For remove: the song's place in the queue.</param>
-public record MusicCommandRequest(MusicCommand Command, int? Position = null);
+/// <param name="Title">For remove: words from the song's title, instead of its place.</param>
+public record MusicCommandRequest(MusicCommand Command, int? Position = null, string? Title = null);
 
 /// <summary>
 /// Spots plainly worded music controls in a chat message ("skip this", "pause", "show the queue", "start the music")
@@ -83,6 +84,10 @@ public static partial class MusicCommandReader
 
         (Rx(@"(remove|delete|take out|drop)( song| track| number| no| the song at( position)?)? #?(?<n>\d+)( out)?( from the queue| out of the queue)?|take( song| number)? #?(?<n>\d+) out( of the queue)?"),
             m => new(MusicCommand.Remove, int.Parse(m.Groups["n"].Value))),
+        // One song by name: "remove mr brightside from the queue". Needs "from the queue" (or "out of"), so "take out
+        // the trash" is just chat; "my songs" / "me" are caught above.
+        (Rx(@"(remove|delete|drop|take)( out)?( my| the)?( song)? (?<title>.+?)( out)? (from|out of|off) (the|my) (queue|playlist)"),
+            m => new(MusicCommand.Remove, Title: m.Groups["title"].Value)),
         (Rx(@"(clear|empty|wipe|clean out|clear out)( out)?( the)? (queue|playlist)"),
             _ => new(MusicCommand.ClearQueue)),
     ];
@@ -105,7 +110,9 @@ public static partial class MusicCommandReader
                 if (pattern.Match(clause) is { Success: true } match)
                 {
                     var request = read(match);
-                    if (request.Position is <= 0 or > 1000)
+                    // "Remove this song from the queue" names no song: that's for the model to work out.
+                    if (request.Position is <= 0 or > 1000 ||
+                        request.Title is { } title && NoTitleRegex().IsMatch(title))
                     {
                         continue;
                     }
@@ -143,6 +150,10 @@ public static partial class MusicCommandReader
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex SpacesRegex();
+
+    /// <summary>"this song", "it", "the current one", "everything": pointing at songs rather than naming one.</summary>
+    [GeneratedRegex(@"^(?:(?:this|that|the|it|current|playing|last|next|one|ones|song|songs|track|tracks|tune|tunes|thing|things|stuff|plug|all|everything|them|those|these|every|of)\s*)+$")]
+    private static partial Regex NoTitleRegex();
 
     [GeneratedRegex(@"^(?:hey|hi|yo|ok|okay|alright|aight|lol|lmao|um+|uh+|so|now|please|pls|plz|can you|could you|would you|will you|can u|could u|would u|you can|go ahead and|just|kindly|bot|mate|bro|dude|i want you to|id like you to|i want to|i wanna|we want to|we wanna|lets|let us)\b\s*")]
     private static partial Regex LeadingFillerRegex();

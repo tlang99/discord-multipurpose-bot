@@ -48,6 +48,8 @@ public class MusicControls
 
     public Task<MusicReply> RemoveAsync(SocketGuildUser user, int position) => _queue.RemoveAsync(user, position);
 
+    public Task<MusicReply> RemoveTitledAsync(SocketGuildUser user, string title) => _queue.RemoveTitledAsync(user, title);
+
     public Task<MusicReply> RemoveMineAsync(SocketGuildUser user) => _queue.RemoveMineAsync(user);
 
     public Task<MusicReply> ClearQueueAsync(SocketGuildUser user) => _queue.ClearAsync(user);

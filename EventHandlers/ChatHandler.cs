@@ -137,8 +137,11 @@ public partial class ChatHandler
     /// was heard is posted ("🎙️ @name: …") and the answer replies to it, as typed.</para>
     /// Returns the answer, or null if there was none.
     /// </summary>
+    /// <param name="earlier">In a voice conversation (see <see cref="VoiceConversation"/>): what was said and answered
+    /// so far, for the chatbot to follow on from. Its requests skip the cooldown (VoiceListener holds
+    /// them to the shorter Voice:FollowUpCooldownSeconds): a back-and-forth is the point.</param>
     public async Task<VoiceAnswer?> HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel,
-        string request, bool aloud)
+        string request, bool aloud, IReadOnlyList<ChatTurn>? earlier = null)
     {
         var guild = channel.Guild;
         if (!ChannelAccess.CanPost(guild.CurrentUser, channel))
@@ -159,7 +162,7 @@ public partial class ChatHandler
         // The cooldown is checked (and counted) here, before anything's posted: typed, a request during it gets a ⏳,
         // but said, there'd be nothing to put that on but a fresh post of what was heard. So it's just dropped, and a
         // chatty speaker or a noisy mic can't flood the channel.
-        if (IsOnCooldown(guild.Id, speaker.Id))
+        if (earlier is not { Count: > 0 } && IsOnCooldown(guild.Id, speaker.Id))
         {
             return null;
         }
@@ -183,7 +186,7 @@ public partial class ChatHandler
             }
         }
 
-        var said = new ChatRequest(channel, heard, speaker, request, request, Spoken: true);
+        var said = new ChatRequest(channel, heard, speaker, request, request, Spoken: true, Earlier: earlier);
         await RespondAsync(allowed, said);
         return said.Answer is { } answer ? new VoiceAnswer(answer, said.AnswerInChat) : null;
     }
@@ -234,8 +237,9 @@ public partial class ChatHandler
     /// <param name="Words">Just what they wrote (or said), for working out actions.</param>
     /// <param name="Question">What they wrote with a note for attachments, for the chatbot to answer.</param>
     /// <param name="Spoken">Said in voice: its cooldown was already counted before posting what was heard.</param>
+    /// <param name="Earlier">A voice conversation so far, oldest first (null for none).</param>
     private sealed record ChatRequest(SocketTextChannel Channel, IUserMessage? Message, IUser Author, string Words,
-        string Question, bool Spoken = false)
+        string Question, bool Spoken = false, IReadOnlyList<ChatTurn>? Earlier = null)
     {
         /// <summary>Answered by voice only: replies aren't posted, except an embed (a web search's).</summary>
         public bool Aloud => Message is null;
@@ -283,7 +287,7 @@ public partial class ChatHandler
 
     private async Task RespondAsync(Allowed allowed, ChatRequest request)
     {
-        var (channel, message, asker, words, question, _) = request;
+        var (channel, message, asker, words, question, _, earlier) = request;
         var (settings, server, isAdmin) = allowed;
         var guild = channel.Guild;
         var bot = guild.CurrentUser;
@@ -388,7 +392,7 @@ public partial class ChatHandler
                 {
                     var (prompt, speakers) = await BuildPromptAsync(channel, message, asker, guild, bot, question);
                     reply = await _chat.ReplyAsync(await BuildSystemPromptAsync(guild, bot),
-                        [new ChatTurn(ChatRole.User, prompt)]);
+                        [.. earlier ?? [], new ChatTurn(ChatRole.User, prompt)]);
                     reply = RemoveScriptedLines(reply, speakers);
                 }
             }
@@ -421,7 +425,8 @@ public partial class ChatHandler
                     }
                     else if (action is MusicControlAction or UnclearMusicAction)
                     {
-                        var music = await RunMusicControlAsync(action, (SocketGuildUser)asker, channel);
+                        var music = await RunMusicControlAsync(action, (SocketGuildUser)asker, channel,
+                            request.Spoken);
                         (text, suppressEmbeds, embed) = (music.Text ?? "", music.SuppressEmbeds, music.Embed);
                     }
                     else if (action is WebSearchAction search)
@@ -429,7 +434,8 @@ public partial class ChatHandler
                         // The answer in the server's personality, its sources in an embed under it.
                         var found = _search.TryStart(guild.Id, asker.Id) is { } reason
                             ? new SearchAnswer(reason, null)
-                            : await _search.AnswerAsync(guild.Id, guild.Name, bot.DisplayName, search.Query);
+                            : await _search.AnswerAsync(guild.Id, guild.Name, bot.DisplayName, search.Query,
+                                quick: request.Aloud);
                         (text, embed) = (found.Text, found.Embed);
                         // Said, it's posted like /search (where Discord shows who searched for what); the answer
                         // is read aloud.
@@ -455,7 +461,9 @@ public partial class ChatHandler
                 // The action and how it went, never the reply text: replies repeat what people asked ("I'll remind you
                 // to..."), and what people say to the bot stays out of the log files.
                 _logger.LogInformation("Chat action {Action} for {User} ({UserId}) in #{Channel}: {Outcome}.",
-                    action.GetType().Name.Replace("Action", ""), asker.Username, asker.Id,
+                    action is MusicControlAction { Request.Command: var command }
+                        ? $"MusicControl ({command})"
+                        : action.GetType().Name.Replace("Action", ""), asker.Username, asker.Id,
                     channel.Name, outcome);
 
                 // A posted poll is its own answer (it's a reply to the request); every other action replies.
@@ -615,6 +623,9 @@ public partial class ChatHandler
         [MusicCommand.Stop] = "stop the music",
         [MusicCommand.ClearQueue] = "clear the queue",
         [MusicCommand.RemoveMine] = "remove my songs",
+        // Looping the queue stays on until someone turns it off, so a wrong guess would repeat songs for days.
+        [MusicCommand.LoopSong] = "loop this song",
+        [MusicCommand.LoopQueue] = "loop the queue",
     };
 
     /// <summary>
@@ -622,12 +633,23 @@ public partial class ChatHandler
     /// so the same rules apply (be in the bot's voice channel to control it, skips are votes, only your own songs are
     /// yours to remove).
     /// </summary>
-    private async Task<MusicReply> RunMusicControlAsync(ChatAction action, SocketGuildUser asker, SocketTextChannel channel)
+    /// <param name="spoken">Said in voice: looping isn't turned on that way (see below).</param>
+    private async Task<MusicReply> RunMusicControlAsync(ChatAction action, SocketGuildUser asker,
+        SocketTextChannel channel, bool spoken)
     {
         if (action is not MusicControlAction { Request: var request } control)
         {
             return MusicReply.Fail("I couldn't tell what you want me to do with the music. Try \"skip\", \"pause\", " +
                                    "\"show the queue\" or \"start the music\" - or see `/help`.");
+        }
+
+        // In voice, "repeat that" / "repeat everything" is far more often "say it again" than looping, and the bot
+        // only listens while no music plays, so a loop turned on there would just wait, unnoticed, to repeat songs
+        // later. Turning looping off still works.
+        if (spoken && request.Command is (MusicCommand.LoopSong or MusicCommand.LoopQueue))
+        {
+            return MusicReply.Fail("I don't turn looping on by voice, since \"repeat that\" sounds just like it. " +
+                                   "Use `/loop` or the music menu.");
         }
 
         // A skip from a member is just one vote, but a moderator's skips go through outright, so the model's guess
@@ -663,7 +685,9 @@ public partial class ChatHandler
             case MusicCommand.LoopOff:
                 return await _musicControls.LoopAsync(asker, LoopMode.Off);
             case MusicCommand.Remove:
-                return await _musicControls.RemoveAsync(asker, request.Position ?? 0);
+                return request.Title is { } title
+                    ? await _musicControls.RemoveTitledAsync(asker, title)
+                    : await _musicControls.RemoveAsync(asker, request.Position ?? 0);
             case MusicCommand.RemoveMine:
                 return await _musicControls.RemoveMineAsync(asker);
             case MusicCommand.ClearQueue:

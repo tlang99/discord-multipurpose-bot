@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Discord;
 using Discord.Audio;
 using Discord.WebSocket;
@@ -11,6 +12,7 @@ using ModBot.Configuration;
 using ModBot.EventHandlers;
 using ModBot.Models;
 using ModBot.Modules.Music;
+using ModBot.Services.Chat;
 using ModBot.Services.Moderation;
 using ModBot.Services.Settings;
 using ModBot.Services.Voice;
@@ -67,15 +69,21 @@ public sealed class VoiceListener
     /// <summary>Made on first use, so a problem making it can only ever break the chime, never the listener.</summary>
     private static readonly Lazy<byte[]> ChimeSound = new(VoiceAudio.Chime);
 
+    private static readonly Lazy<byte[]> ExitChimeSound = new(VoiceAudio.ExitChime);
+
     /// <summary>After the bot stops talking, it goes on ignoring what it hears for this long: its own voice can still be
     /// coming back through someone's mic.</summary>
     private static readonly TimeSpan EchoTail = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>The start of <see cref="SpeechHint"/>: words speech-to-text is told to expect.</summary>
+    private const string HintWords = "Patch notes, LFG, loadout";
 
     private readonly DiscordSocketClient _client;
     private readonly SpeechToText _speech;
     private readonly TextToSpeech _voiceOut;
     private readonly IAudioService _audio;
     private readonly Lazy<ChatHandler> _chat;
+    private readonly IChatService _model;
     private readonly ServerSettingsService _settings;
     private readonly ChatOptions _chatOptions;
     private readonly VoiceOptions _options;
@@ -95,8 +103,12 @@ public sealed class VoiceListener
     /// connection while any are.</summary>
     private readonly ConcurrentDictionary<ulong, int> _musicStarting = new();
 
+    /// <summary>Each person's last request in voice, for the shorter cooldown on conversation replies
+    /// (Voice:FollowUpCooldownSeconds).</summary>
+    private readonly UserCooldowns _followUps;
+
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, TextToSpeech voiceOut, IAudioService audio,
-        Lazy<ChatHandler> chat, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
+        Lazy<ChatHandler> chat, IChatService model, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
         IOptions<VoiceOptions> options, ILogger<VoiceListener> logger)
     {
         _client = client;
@@ -104,10 +116,12 @@ public sealed class VoiceListener
         _voiceOut = voiceOut;
         _audio = audio;
         _chat = chat;
+        _model = model;
         _settings = settings;
         _chatOptions = chatOptions.Value;
         _options = options.Value;
         _logger = logger;
+        _followUps = new UserCooldowns(Math.Clamp(_options.FollowUpCooldownSeconds, 0, 60));
         _client.UserVoiceStateUpdated += OnVoiceStateUpdatedAsync;
         // On connecting (and reconnecting), join anyone already sitting in voice.
         _client.GuildAvailable += guild =>
@@ -210,7 +224,8 @@ public sealed class VoiceListener
         IAudioClient voice;
         // The chime and spoken replies need the Speak permission, and an unmuted bot: muted, it sends no sound at all.
         var canPlay = (_options.Chime || _voiceOut.Problem is null) && CanSpeakIn(channel);
-        var session = new Session(guild, channel, replyChannel, autoJoined: startedBy is null, canPlay);
+        var session = new Session(guild, channel, replyChannel, autoJoined: startedBy is null, canPlay,
+            ConversationLength);
         _joining[guild.Id] = true;
         try
         {
@@ -322,7 +337,8 @@ public sealed class VoiceListener
         var name = guild.CurrentUser.DisplayName;
         try
         {
-            await replyChannel.SendMessageAsync(ListeningLine(name), allowedMentions: AllowedMentions.None);
+            await replyChannel.SendMessageAsync(ListeningLine(name, _options.LogRequests),
+                allowedMentions: AllowedMentions.None);
         }
         catch (Exception ex)
         {
@@ -335,9 +351,13 @@ public sealed class VoiceListener
 
     /// <summary>The one line it posts on joining: that it's listening, what happens to what's said, and how to stop
     /// it.</summary>
-    public static string ListeningLine(string name)
+    /// <param name="logsRequests">Voice:LogRequests is on: what's asked is written to the bot's log, and people
+    /// should know.</param>
+    public static string ListeningLine(string name, bool logsRequests = false)
         => $"🎙️ Listening for \"hey {name}\". Speech is turned into text on the bot's own computer, only what's said " +
-           $"after my name is used, and no audio is kept. \"Hey {name}, stop listening\" sends me away.";
+           $"after my name, or a reply in the moments after I answer, is used, and no audio is kept." +
+           (logsRequests ? " What's said to me is written to the bot's log, to fix what I mishear." : "") +
+           $" \"Hey {name}, stop listening\" sends me away.";
 
     /// <summary>The voice channel status while it listens: shown under the channel's name in the channel list, so
     /// anyone joining later sees it without a post or a ping.</summary>
@@ -687,21 +707,24 @@ public sealed class VoiceListener
         {
             var speech = new MemoryStream();
             var lastHeard = DateTime.UtcNow;
+            int frames = 0, framesOverBot = 0;
             while (!reading.IsCancellationRequested)
             {
                 // Audio only arrives while someone's talking, so a gap in it is a pause.
                 if (stream.AvailableFrames > 0)
                 {
                     var frame = await stream.ReadFrameAsync(reading);
-                    // While the bot's talking, what comes in may be its own voice through someone's mic.
+                    // While the bot's talking, what comes in may be its own voice through someone's mic: it's still
+                    // heard, but only for a goodbye (see HandleSpeechAsync).
+                    frames++;
                     if (session.IsTalking)
                     {
-                        speech.SetLength(0);
-                        continue;
+                        framesOverBot++;
                     }
 
                     speech.Write(frame.Payload);
                     lastHeard = DateTime.UtcNow;
+                    session.Conversation.Heard(DateTimeOffset.UtcNow, userId); // don't end one mid-sentence
                     if (speech.Length < longest)
                     {
                         continue;
@@ -714,7 +737,9 @@ public sealed class VoiceListener
                 }
 
                 var said = speech.ToArray();
+                var overBot = framesOverBot * 2 > frames;
                 speech.SetLength(0);
+                frames = framesOverBot = 0;
                 if (VoiceAudio.DurationOf(said.Length) < ShortestSpeech)
                 {
                     continue;
@@ -728,49 +753,133 @@ public sealed class VoiceListener
 
                 Background.Run(_logger, async () =>
                 {
+                    // Its place in the queue is given back once it's been turned into text (the queue only holds
+                    // speech waiting for that), or at the latest when it's been handled.
+                    var done = 0;
+                    void Release()
+                    {
+                        if (Interlocked.Exchange(ref done, 1) == 0)
+                        {
+                            session.SpeechDone(userId);
+                        }
+                    }
+
                     try
                     {
-                        await HandleSpeechAsync(session, userId, said);
+                        await HandleSpeechAsync(session, userId, said, overBot, Release);
                     }
                     finally
                     {
-                        session.SpeechDone(userId);
+                        Release();
                     }
                 }, LogLevel.Warning, "Couldn't handle speech in guild {GuildId}.", session.Guild.Id);
             }
         }, LogLevel.Debug, "Stopped reading voice in guild {GuildId}.", session.Guild.Id);
     }
 
-    /// <summary>Turns one sentence into text and, if it was said to the bot, hands it on as a request.</summary>
-    private async Task HandleSpeechAsync(Session session, ulong userId, byte[] said)
+    /// <summary>Turns one sentence into text and, if it was said to the bot (or in a conversation with it), hands it
+    /// on as a request.</summary>
+    /// <param name="transcribed">Called once it's been turned into text, which frees its place in the queue.</param>
+    /// <param name="overBot">Mostly said while the bot was talking: then only a goodbye counts ("thanks ModBot" to
+    /// cut it off), and anything else is taken for its own voice coming back through a mic.</param>
+    private async Task HandleSpeechAsync(Session session, ulong userId, byte[] said, bool overBot, Action transcribed)
     {
         var name = session.Guild.CurrentUser.DisplayName;
-        string text;
+        var timer = Stopwatch.StartNew();
+        Transcript heard;
         try
         {
-            text = await _speech.TranscribeAsync(VoiceAudio.ToWhisperSamples(said), $"Hey {name}.",
+            heard = await _speech.TranscribeAsync(VoiceAudio.ToWhisperSamples(said), SpeechHint(name),
                 session.Stopping.Token);
         }
         catch (OperationCanceledException)
         {
             return; // stopped listening while it was being turned into text
         }
+        finally
+        {
+            transcribed();
+        }
 
-        if (text.Length == 0 || session.Stopping.IsCancellationRequested)
+        var heardIn = timer.Elapsed;
+        var text = heard.Text;
+        if (text.Length == 0 || session.Stopping.IsCancellationRequested || IsHintEcho(text) ||
+            session.Guild.GetUser(userId) is not { IsBot: false } speaker)
         {
             return;
         }
 
-        var request = WakeWord.FindRequest(text, [name, _client.CurrentUser.Username]);
+        string[] names = [name, _client.CurrentUser.Username];
+        var conversation = session.Conversation;
+        var request = WakeWord.FindRequest(text, names);
+
+        // Whether the bot's talking with this person (or, as the server chose, with anyone): they can go on without
+        // its name.
+        var hearsThem = conversation.Hears(userId);
+
+        // "Thanks ModBot", "goodbye", "stop": ends the conversation, and cuts the bot off if it's talking, whoever's
+        // question it's answering. Said by name, anyone's counts; a plain "thanks" only from someone it's talking
+        // with (others in the channel thank each other too). Heard over the bot, it has to name the bot ("thanks
+        // ModBot", not a "Thank you." that speech-to-text made up from its echo), and mustn't be its own words.
+        var maybeGoodbye = request ?? WakeWord.Tidy(text);
+        if ((overBot || session.IsTalking || conversation.IsActive) && maybeGoodbye.Length > 0 &&
+            VoiceConversation.IsGoodbye(maybeGoodbye, names, out var nameInIt))
+        {
+            // "Hey ModBot, stop" (said after its name), or "thanks ModBot" (its name in it).
+            var named = request is not null || nameInIt;
+            if (overBot ? named && !VoiceConversation.Repeats(session.Saying, maybeGoodbye) : named || hearsThem)
+            {
+                await GoodbyeAsync(session);
+                return;
+            }
+        }
+
+        if (overBot)
+        {
+            return; // anything else said over the bot is most likely its own voice, through someone's mic
+        }
+
+        var inConversation = conversation.IsOpen;
+        var followUp = false; // said to the bot without its name, in a conversation
+        // In a conversation, the bot's own answer coming back through a mic isn't a request, even if it says its name.
+        if (inConversation && conversation.IsEcho(WakeWord.Tidy(text)))
+        {
+            _logger.LogInformation("Ignored what sounded like my own answer coming back in guild {GuildId}.",
+                session.Guild.Id);
+            return;
+        }
+
         if (request is not null)
         {
-            // Heard its name (not again for the request that follows a lone "hey ModBot"). Only for someone whose
-            // requests can be answered: a request is only run where its speaker could have typed it (ChatHandler).
-            if (session.Guild.GetUser(userId) is { IsBot: false } caller &&
+            // Heard its name (not again for the request that follows a lone "hey ModBot", or mid-conversation, when
+            // it's already listening). Only for someone whose requests can be answered: a request is only run where
+            // its speaker could have typed it (ChatHandler).
+            if (!inConversation && session.Guild.GetUser(userId) is { IsBot: false } caller &&
                 ChannelAccess.CanPost(caller, session.ReplyChannel))
             {
                 Chime(session);
+                if (request.Length == 0)
+                {
+                    WarmUpModel(session); // the request follows in the next sentence: load the model meanwhile
+                }
             }
+
+            // How sure speech-to-text was, never what it heard: to find out what sets off a chime nobody meant.
+            _logger.LogInformation("Heard my name in guild {GuildId} ({Confidence:P1} sure of the words, " +
+                                   "{NoSpeech:P1} likely no speech).", session.Guild.Id, heard.Confidence,
+                heard.NoSpeech);
+            if (_options.LogRequests && request.Length == 0)
+            {
+                // Its name on its own: logged too, to find out what sets off a chime nobody meant.
+                _logger.LogInformation("Heard my name from {UserId} in {Channel}, heard as: \"{Text}\"", userId,
+                    session.Channel.Name, text);
+            }
+        }
+        else if (inConversation && hearsThem)
+        {
+            // In a conversation, whatever they say is said to the bot (its own voice coming back is dropped above).
+            request = WakeWord.Tidy(text);
+            followUp = true;
         }
         else
         {
@@ -789,25 +898,137 @@ public sealed class VoiceListener
             return;
         }
 
-        if (session.Guild.GetUser(userId) is not { IsBot: false } speaker)
+        // Every request starts the person's follow-up cooldown. Every one in a conversation is held to it, name or not:
+        // there, the chatbot's own longer cooldown is skipped (ChatHandler), so this is the one that applies.
+        if (!_followUps.TryClaim(session.Guild.Id, userId, out _) && (followUp || inConversation))
+        {
+            _logger.LogInformation("Dropped a voice reply from {User} ({UserId}): under " +
+                                   "Voice:FollowUpCooldownSeconds since their last request.", speaker.Username,
+                speaker.Id);
+            return;
+        }
+
+        // Not what was said, unless Voice:LogRequests is on (to work out what it mishears; the join line says so).
+        if (_options.LogRequests)
+        {
+            _logger.LogInformation("Voice request from {User} ({UserId}) in {Channel}, heard as: \"{Request}\"",
+                speaker.Username, speaker.Id, session.Channel.Name, request);
+        }
+        else
+        {
+            _logger.LogInformation("Voice request from {User} ({UserId}) in {Channel}.", speaker.Username, speaker.Id,
+                session.Channel.Name);
+        }
+
+        // Answered aloud when it can be, and then not posted too; otherwise in chat, as typed.
+        var aloud = session.CanPlay && _voiceOut.Problem is null && CanSpeakIn(session.Channel) &&
+                    EveryoneCanRead(session.Channel, session.ReplyChannel);
+        // Only a spoken back-and-forth is a conversation: answered in chat, people can just type.
+        var talking = aloud && ConversationLength > TimeSpan.Zero;
+        // Marks to tell, when the answer's ready, whether someone has said goodbye since: then it isn't said.
+        // The conversation is with whoever asked last; the server can open it to anyone (/settings voice-follow-ups).
+        var anyone = talking && (await _settings.GetAsync(session.Guild.Id)).VoiceFollowUpsFromAnyone;
+        var mark = conversation.Asking(DateTimeOffset.UtcNow, speaker.Id, anyone);
+        var hushes = session.Hushes;
+        string? answered = null, spoken = null;
+        try
+        {
+            timer.Restart();
+            var answer = await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request, aloud,
+                talking ? conversation.Earlier() : null);
+            var answeredIn = timer.Elapsed;
+            if (answer is not null && aloud && conversation.Still(mark))
+            {
+                answered = answer.Text;
+                spoken = await SpeakAsync(session, answer.Text, heardIn, answeredIn, hushes, couldntSay: answer.InChat
+                    ? null
+                    : () => _chat.Value.PostUnspokenAnswerAsync(speaker, session.ReplyChannel, request, answer.Text));
+            }
+        }
+        finally
+        {
+            var opened = talking && spoken is not null;
+            conversation.Answered(mark, DateTimeOffset.UtcNow, opened ? speaker.DisplayName : null, request,
+                opened ? answered : null, spoken);
+            if (opened)
+            {
+                WatchConversation(session);
+            }
+        }
+    }
+
+    /// <summary>Someone said goodbye: the conversation ends, the bot stops talking at once, answers still on their
+    /// way aren't said, and the closing chime plays.</summary>
+    private async Task GoodbyeAsync(Session session)
+    {
+        session.Conversation.End();
+        await session.HushAsync();
+        ExitChime(session, "someone said goodbye");
+    }
+
+    /// <summary>Has the chat model loaded, without waiting (a local Ollama unloads it when idle, and loading it again
+    /// would hold up the next answer by seconds).</summary>
+    private void WarmUpModel(Session session)
+    {
+        if (_chatOptions.IsEnabled)
+        {
+            Background.Run(_logger, () => _model.WarmUpAsync(session.Stopping.Token), LogLevel.Debug,
+                "Couldn't warm up the chat model for guild {GuildId}.", session.Guild.Id);
+        }
+    }
+
+    /// <summary>How long a conversation stays open after the bot's last answer with nobody saying anything to it
+    /// (Voice:ConversationSeconds, 0 = no conversations).</summary>
+    private TimeSpan ConversationLength => TimeSpan.FromSeconds(Math.Clamp(_options.ConversationSeconds, 0, 60));
+
+    /// <summary>Ends the session's conversation once it's gone quiet, with the closing chime. One watcher per session
+    /// at a time; it stops when the conversation (or the session) ends.</summary>
+    private void WatchConversation(Session session)
+    {
+        if (!session.TryStartWatching())
         {
             return;
         }
 
-        // Not what was said: the chatbot posts that in the channel, and the log stays free of it.
-        _logger.LogInformation("Voice request from {User} ({UserId}) in {Channel}.", speaker.Username, speaker.Id,
-            session.Channel.Name);
-        // Answered aloud when it can be, and then not posted too; otherwise in chat, as typed.
-        var aloud = session.CanPlay && _voiceOut.Problem is null && CanSpeakIn(session.Channel) &&
-                    EveryoneCanRead(session.Channel, session.ReplyChannel);
-        if (await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request, aloud) is { } answer &&
-            aloud)
+        Background.Run(_logger, async () =>
         {
-            Speak(session, answer.Text, couldntSay: answer.InChat
-                ? null
-                : () => _chat.Value.PostUnspokenAnswerAsync(speaker, session.ReplyChannel, request, answer.Text));
-        }
+            try
+            {
+                while (session.Conversation.IsOpen && !session.Stopping.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), session.Stopping.Token);
+                    if (session.Conversation.TryEndQuiet(DateTimeOffset.UtcNow, session.TalkingUntil))
+                    {
+                        ExitChime(session, "it went quiet");
+                    }
+                }
+            }
+            finally
+            {
+                session.StoppedWatching();
+            }
+
+            // A request answered just as this stopped may have opened a new conversation with nobody watching it.
+            if (session.Conversation.IsOpen && !session.Stopping.IsCancellationRequested)
+            {
+                WatchConversation(session);
+            }
+        }, LogLevel.Debug, "Stopped watching a voice conversation in guild {GuildId}.", session.Guild.Id);
     }
+
+    /// <summary>
+    /// Speech-to-text, on noise, can come out with the words it was told to expect (<see cref="SpeechHint"/>)
+    /// rather than what was said. Those words in a row are an echo of the hint, not speech.
+    /// </summary>
+    private static bool IsHintEcho(string text)
+        => text.Contains(HintWords, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The words speech-to-text is told to expect, so they come out spelled right: the bot's name, and gaming words it
+    /// otherwise mishears ("patch notes" came out as "Passonets"). Speech-to-text can echo its hint on unclear audio,
+    /// so the name comes last: an echo is only "hey ModBot", with nothing asked after it.
+    /// </summary>
+    public static string SpeechHint(string name) => $"{HintWords}, ranked, web search. Hey {name}.";
 
     /// <summary>Whether the bot can be heard in <paramref name="channel"/>: Speak, and not server-muted (checked on each
     /// request, not just on joining, or a bot muted since would talk to no one).</summary>
@@ -832,17 +1053,35 @@ public sealed class VoiceListener
         }
     }
 
+    /// <summary>Plays the closing chime: a conversation's over, and it's back to waiting for its name. Waits for an
+    /// answer still playing, so it comes after it.</summary>
+    private void ExitChime(Session session, string why)
+    {
+        _logger.LogInformation("Voice conversation in guild {GuildId} ended: {Why}.", session.Guild.Id, why);
+        if (_options.Chime)
+        {
+            Background.Run(_logger, () => PlayAsync(session, _ => Task.FromResult<byte[]?>(ExitChimeSound.Value),
+                speech: false, couldntPlay: null, wait: true), LogLevel.Warning,
+                "Couldn't play the closing chime in guild {GuildId}.", session.Guild.Id);
+        }
+    }
+
     /// <summary>Reads <paramref name="answer"/> aloud (its first few sentences, as speech), after any sound already
-    /// playing. If it can't be said, <paramref name="couldntSay"/> runs (posting it in chat instead).</summary>
-    private void Speak(Session session, string answer, Func<Task>? couldntSay)
+    /// playing, and returns once it's been said. If it can't be said, <paramref name="couldntSay"/> runs (posting it
+    /// in chat instead). Returns what was said, or null if nothing was.</summary>
+    /// <param name="heardIn">How long speech-to-text took, and <paramref name="answeredIn"/> the answer: logged with
+    /// how long speaking took, to see where the time goes.</param>
+    /// <param name="hushes">The session's <see cref="Session.Hushes"/> when the answer was asked for: hushed since, it's
+    /// not said.</param>
+    private async Task<string?> SpeakAsync(Session session, string answer, TimeSpan heardIn, TimeSpan answeredIn,
+        int hushes, Func<Task>? couldntSay)
     {
         // Nothing to say aloud (only a link or emoji): then it's for reading.
         var max = Math.Clamp(_options.MaxSpokenCharacters, 50, 2000);
         if (SpokenText.From(answer, max, out var whole) is not { Length: > 0 } text)
         {
-            Background.Run(_logger, () => couldntSay?.Invoke() ?? Task.CompletedTask, LogLevel.Warning,
-                "Couldn't post a voice answer in guild {GuildId}.", session.Guild.Id);
-            return;
+            await (couldntSay?.Invoke() ?? Task.CompletedTask);
+            return null;
         }
 
         // Only how much, never the words: what the bot says stays out of the log, as what people say does.
@@ -853,53 +1092,69 @@ public sealed class VoiceListener
                 session.Guild.Id, text.Length, whole, max);
         }
 
-        Play(session, token => _voiceOut.SpeakAsync(text, token), speech: true, couldntSay);
+        session.Saying = text;
+        var played = await PlayAsync(session, async token =>
+        {
+            var timer = Stopwatch.StartNew();
+            var speech = await _voiceOut.SpeakAsync(text, token);
+            _logger.LogInformation("Voice answer in guild {GuildId}: speech-to-text {Heard} ms, answer {Answered} ms, " +
+                                   "text-to-speech {Voiced} ms.", session.Guild.Id, (int)heardIn.TotalMilliseconds,
+                (int)answeredIn.TotalMilliseconds, (int)timer.ElapsedMilliseconds);
+            return speech;
+        }, speech: true, couldntSay, hushed: hushes);
+        return played ? text : null;
     }
 
-    /// <summary>Makes a sound (<paramref name="sound"/>, in Discord's format) and plays it in the channel, without
-    /// waiting for it. A failure to play turns sound off for the rest of the session; <paramref name="couldntPlay"/>
-    /// then runs, so a spoken answer still reaches chat.</summary>
+    /// <summary>Makes a sound and plays it in the channel, without waiting for it (see <see cref="PlayAsync"/>).</summary>
     private void Play(Session session, Func<CancellationToken, Task<byte[]?>> sound, bool speech,
         Func<Task>? couldntPlay)
+        => Background.Run(_logger, () => PlayAsync(session, sound, speech, couldntPlay), LogLevel.Warning,
+            "A sound or its fallback failed in guild {GuildId}.", session.Guild.Id);
+
+    /// <summary>Makes a sound (<paramref name="sound"/>, in Discord's format) and plays it in the channel. A failure to
+    /// play turns sound off for the rest of the session; <paramref name="couldntPlay"/> then runs, so a spoken answer
+    /// still reaches chat. Returns whether it was played.</summary>
+    /// <param name="wait">For a sound that isn't speech: wait for one already playing rather than skip it.</param>
+    private async Task<bool> PlayAsync(Session session, Func<CancellationToken, Task<byte[]?>> sound, bool speech,
+        Func<Task>? couldntPlay, bool wait = false, int? hushed = null)
     {
-        Background.Run(_logger, async () =>
+        var played = false;
+        byte[]? pcm = null;
+        try
         {
-            var played = false;
-            byte[]? pcm = null;
-            try
-            {
-                // Making the sound failing only costs this one (its answer goes to chat, below).
-                pcm = session.CanPlay ? await sound(session.Stopping.Token) : null;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Couldn't make a sound to play in guild {GuildId}.", session.Guild.Id);
-            }
-            catch (OperationCanceledException)
-            {
-                // Stopped listening meanwhile.
-            }
+            // Making the sound failing only costs this one (its answer goes to chat, below).
+            pcm = session.CanPlay ? await sound(session.Stopping.Token) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Couldn't make a sound to play in guild {GuildId}.", session.Guild.Id);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped listening meanwhile.
+        }
 
-            try
-            {
-                played = pcm is { Length: > 0 } && await session.PlayAsync(pcm, speech, EchoTail);
-            }
-            catch (OperationCanceledException) when (session.Stopping.IsCancellationRequested)
-            {
-                // Stopped listening meanwhile (the answer still goes to chat, below).
-            }
-            catch (Exception ex) // including a send that timed out: the connection isn't taking sound
-            {
-                session.CanPlay = false;
-                _logger.LogWarning(ex, "Couldn't play sound in guild {GuildId}; no more sounds until I rejoin.",
-                    session.Guild.Id);
-            }
+        try
+        {
+            played = pcm is { Length: > 0 } && await session.PlayAsync(pcm, speech, EchoTail, wait, hushed);
+        }
+        catch (OperationCanceledException) when (session.Stopping.IsCancellationRequested)
+        {
+            // Stopped listening meanwhile (the answer still goes to chat, below).
+        }
+        catch (Exception ex) // including a send that timed out: the connection isn't taking sound
+        {
+            session.CanPlay = false;
+            _logger.LogWarning(ex, "Couldn't play sound in guild {GuildId}; no more sounds until I rejoin.",
+                session.Guild.Id);
+        }
 
-            if (!played && couldntPlay is not null)
-            {
-                await couldntPlay();
-            }
-        }, LogLevel.Warning, "A sound or its fallback failed in guild {GuildId}.", session.Guild.Id);
+        if (!played && couldntPlay is not null)
+        {
+            await couldntPlay();
+        }
+
+        return played;
     }
 
     private bool MusicIsPlaying(ulong guildId) => MusicService.GetPlayer(_audio, guildId) is not null;
@@ -918,7 +1173,7 @@ public sealed class VoiceListener
 
     /// <summary>Listening in one server's voice channel.</summary>
     private sealed class Session(SocketGuild guild, SocketVoiceChannel channel, SocketTextChannel replyChannel,
-        bool autoJoined, bool canPlay)
+        bool autoJoined, bool canPlay, TimeSpan conversationLength)
     {
         private readonly ConcurrentDictionary<ulong, CancellationTokenSource> _readers = new();
         private readonly SemaphoreSlim _playing = new(1, 1);
@@ -945,6 +1200,19 @@ public sealed class VoiceListener
         /// <summary>The bot is talking (or just was): what it hears now may be its own voice, through someone's mic.</summary>
         public bool IsTalking => DateTime.UtcNow.Ticks < Interlocked.Read(ref _talkingUntil);
 
+        /// <summary>When the bot stops talking (with its echo tail), or stopped.</summary>
+        public DateTimeOffset TalkingUntil => new(Interlocked.Read(ref _talkingUntil), TimeSpan.Zero);
+
+        /// <summary>The back-and-forth after an answer, when anyone can say the next thing without the bot's name.</summary>
+        public VoiceConversation Conversation { get; } = new(conversationLength);
+
+        private int _watching;
+
+        /// <summary>True if nothing's watching <see cref="Conversation"/> to end it yet, and now this caller is.</summary>
+        public bool TryStartWatching() => Interlocked.CompareExchange(ref _watching, 1, 0) == 0;
+
+        public void StoppedWatching() => Interlocked.Exchange(ref _watching, 0);
+
         /// <summary>
         /// Plays <paramref name="pcm"/> (Discord's format) in the channel, one sound at a time. Speech waits its turn,
         /// but only <see cref="LongestWaitToSpeak"/> (later than that, it's no longer an answer: the caller posts it
@@ -953,20 +1221,33 @@ public sealed class VoiceListener
         /// <param name="speech">Spoken: <see cref="IsTalking"/> holds while it plays, and for
         /// <paramref name="echoTail"/> after.</param>
         /// <returns>Whether it was played (not skipped).</returns>
-        public async Task<bool> PlayAsync(byte[] pcm, bool speech, TimeSpan echoTail)
+        /// <param name="wait">For a sound that isn't speech: wait its turn like speech, rather than be skipped.</param>
+        /// <param name="hushed">For speech: <see cref="Hushes"/> when its answer was asked for. If the bot's been
+        /// hushed since (<see cref="HushAsync"/>), it isn't said (and counts as played: it's not wanted in chat either).</param>
+        public async Task<bool> PlayAsync(byte[] pcm, bool speech, TimeSpan echoTail, bool wait = false,
+            int? hushed = null)
         {
             var length = VoiceAudio.DurationOf(pcm.Length);
-            if (Voice is null || !await _playing.WaitAsync(speech ? LongestWaitToSpeak : TimeSpan.Zero, Stopping.Token))
+            if (Voice is null ||
+                !await _playing.WaitAsync(speech || wait ? LongestWaitToSpeak : TimeSpan.Zero, Stopping.Token))
             {
                 return false;
             }
 
+            using var cut = CancellationTokenSource.CreateLinkedTokenSource(Stopping.Token);
             try
             {
                 if (!CanPlay || Stopping.IsCancellationRequested)
                 {
                     return false; // the session ended while this one waited
                 }
+
+                if (hushed is { } mark && mark != Volatile.Read(ref _hushes))
+                {
+                    return true; // told to stop while this one waited
+                }
+
+                Volatile.Write(ref _cut, cut);
 
                 if (speech)
                 {
@@ -978,14 +1259,26 @@ public sealed class VoiceListener
                 // (a second), a quarter-second chime would just sit there. And never waits much past the sound's own
                 // length for it to go out.
                 _sound ??= Voice.CreatePCMStream(AudioApplication.Voice, bufferMillis: 100);
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Stopping.Token);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cut.Token);
                 timeout.CancelAfter(length + TimeSpan.FromSeconds(5));
-                await _sound.WriteAsync(pcm, timeout.Token);
-                await _sound.FlushAsync(timeout.Token);
+                try
+                {
+                    await _sound.WriteAsync(pcm, timeout.Token);
+                    await _sound.FlushAsync(timeout.Token);
+                }
+                catch (OperationCanceledException) when (cut.IsCancellationRequested && !Stopping.IsCancellationRequested)
+                {
+                    // Hushed mid-sentence: nothing more is sent, and the little already sent (a tenth of a second)
+                    // plays out. Not ClearAsync: Discord.Net's doesn't give back the room the dropped audio took, so
+                    // the stream jams and every sound after it times out.
+                    Interlocked.Exchange(ref _talkingUntil, (DateTime.UtcNow + echoTail).Ticks);
+                }
+
                 return true;
             }
             finally
             {
+                Interlocked.CompareExchange(ref _cut, null, cut);
                 if (speech)
                 {
                     // Writing can finish before the last of it is heard: keep ignoring a moment longer.
@@ -994,6 +1287,34 @@ public sealed class VoiceListener
                 }
 
                 _playing.Release();
+            }
+        }
+
+        private CancellationTokenSource? _cut;
+        private int _hushes;
+
+        /// <summary>Counts <see cref="HushAsync"/> calls: an answer asked for before the latest isn't said.</summary>
+        public int Hushes => Volatile.Read(ref _hushes);
+
+        /// <summary>What the bot's saying right now ("" when it isn't), for telling its own voice from someone
+        /// talking over it.</summary>
+        public string Saying { get; set; } = "";
+
+        /// <summary>Stops whatever it's playing, at once, and drops answers asked for until now that are still on
+        /// their way (someone said goodbye).</summary>
+        public async Task HushAsync()
+        {
+            Interlocked.Increment(ref _hushes);
+            if (Volatile.Read(ref _cut) is { } cut)
+            {
+                try
+                {
+                    await cut.CancelAsync();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // It finished meanwhile.
+                }
             }
         }
 

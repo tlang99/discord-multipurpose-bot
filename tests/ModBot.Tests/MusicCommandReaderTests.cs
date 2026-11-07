@@ -62,6 +62,37 @@ public sealed class MusicCommandReaderTests
     }
 
     [Theory]
+    [InlineData("remove mr brightside from the queue", "mr brightside")]
+    [InlineData("can you take hotel california out of the queue?", "hotel california")]
+    [InlineData("remove my song never gonna give you up from the queue", "never gonna give you up")]
+    [InlineData("take the song bohemian rhapsody off the playlist", "bohemian rhapsody")]
+    public void Reads_a_song_to_remove_by_name(string message, string title)
+        => Assert.Equal(new MusicCommandRequest(MusicCommand.Remove, Title: title), MusicCommandReader.Read(message));
+
+    [Theory]
+    [InlineData("remove this song from the queue")] // points at a song, doesn't name one: the model's job
+    [InlineData("take it out of the queue")]
+    [InlineData("remove the current one from the queue")]
+    [InlineData("pull the plug off the queue")]
+    [InlineData("remove everything from the queue")]
+    [InlineData("remove all the songs from the queue")]
+    [InlineData("take them out of the queue")]
+    [InlineData("I took the trash out")]
+    public void Doesnt_read_a_title_that_isnt_one(string message)
+        => Assert.Null(MusicCommandReader.Read(message)?.Title);
+
+    [Theory]
+    [InlineData("remove my songs from the queue", MusicCommand.RemoveMine)]
+    [InlineData("remove me from the queue", MusicCommand.RemoveMine)]
+    [InlineData("remove 3 from the queue", MusicCommand.Remove)]
+    public void Removing_all_or_by_number_still_wins(string message, MusicCommand expected)
+    {
+        var read = MusicCommandReader.Read(message);
+        Assert.Equal(expected, read?.Command);
+        Assert.Null(read?.Title);
+    }
+
+    [Theory]
     [InlineData("i hate it when people skip songs")]
     [InlineData("do you like this song?")]
     [InlineData("what music do you like?")]

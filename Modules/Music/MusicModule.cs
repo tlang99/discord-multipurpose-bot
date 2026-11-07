@@ -131,8 +131,43 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     [ComponentInteraction(MusicQueueService.StopButton)]
     public Task StopButtonAsync() => ButtonAsync((user, _) => _controls.StopAsync(user));
 
+    /// <summary>"Remove mine": a private list of the person's waiting songs, to take out one, or all of them.</summary>
     [ComponentInteraction(MusicQueueService.MineButton)]
-    public Task MineButtonAsync() => ButtonAsync((user, _) => _controls.RemoveMineAsync(user), alwaysPrivate: true);
+    public async Task MineButtonAsync()
+    {
+        var songs = await _queue.SongsOfAsync(Context.Guild.Id, Context.User.Id);
+        if (songs.Count == 0)
+        {
+            await RespondAsync("You don't have any songs waiting.", ephemeral: true);
+            return;
+        }
+
+        // A list holds 25 choices: up to 24 songs, and "all of them".
+        var pick = new SelectMenuBuilder()
+            .WithCustomId(MusicQueueService.MinePick)
+            .WithPlaceholder("Pick a song to take out");
+        foreach (var (position, song) in songs.Take(24))
+        {
+            // A list choice can't be blank.
+            pick.AddOption(TextTools.Truncate(string.IsNullOrWhiteSpace(song.Title) ? "Unknown track" : song.Title, 100),
+                song.Id.ToString(),
+                $"#{position} in the queue · {MusicFormatting.SongLength(song)}");
+        }
+
+        pick.AddOption(songs.Count == 1 ? "All of my songs (just this one)" : $"All {songs.Count} of my songs",
+            MusicQueueService.AllMine, emote: new Emoji("🗑️"));
+        await RespondAsync(songs.Count > 24 ? "Your first 24 waiting songs:" : "Your waiting songs:",
+            components: new ComponentBuilder().WithSelectMenu(pick).Build(), ephemeral: true);
+    }
+
+    [ComponentInteraction(MusicQueueService.MinePick)]
+    public Task MinePickedAsync(string[] picked)
+        => ButtonAsync((user, _) => picked.FirstOrDefault() switch
+        {
+            MusicQueueService.AllMine => _controls.RemoveMineAsync(user),
+            { } choice when Guid.TryParse(choice, out var id) => _queue.RemoveSongAsync(user, id),
+            _ => Task.FromResult(MusicReply.Fail("I couldn't tell which song that was - press Remove mine again.")),
+        }, alwaysPrivate: true);
 
     /// <summary>Runs a command and replies: publicly when it worked (everyone listening should know), privately when
     /// it didn't.</summary>

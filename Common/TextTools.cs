@@ -4,6 +4,22 @@ namespace ModBot.Common;
 
 public static class TextTools
 {
+    /// <summary>Letters and digits only, lower case: "Mod-Bot," is "modbot", "Mr. Brightside" is "mrbrightside".
+    /// For matching what's said or typed loosely.</summary>
+    public static string Squash(string text)
+    {
+        var builder = new System.Text.StringBuilder(text.Length);
+        foreach (var c in text)
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                builder.Append(char.ToLowerInvariant(c));
+            }
+        }
+
+        return builder.ToString();
+    }
+
     /// <summary><paramref name="value"/> cut to at most <paramref name="max"/> characters, ending in "…" when
     /// cut.</summary>
     public static string Truncate(string value, int max)

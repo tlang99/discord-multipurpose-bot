@@ -97,7 +97,8 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
   pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
   **Add song** (a pop-up), **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and
-  **Remove mine**. The buttons keep working across restarts. Running `/music-menu` again replaces it.
+  **Remove mine** (a private list of your waiting songs: take out one, or all of them). The buttons keep working
+  across restarts. Running `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
   minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
@@ -269,6 +270,8 @@ saved in `data/server-settings.json`:
   still finish: LFG posts can be cancelled, polls ended, and reminders are delivered.
 - `/settings voice-channel` — voice auto-join only joins this voice channel; leave it out for whichever one is
   busiest.
+- `/settings voice-follow-ups` — after the bot answers in voice, who can reply without its name: only whoever said it
+  (the default), or anyone in the voice channel.
 - `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.
   Channels are saved by ID, so renaming one doesn't break it.
 - `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
@@ -338,8 +341,9 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
     channel, or the one they replied to.
   - **Music:** "@bot add mr brightside" (or "queue up…", "put … in the queue") just queues a song, like `/add`;
     "play …" also starts the music, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
-    this song", "remove song 3", "remove my songs", "start the music", "where's the music menu?" and the rest of
-    the music commands work by asking too, through the same code as the slash commands (so a skip is a vote).
+    this song", "remove song 3", "remove mr brightside from the queue", "remove my songs", "start the music",
+    "where's the music menu?" and the rest of the music commands work by asking too, through the same code as the
+    slash commands (so a skip is a vote).
     "Music session" wording works as well: starting one starts the music, leaving one takes out your songs.
     Plainly worded controls are read with fixed rules, without the model: a clause of the message has to be the
     command itself, so "this song sucks, skip it" skips but "I hate it when people skip songs" doesn't. Looser
@@ -527,7 +531,9 @@ By default the chatbot uses Ollama running on the same machine as the bot. No ac
 
 If Ollama isn't running, the bot replies that it couldn't come up with an answer and logs why; everything else keeps
 working. The first question after Ollama has been idle for a while is slower, since it loads the model into memory
-first (`Chat:TimeoutSeconds`, default 120, allows for that).
+first (`Chat:TimeoutSeconds`, default 120, allows for that). Ollama keeps the model loaded for
+`Chat:KeepAliveMinutes` (default 5) after each question; longer keeps answers quick but holds on to graphics memory.
+In voice, the bot starts loading it as soon as it hears its name.
 
 **Using Ollama's cloud instead:** set `Chat:OllamaUrl` to `https://ollama.com`, set `Chat:Model` to a name from
 [ollama.com/api/tags](https://ollama.com/api/tags), and create an API key at
