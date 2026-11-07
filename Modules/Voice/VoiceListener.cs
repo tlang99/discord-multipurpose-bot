@@ -95,7 +95,7 @@ public sealed partial class VoiceListener
 
     /// <summary>What it says, before leaving, when music needs the voice connection (no music account of its own).</summary>
     public const string LeavingForMusicLine =
-        "Playing. I can't listen while the music's on, so use the music menu, and I'll be back when it's done.";
+        "Starting the music. I can't listen while it's on, so use the music menu, and I'll be back when it's done.";
 
     private readonly DiscordSocketClient _client;
     private readonly IMusicQueueStore _queue;
@@ -585,14 +585,19 @@ public sealed partial class VoiceListener
         if (_sessions.TryGetValue(guildId, out var session) && session.CanPlay && _voiceOut.Problem is null &&
             CanSpeakIn(session.Channel))
         {
+            var saying = SpeakAsync(session, LeavingForMusicLine, TimeSpan.Zero, TimeSpan.Zero, session.Hushes,
+                couldntSay: null);
+            // Still going after the wait, it's left to finish (or be cut off by StopAsync); a problem then is logged.
+            _ = saying.ContinueWith(t => _logger.LogDebug(t.Exception, "Couldn't say why it's leaving for music in " +
+                                                                       "guild {GuildId}.", guildId),
+                TaskContinuationOptions.OnlyOnFaulted);
             try
             {
-                await SpeakAsync(session, LeavingForMusicLine, TimeSpan.Zero, TimeSpan.Zero, session.Hushes,
-                    couldntSay: null).WaitAsync(LeavingForMusicWait);
+                await saying.WaitAsync(LeavingForMusicWait);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogDebug(ex, "Didn't finish saying why it's leaving for music in guild {GuildId}.", guildId);
+                // Timed out, cut off or failed (a failure's logged above): either way, the music doesn't wait longer.
             }
         }
 
@@ -964,7 +969,12 @@ public sealed partial class VoiceListener
             _logger.LogInformation("Dropped a voice reply from {User} ({UserId}): under " +
                                    "Voice:FollowUpCooldownSeconds since their last request.", speaker.Username,
                 speaker.Id);
-            BusyChime(session, userId);
+            // Only said to it by name is surely a request: a follow-up this soon may just be a mutter ("hmm, okay").
+            if (!followUp)
+            {
+                BusyChime(session, userId);
+            }
+
             return;
         }
 
@@ -1003,6 +1013,12 @@ public sealed partial class VoiceListener
                 answer = null;
             }
 
+            // Several people asking at once: spoken answers say whose they are. Every answered request counts as
+            // asking (one dropped for a cooldown doesn't, so it can't make the next answer someone else's).
+            var addressed = answer is not null && session.OthersAsked(speaker.Id, DateTimeOffset.UtcNow, GroupWindow)
+                ? SpokenName(speaker.DisplayName)
+                : null;
+
             // An action that worked (a song, a reminder, an LFG, a poll): the "done" chime says so, rather than
             // reading out what chat would show. (Nothing's said, so no conversation opens: the next request takes the
             // name again.) If the chime can't be played, the answer's said (or posted) as usual instead, so it's
@@ -1013,11 +1029,6 @@ public sealed partial class VoiceListener
             if (!chimed && answer is not null && aloud && conversation.Still(mark))
             {
                 answered = answer.Text;
-                // Several people asking at once: the answer says whose it is. (Only answered requests count as
-                // asking: one dropped for a cooldown doesn't make the next answer someone else's.)
-                var addressed = session.OthersAsked(speaker.Id, DateTimeOffset.UtcNow, GroupWindow)
-                    ? SpokenName(speaker.DisplayName)
-                    : null;
                 var saying = addressed is null ? answer.Text : $"{addressed}, {answer.Text}";
                 spoken = await SpeakAsync(session, saying, heardIn, answeredIn, hushes, couldntSay: answer.InChat
                     ? null
@@ -1175,8 +1186,10 @@ public sealed partial class VoiceListener
         }
         catch (Exception ex)
         {
-            // Only a better guess at spelling: without it, speech is still turned into text.
+            // Only a better guess at spelling: without it, speech is still turned into text. Not tried again until
+            // HintFor has passed, so a failing read doesn't hold up (and log for) every sentence heard.
             _logger.LogDebug(ex, "Couldn't read the speech hint's words for guild {GuildId}.", session.Guild.Id);
+            session.Hint = new HintCache(DateTimeOffset.UtcNow, []);
             return [];
         }
     }

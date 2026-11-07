@@ -28,8 +28,9 @@ misheard) and replies to that instead.
   of words, so it doesn't talk over the music. A reminder is also posted in the voice channel's chat (with its time
   and how to cancel it), since nothing else would show it. If it couldn't do it, it says why. Questions (what's
   playing, the queue, a web search, chat) are answered aloud. With `Voice:Chime` off, it says what it did, as before.
-- Asked again too soon (within `Chat:CooldownSeconds` of your last question, or `Voice:FollowUpCooldownSeconds` in a
-  conversation), it plays two low falling notes: "heard you, but not right now". Wait a moment and ask again.
+- Asked again by name too soon (within `Chat:CooldownSeconds` of your last question, or
+  `Voice:FollowUpCooldownSeconds` in a conversation), it plays two low falling notes: "heard you, but not right
+  now". Wait a moment and ask again. (With `Voice:Chime` on; at most once every 10 seconds each.)
 - To spell things right, speech-to-text is told what to expect: gaming words, the bot's name, and this server's own
   words (the next songs in the queue, the people in the channel, and its LFG game and playlists).
 - When more than one person has asked it something in the last 30 seconds, a spoken answer starts with the asker's
@@ -79,8 +80,8 @@ misheard) and replies to that instead.
 Discord gives a bot one voice connection per server, and music (Lavalink) needs one to play. Two ways to run it:
 
 - **One bot (the default):** the bot listens only while no music is playing. Starting music stops the listening
-  (first it says so, where it can speak: "I can't listen while the music's on, so use the music menu…"), and it
-  won't start listening while music plays. With voice auto-join on, it comes back once the music player
+  (first it says so, where it can speak: "Starting the music. I can't listen while it's on, so use the music
+  menu…"), and it won't start listening while music plays. With voice auto-join on, it comes back once the music player
   leaves voice (`Music:IdleTimeoutSeconds` after the last song, or straight after `/stop`).
 - **A second bot account for music:** music and listening run at once. The second account only joins voice and
   plays: `/play`, the music menu and "hey ModBot, play …" all stay on the main bot. While the bot reads an answer
