@@ -50,6 +50,10 @@ jobs:
             THE FILES THIS PR CHANGES (these, and only these, are what you review):
             ${{ steps.files.outputs.list }}
 
+            DECIDED ON PURPOSE: before anything else, read .github/review-decisions.md. It lists choices
+            the owner made deliberately. Don't raise anything it lists unless this PR breaks it, or it
+            causes a real bug the entry doesn't cover.
+
             How to read the changes:
             - The working directory has only the PR's latest commit, with no git history, so every
               file in it looks new. It isn't: the PR changes only the files listed above. Never

@@ -111,6 +111,10 @@ jobs:
             THE FILES IN THIS AREA (${{ steps.files.outputs.count }} files; read all of them):
             ${{ steps.files.outputs.list }}
 
+            DECIDED ON PURPOSE: before anything else, read .github/review-decisions.md. It lists choices
+            the owner made deliberately. Don't suggest anything it lists (as a quick win, polish or idea)
+            unless the code breaks it, or it causes a real bug the entry doesn't cover.
+
             HOW IT'S MEANT TO WORK, FOR THE PEOPLE USING IT (read the parts about this area):
             ${{ matrix.docs }}
 
