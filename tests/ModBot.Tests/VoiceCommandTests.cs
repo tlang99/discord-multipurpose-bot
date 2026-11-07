@@ -502,17 +502,6 @@ public class VoiceConversationTests
     }
 
     [Fact]
-    public void Ends_after_its_longest_however_much_is_said()
-    {
-        var conversation = Answered(Start);
-        var end = Start + VoiceConversation.LongestConversation;
-        conversation.Heard(end); // a TV in the background, never quiet
-
-        Assert.False(conversation.TryEndQuiet(end.AddSeconds(-1), end));
-        Assert.True(conversation.TryEndQuiet(end, end));
-    }
-
-    [Fact]
     public void Keeps_only_the_latest_turns()
     {
         var conversation = Answered(Start);

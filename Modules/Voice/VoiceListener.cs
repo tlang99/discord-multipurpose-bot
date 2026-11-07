@@ -923,7 +923,7 @@ public sealed class VoiceListener
                     await Task.Delay(TimeSpan.FromMilliseconds(250), session.Stopping.Token);
                     if (session.Conversation.TryEndQuiet(DateTimeOffset.UtcNow, session.TalkingUntil))
                     {
-                        ExitChime(session, "it went quiet, or reached its 3-minute limit");
+                        ExitChime(session, "it went quiet");
                     }
                 }
             }

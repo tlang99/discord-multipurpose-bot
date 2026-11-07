@@ -34,8 +34,7 @@ misheard) and replies to that instead.
   ModBot" ("and what about tomorrow?"), and the bot remembers what was said and answered so far, in memory only.
   It ends after `Voice:ConversationSeconds` (10 by default) with nobody saying anything once it's finished talking,
   or when someone says "thanks", "that's all" or "never mind"; then a closing chime (the chime falling) says it's
-  back to waiting for its name, and the conversation is forgotten. A conversation lasts 3 minutes at most, so a TV
-  or a game picked up by a mic can't keep one open. While one is open, everything said in the
+  back to waiting for its name, and the conversation is forgotten. While one is open, everything said in the
   channel counts as a request, side chatter included.
 - An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
   history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
