@@ -101,7 +101,7 @@ public static partial class MusicCommandReader
             _ => new(MusicCommand.Restart)),
         (Rx(@"(go|skip) back( a song| one| to the (last|previous) (song|one|track))?|(play )?(the )?previous( song| track| one)?|back to the (last|previous) (song|one|track)"),
             _ => new(MusicCommand.Previous)),
-        (Rx(@"(play|queue|add) (that|this|it)( song| track| one)? again|(play|queue|add)( the)? (last|previous) (song|track|one) again|one more time|again please"),
+        (Rx(@"(play|queue|add) (that|this|it)( song| track| one)? again|(play|queue|add)( the)? (last|previous) (song|track|one) again|one more time"),
             _ => new(MusicCommand.PlayAgain)),
         (Rx(@"(what|which) (was|were) (that|the last|the previous|the) (song|track|one|songs)( called| before| just now)?|(show|list|see|view)( me| us)?( the)? (history|song history|recent songs|recently played( songs)?|last (few )?songs)|whats? (been|was) (played|playing)( (lately|before|earlier))?|what did (we|you) (just )?(play|listen to)|recently played"),
             _ => new(MusicCommand.ShowHistory)),
@@ -225,8 +225,9 @@ public static partial class MusicCommandReader
     [GeneratedRegex(@"\s*\b(?:please|pls|plz|for me|for us|now|thanks|thank you|thx|ty|already|real quick|quick|rn|right now|mate|bro|dude)$")]
     private static partial Regex TrailingFillerRegex();
 
-    /// <summary>"Skip to 1:30", "jump ahead to 2:05", "play it from 45": a time ("t") in the song that's playing.
-    /// Needs "to" or "from", so "skip 2" isn't a jump.</summary>
-    [GeneratedRegex(@"^(?:seek|skip|jump|go|fast forward|rewind|scrub)(?: ahead| forward| back)? to (?:the )?#?(?<t>\d{1,5}(?::\d{1,2}){0,2})(?: in (?:this|the) (?:song|track))?$|^(?:start|play)(?: it| this| that| the song)? (?:from|at) (?<t>\d{1,5}(?::\d{1,2}){0,2})$", RegexOptions.ExplicitCapture)]
+    /// <summary>"Skip to 1:30", "jump ahead to 2:05", "seek to 90", "play it from 45": a time ("t") in the song that's
+    /// playing. "Skip to", "jump to" and "go to" need minutes and seconds ("skip to 2" may mean song 2); plain seconds
+    /// only go with "seek to" or "from".</summary>
+    [GeneratedRegex(@"^(?:skip|jump|go|fast forward|rewind|scrub)(?: ahead| forward| back)? to (?:the )?(?<t>\d{1,5}(?::\d{1,2}){1,2})(?: in (?:this|the) (?:song|track))?$|^seek to (?:the )?(?<t>\d{1,5}(?::\d{1,2}){0,2})(?: in (?:this|the) (?:song|track))?$|^(?:start|play)(?: it| this| that| the song)? (?:from|at) (?<t>\d{1,5}(?::\d{1,2}){0,2})$", RegexOptions.ExplicitCapture)]
     private static partial Regex SeekRegex();
 }

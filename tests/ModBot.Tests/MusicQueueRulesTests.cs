@@ -302,6 +302,36 @@ public sealed class MusicQueueRulesTests
     }
 
     [Fact]
+    public void Going_back_again_goes_further_back_rather_than_bouncing()
+    {
+        var state = new MusicQueueState();
+        QueuedSong a = Song(Alice, "a"), b = Song(Alice, "b"), c = Song(Alice, "c");
+        foreach (var song in new[] { a, b, c })
+        {
+            MusicQueueRules.RecordPlayed(state, song); // as each one starts: c is playing now
+        }
+
+        // Back from c plays b (and b starting is noted, as the player would); back again plays a, not c.
+        var first = MusicQueueRules.PreviousOf(state, c)!;
+        MusicQueueRules.GoBack(state, c);
+        MusicQueueRules.RecordPlayed(state, first);
+        var second = MusicQueueRules.PreviousOf(state, first)!;
+
+        Assert.Equal(("b", "a"), (first.Title, second.Title));
+        Assert.Equal(["c"], Titles(MusicQueueRules.Order(state))); // c waits to play again, not lost
+    }
+
+    [Fact]
+    public void There_is_nothing_to_go_back_to_before_the_first_song()
+    {
+        var state = new MusicQueueState();
+        var only = Song(Alice, "a");
+        MusicQueueRules.RecordPlayed(state, only);
+
+        Assert.Null(MusicQueueRules.PreviousOf(state, only));
+    }
+
+    [Fact]
     public void A_song_played_again_is_a_new_copy_for_whoever_asked()
     {
         var original = Song(Alice, "mr brightside");

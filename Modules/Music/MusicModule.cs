@@ -97,7 +97,7 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     [SlashCommand("playagain", "Adds the song played most recently to the queue again, for you.")]
     public Task PlayAgainAsync() => RunAsync((user, channel) => _controls.AgainAsync(user, channel), slow: true);
 
-    [SlashCommand("playnext","Makes one of your songs the next of yours to play (nobody else's turn moves).")]
+    [SlashCommand("playnext", "Makes one of your songs the next of yours to play (nobody else's turn moves).")]
     public Task PlayNextAsync([Summary(description: "Its position, as shown by /queue")] [MinValue(1)] int position)
         => RunAsync((user, _) => _controls.PlayNextAsync(user, position));
 

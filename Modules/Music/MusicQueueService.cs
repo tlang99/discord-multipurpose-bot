@@ -751,12 +751,22 @@ public class MusicQueueService : IHostedService
         _votes.TryRemove(player.GuildId, out _);
         _stopVotes.TryRemove(player.GuildId, out _);
         _leftVoiceAt.TryRemove(player.GuildId, out _); // playing again: the last "left voice" time is old news
-        if (item is QueueTrackItem { Song: var song })
+        try
         {
-            await _store.MutateAsync(player.GuildId, state => MusicQueueRules.RecordPlayed(state, song));
+            if (item is QueueTrackItem { Song: var song })
+            {
+                await _store.MutateAsync(player.GuildId, state => MusicQueueRules.RecordPlayed(state, song));
+            }
         }
-
-        RefreshMenu(player.GuildId);
+        catch (Exception ex)
+        {
+            // Only the history: the song still plays, and the menu still shows it.
+            _logger.LogWarning(ex, "Couldn't note the song that started in guild {GuildId}.", player.GuildId);
+        }
+        finally
+        {
+            RefreshMenu(player.GuildId);
+        }
     }
 
     /// <summary>Sets the server's volume (kept for next time) and, if the music's playing, the player's.</summary>
@@ -775,38 +785,34 @@ public class MusicQueueService : IHostedService
     /// front of its picker's songs, so it isn't lost. It doesn't use up anyone's turn.</summary>
     public async Task<MusicReply> BackAsync(SocketGuildUser user, MusicPlayer player)
     {
-        var current = (player.CurrentItem as QueueTrackItem)?.Song;
-        var history = (await _store.GetAsync(user.Guild.Id)).History;
-        // The newest one that isn't the song playing (which is in the history too, first).
-        if (history.FirstOrDefault(s => s.Track != current?.Track) is not { } previous)
+        // All under the playback lock, so a song ending (or a skip) meanwhile can't make it put back a song that's
+        // already finished, or go back from the wrong one.
+        var reply = await _music.WithPlaybackLockAsync(user.Guild.Id, async () =>
         {
-            return MusicReply.Fail("There's no song before this one yet.");
-        }
-
-        if (!LavalinkTrack.TryParse(previous.Track, null, out var track))
-        {
-            return MusicReply.Fail("I couldn't read the saved copy of the last song. Add it again by name.");
-        }
-
-        await _music.WithPlaybackLockAsync(user.Guild.Id, async () =>
-        {
-            if (current is not null)
+            var current = (player.CurrentItem as QueueTrackItem)?.Song;
+            if (MusicQueueRules.PreviousOf(await _store.GetAsync(user.Guild.Id), current) is not { } previous)
             {
-                await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.PutBackFirst(state, current));
+                return MusicReply.Fail("There's no song before this one yet.");
             }
 
+            if (!LavalinkTrack.TryParse(previous.Track, null, out var track))
+            {
+                return MusicReply.Fail("I couldn't read the saved copy of the last song. Add it again by name.");
+            }
+
+            await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.GoBack(state, current));
             // A looped song would otherwise carry on looping the one gone back to.
             player.RepeatMode = Lavalink4NET.Players.Queued.TrackRepeatMode.None;
             await player.PlayAsync(new QueueTrackItem(track, MusicQueueRules.Copy(previous)), enqueue: false);
-            return true;
+            return MusicReply.Ok($"⏮️ {user.Mention} went back to {MusicFormatting.SongLink(previous)}." +
+                                 (current is null
+                                     ? ""
+                                     : $" {MusicFormatting.SongLink(current)} is back in the queue, next of " +
+                                       $"<@{current.PickerId}>'s songs."));
         });
 
         RefreshMenu(user.Guild.Id);
-        return MusicReply.Ok($"⏮️ {user.Mention} went back to {MusicFormatting.SongLink(previous)}." +
-                             (current is null
-                                 ? ""
-                                 : $" {MusicFormatting.SongLink(current)} is back in the queue, next of " +
-                                   $"<@{current.PickerId}>'s songs."));
+        return reply;
     }
 
     private Task OnTrackEndedAsync(MusicPlayer player, ITrackQueueItem item, TrackEndReason reason)

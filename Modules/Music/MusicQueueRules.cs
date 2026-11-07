@@ -88,6 +88,23 @@ public static class MusicQueueRules
         Join(state, song.PickerId);
     }
 
+    /// <summary>The song to go back to from <paramref name="current"/> (the one playing, if any): the newest in the
+    /// history that isn't it. Null if there's none.</summary>
+    public static QueuedSong? PreviousOf(MusicQueueState state, QueuedSong? current)
+        => state.History.FirstOrDefault(s => s.Track != current?.Track);
+
+    /// <summary>Going back from <paramref name="current"/>: it leaves the history (it'll be noted again when it plays)
+    /// and goes back at the front of its picker's songs. So each "go back" goes one song further back, rather than
+    /// bouncing between the last two.</summary>
+    public static void GoBack(MusicQueueState state, QueuedSong? current)
+    {
+        if (current is not null)
+        {
+            state.History.RemoveAll(s => s.Track == current.Track);
+            PutBackFirst(state, current);
+        }
+    }
+
     /// <summary>How many played songs are remembered for History, "play that again" and going back.</summary>
     public const int HistoryLength = 20;
 

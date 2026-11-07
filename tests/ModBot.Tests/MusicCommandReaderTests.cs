@@ -138,7 +138,15 @@ public sealed class MusicCommandReaderTests
             MusicCommandReader.Read(message));
 
     [Theory]
+    [InlineData("seek to 90", 90)]
+    [InlineData("skip ahead to 0:45", 45)]
+    public void Plain_seconds_only_jump_with_seek_or_from(string message, int seconds)
+        => Assert.Equal(TimeSpan.FromSeconds(seconds), MusicCommandReader.Read(message)?.At);
+
+    [Theory]
     [InlineData("skip 2")] // no "to": not a jump
+    [InlineData("skip to 2")] // could be song 2: a jump needs minutes and seconds
+    [InlineData("go to 5")]
     [InlineData("volume 99999999999")]
     public void Not_a_jump_or_a_volume(string message)
         => Assert.False(MusicCommandReader.Read(message) is { Command: MusicCommand.Seek or MusicCommand.SetVolume });

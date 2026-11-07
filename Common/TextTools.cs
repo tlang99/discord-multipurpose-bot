@@ -4,12 +4,19 @@ namespace ModBot.Common;
 
 public static class TextTools
 {
+    /// <summary>The longest a time in a song can be (<see cref="ParseTime"/>): longer than any song.</summary>
+    private static readonly TimeSpan LongestSongTime = TimeSpan.FromHours(12);
+
+    /// <summary>The most digits in one part of a time ("43200" seconds is 12 hours), so a huge number isn't parsed.
+    /// </summary>
+    private const int MostTimeDigits = 5;
+
     /// <summary>A point in a song as people write it: "1:30", "1:02:03", or plain seconds ("90"). Null if it isn't
-    /// one (or is past 12 hours, longer than any song).</summary>
+    /// one (or is past <see cref="LongestSongTime"/>).</summary>
     public static TimeSpan? ParseTime(string? text)
     {
         var parts = (text ?? "").Trim().Split(':');
-        if (parts.Length > 3 || parts.Any(p => p.Length is 0 or > 5 || !p.All(char.IsAsciiDigit)))
+        if (parts.Length > 3 || parts.Any(p => p.Length == 0 || p.Length > MostTimeDigits || !p.All(char.IsAsciiDigit)))
         {
             return null;
         }
@@ -21,8 +28,8 @@ public static class TextTools
             return null;
         }
 
-        var seconds = numbers.Aggregate(0L, (total, n) => total * 60 + n);
-        return seconds <= 12 * 3600 ? TimeSpan.FromSeconds(seconds) : null;
+        var time = TimeSpan.FromSeconds(numbers.Aggregate(0L, (total, n) => total * 60 + n));
+        return time <= LongestSongTime ? time : null;
     }
 
     /// <summary>Letters and digits only, lower case: "Mod-Bot," is "modbot", "Mr. Brightside" is "mrbrightside".
