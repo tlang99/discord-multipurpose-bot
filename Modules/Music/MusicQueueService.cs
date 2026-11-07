@@ -411,7 +411,15 @@ public class MusicQueueService : IHostedService
             return null;
         }
 
+        // The votes needed are from those who can hear it: if the others are deafened, the one listener decides.
+        // (Deafening yourself can't help: it takes away your own vote.) Nobody hearing it at all, there's no one to
+        // vote, so it just stops.
         var listening = Listeners(user.Guild, player.VoiceChannelId);
+        if (listening.Count == 0)
+        {
+            return null;
+        }
+
         if (!listening.Contains(user.Id))
         {
             return MusicReply.Fail(DeafenedVoter);
@@ -431,8 +439,8 @@ public class MusicQueueService : IHostedService
     }
 
     /// <summary>Whether a stop goes through without a vote: with fewer than 3 people in the channel (everyone in it,
-    /// deafened too, so deafening can't get round the vote), for whoever started the music, or for a moderator.
-    /// </summary>
+    /// deafened too, so someone deafening themselves can't bring it under 3), for whoever started the music, or for a
+    /// moderator.</summary>
     public static bool StopsAtOnce(int inChannel, bool isModerator, bool isStarter)
         => inChannel < 3 || isModerator || isStarter;
 
