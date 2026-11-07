@@ -58,6 +58,25 @@ public class WakeWordTests
             StringComparison.OrdinalIgnoreCase);
 
     [Fact]
+    public void Hint_words_that_spell_the_bots_name_together_are_kept_apart()
+    {
+        var hint = Modules.Voice.VoiceListener.SpeechHint("ModBot", ["Mod", "Bot", "Sam"]);
+
+        Assert.Contains("Mod, Sam. Hey ModBot.", hint);
+        Assert.Equal("", WakeWord.FindRequest(hint, Names));
+    }
+
+    [Fact]
+    public void A_long_hint_word_is_never_cut_through_an_emoji()
+    {
+        var title = new string('a', 39) + "🎵 and more";
+        var hint = Modules.Voice.VoiceListener.SpeechHint("ModBot", [title]);
+
+        Assert.Contains(", " + new string('a', 39) + ".", hint);
+        Assert.DoesNotContain('\uD83C', hint);
+    }
+
+    [Fact]
     public void The_hint_keeps_only_whole_words_that_fit()
     {
         var many = Enumerable.Range(1, 40).Select(i => $"Player {i:00}").ToList();

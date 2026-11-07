@@ -83,9 +83,15 @@ public sealed partial class VoiceListener
     /// <summary>How long the server's words for the hint are reused before they're read again.</summary>
     private static readonly TimeSpan HintFor = TimeSpan.FromSeconds(10);
 
+    /// <summary>The least time between one person's "not right now" chimes.</summary>
+    private const int BusyChimeEverySeconds = 10;
+
     /// <summary>When more than one person has asked within this long, spoken answers start with the asker's name, so
     /// everyone can tell whose answer it is.</summary>
     private static readonly TimeSpan GroupWindow = TimeSpan.FromSeconds(30);
+
+    /// <summary>The longest the music waits for <see cref="LeavingForMusicLine"/> to be said.</summary>
+    private static readonly TimeSpan LeavingForMusicWait = TimeSpan.FromSeconds(8);
 
     /// <summary>What it says, before leaving, when music needs the voice connection (no music account of its own).</summary>
     public const string LeavingForMusicLine =
@@ -123,6 +129,9 @@ public sealed partial class VoiceListener
     /// <summary>Each person's last request in voice, for the shorter cooldown on conversation replies
     /// (Voice:FollowUpCooldownSeconds).</summary>
     private readonly UserCooldowns _followUps;
+
+    /// <summary>Each person's last "not right now" chime (see BusyChime).</summary>
+    private readonly UserCooldowns _busyChimes = new(BusyChimeEverySeconds);
 
     /// <summary>The chimes, at Voice:ChimeVolumePercent. Made on first use, so a problem making one can only ever
     /// break the chime, never the listener.</summary>
@@ -570,12 +579,21 @@ public sealed partial class VoiceListener
     public async Task MakeWayForMusicAsync(ulong guildId)
     {
         _musicStarting.AddOrUpdate(guildId, 1, (_, n) => n + 1);
-        // Leaving mid-conversation with no word would look like it broke: it says why first, where it can speak.
+        // Leaving mid-conversation with no word would look like it broke: it says why first, where it can speak. The
+        // music waits for that, but never longer than LeavingForMusicWait, and a problem saying it never keeps the
+        // connection from music (StopAsync always runs, and cuts the line off if it's still going).
         if (_sessions.TryGetValue(guildId, out var session) && session.CanPlay && _voiceOut.Problem is null &&
             CanSpeakIn(session.Channel))
         {
-            await SpeakAsync(session, LeavingForMusicLine, TimeSpan.Zero, TimeSpan.Zero, session.Hushes,
-                couldntSay: null);
+            try
+            {
+                await SpeakAsync(session, LeavingForMusicLine, TimeSpan.Zero, TimeSpan.Zero, session.Hushes,
+                    couldntSay: null).WaitAsync(LeavingForMusicWait);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Didn't finish saying why it's leaving for music in guild {GuildId}.", guildId);
+            }
         }
 
         await StopAsync(guildId);
@@ -946,7 +964,7 @@ public sealed partial class VoiceListener
             _logger.LogInformation("Dropped a voice reply from {User} ({UserId}): under " +
                                    "Voice:FollowUpCooldownSeconds since their last request.", speaker.Username,
                 speaker.Id);
-            BusyChime(session);
+            BusyChime(session, userId);
             return;
         }
 
@@ -971,10 +989,6 @@ public sealed partial class VoiceListener
         // The conversation is with whoever asked last; the server can open it to anyone (/settings voice-follow-ups).
         var anyone = talking && (await _settings.GetAsync(session.Guild.Id)).VoiceFollowUpsFromAnyone;
         var mark = conversation.Asking(DateTimeOffset.UtcNow, speaker.Id, anyone);
-        // Several people asking at once: the answer says whose it is.
-        var addressed = session.OthersAsked(speaker.Id, DateTimeOffset.UtcNow, GroupWindow)
-            ? SpokenName(speaker.DisplayName)
-            : null;
         var hushes = session.Hushes;
         string? answered = null, spoken = null;
         try
@@ -985,7 +999,7 @@ public sealed partial class VoiceListener
             var answeredIn = timer.Elapsed;
             if (answer is { Busy: true })
             {
-                BusyChime(session); // asked again too soon: "heard you, but not right now", not silence
+                BusyChime(session, speaker.Id); // asked again too soon: "heard you, but not right now", not silence
                 answer = null;
             }
 
@@ -999,6 +1013,11 @@ public sealed partial class VoiceListener
             if (!chimed && answer is not null && aloud && conversation.Still(mark))
             {
                 answered = answer.Text;
+                // Several people asking at once: the answer says whose it is. (Only answered requests count as
+                // asking: one dropped for a cooldown doesn't make the next answer someone else's.)
+                var addressed = session.OthersAsked(speaker.Id, DateTimeOffset.UtcNow, GroupWindow)
+                    ? SpokenName(speaker.DisplayName)
+                    : null;
                 var saying = addressed is null ? answer.Text : $"{addressed}, {answer.Text}";
                 spoken = await SpeakAsync(session, saying, heardIn, answeredIn, hushes, couldntSay: answer.InChat
                     ? null
@@ -1096,15 +1115,21 @@ public sealed partial class VoiceListener
     public static string SpeechHint(string name, IEnumerable<string>? extra = null, string? username = null)
     {
         string[] botNames = [.. new[] { name, username ?? "" }.Select(TextTools.Squash).Where(n => n.Length > 0)];
+        bool HasBotName(string text) => botNames.Any(TextTools.Squash(text).Contains);
         var words = new List<string>();
         var length = 0;
-        foreach (var word in (extra ?? []).Select(HintWord)
-                     .Where(w => w.Length > 1 && !botNames.Any(TextTools.Squash(w).Contains))
+        foreach (var word in (extra ?? []).Select(HintWord).Where(w => w.Length > 1 && !HasBotName(w))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (length + word.Length + 2 > MaxHintExtra)
             {
                 break;
+            }
+
+            // Two words next to each other can make the name too ("Mod", "Bot").
+            if (words.Count > 0 && HasBotName(words[^1] + word))
+            {
+                continue;
             }
 
             words.Add(word);
@@ -1121,15 +1146,20 @@ public sealed partial class VoiceListener
         var cut = text.IndexOfAny(['(', '[', '|']);
         var word = string.Join(' ', (cut >= 0 ? text[..cut] : text).Split([' ', '.', ','],
             StringSplitOptions.RemoveEmptyEntries));
-        return word.Length <= 40 ? word : word[..40].TrimEnd();
+        // Cut at 40, but never through an emoji (half of a surrogate pair isn't text).
+        var end = word.Length <= 40 ? word.Length : char.IsHighSurrogate(word[39]) ? 39 : 40;
+        return word[..end].TrimEnd();
     }
+
+    /// <summary>The server's own words for the speech hint, and when they were read.</summary>
+    private sealed record HintCache(DateTimeOffset At, IReadOnlyList<string> Words);
 
     /// <summary>The server's own words for <see cref="SpeechHint"/>: the songs waiting in its queue (in play order),
     /// the people in the channel, and its LFG game and playlists. Read at most every <see cref="HintFor"/> per session,
     /// since every sentence heard (noise included) needs a hint before it's turned into text.</summary>
     private async Task<IReadOnlyList<string>> HintExtraAsync(Session session)
     {
-        if (session.HintWords is { } cached && DateTimeOffset.UtcNow - cached.At < HintFor)
+        if (session.Hint is { } cached && DateTimeOffset.UtcNow - cached.At < HintFor)
         {
             return cached.Words;
         }
@@ -1140,7 +1170,7 @@ public sealed partial class VoiceListener
             var people = session.Channel.ConnectedUsers.Where(u => !u.IsBot).Select(u => u.DisplayName);
             var game = await _settings.LfgGameAsync(session.Guild.Id);
             var words = queue.Concat(people).Append(game.Name).Concat(game.Playlists.Select(p => p.Name)).ToList();
-            session.HintWords = (DateTimeOffset.UtcNow, words);
+            session.Hint = new HintCache(DateTimeOffset.UtcNow, words);
             return words;
         }
         catch (Exception ex)
@@ -1183,8 +1213,15 @@ public sealed partial class VoiceListener
     }
 
     /// <summary>Plays the "heard you, but not right now" chime: a request was dropped because its speaker asked again
-    /// too soon. Without it, being on a cooldown sounds the same as not being heard.</summary>
-    private void BusyChime(Session session) => ChimeAfter(session, _busyChimeSound, "the not-right-now chime");
+    /// too soon. Without it, being on a cooldown sounds the same as not being heard. At most once per person every
+    /// <see cref="BusyChimeEverySeconds"/>, so a noisy mic doesn't chime at every sentence.</summary>
+    private void BusyChime(Session session, ulong userId)
+    {
+        if (_busyChimes.TryClaim(session.Guild.Id, userId, out _))
+        {
+            ChimeAfter(session, _busyChimeSound, "the not-right-now chime");
+        }
+    }
 
     /// <summary>Plays <paramref name="sound"/> (one of the chimes) once anything already playing has finished.</summary>
     private void ChimeAfter(Session session, Lazy<byte[]> sound, string what)
@@ -1626,7 +1663,10 @@ public sealed partial class VoiceListener
             return _askedAt.Keys.Any(id => id != userId);
         }
 
-        /// <summary>The server's own words for the speech hint, and when they were read (see HintExtraAsync).</summary>
-        public (DateTimeOffset At, IReadOnlyList<string> Words)? HintWords { get; set; }
+        /// <summary>The server's own words for the speech hint, and when they were read (see HintExtraAsync). A record,
+        /// swapped whole, so sentences handled at once never see half of one.</summary>
+        public HintCache? Hint { get => Volatile.Read(ref _hint); set => Volatile.Write(ref _hint, value); }
+
+        private HintCache? _hint;
     }
 }
