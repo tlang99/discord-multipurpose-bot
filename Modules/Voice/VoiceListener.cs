@@ -1135,9 +1135,6 @@ public sealed class VoiceListener
         return played ? text : null;
     }
 
-    /// <summary>How loud the music is while the bot talks over it, as a share of how loud it was.</summary>
-    private const float DuckedVolume = 0.25f;
-
     /// <summary>
     /// With music on its own account (<see cref="MusicBot"/>) playing in the same channel, turns it down while the
     /// bot says an answer, and back up after. Answers can overlap (one waits on another), so it's counted: the music
@@ -1145,7 +1142,7 @@ public sealed class VoiceListener
     /// </summary>
     private async Task DuckMusicAsync(Session session, bool down)
     {
-        if (!_musicBot.IsSeparate || !session.TrackDucking(down) ||
+        if (!_musicBot.IsSeparate || !(down ? session.Ducking.Begin() : session.Ducking.End()) ||
             MusicService.GetPlayer(_audio, session.Guild.Id) is not { } player ||
             player.VoiceChannelId != session.Channel.Id)
         {
@@ -1159,18 +1156,12 @@ public sealed class VoiceListener
             if (down)
             {
                 var before = player.Volume;
-                await player.SetVolumeAsync(before * DuckedVolume);
-                session.VolumeBeforeDucking = before;
-                session.DuckedTo = player.Volume; // as the player has it, rounded or not
+                await player.SetVolumeAsync(MusicDucking.Lowered(before, _options.MusicDuckPercent));
+                session.Ducking.TurnedDown(before, player.Volume); // as the player has it, rounded or not
             }
-            else if (session.VolumeBeforeDucking is { } before)
+            else if (session.Ducking.ToRestore(player.Volume) is { } before)
             {
-                // Unless the volume was changed meanwhile: then that's what it should stay at.
-                session.VolumeBeforeDucking = null;
-                if (session.DuckedTo is { } ducked && Math.Abs(player.Volume - ducked) < 0.01f)
-                {
-                    await player.SetVolumeAsync(before);
-                }
+                await player.SetVolumeAsync(before);
             }
         }
         catch (Exception ex)
@@ -1374,18 +1365,8 @@ public sealed class VoiceListener
         /// <summary>Counts <see cref="HushAsync"/> calls: an answer asked for before the latest isn't said.</summary>
         public int Hushes => Volatile.Read(ref _hushes);
 
-        private int _ducks;
-
-        /// <summary>One answer more (<paramref name="down"/>) or less talking over the music. True when that should
-        /// change the volume: the first one turns it down, the last one back up.</summary>
-        public bool TrackDucking(bool down)
-            => down ? Interlocked.Increment(ref _ducks) == 1 : Interlocked.Decrement(ref _ducks) == 0;
-
-        /// <summary>The music's volume before the bot turned it down, to put it back to.</summary>
-        public float? VolumeBeforeDucking { get; set; }
-
-        /// <summary>The volume it was turned down to, as the player reported it after.</summary>
-        public float? DuckedTo { get; set; }
+        /// <summary>Turning the music down while the bot talks over it, and back up after.</summary>
+        public MusicDucking Ducking { get; } = new();
 
         /// <summary>What the bot's saying right now ("" when it isn't), for telling its own voice from someone
         /// talking over it.</summary>

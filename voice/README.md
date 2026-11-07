@@ -73,7 +73,7 @@ Discord gives a bot one voice connection per server, and music (Lavalink) needs 
   leaves voice (`Music:IdleTimeoutSeconds` after the last song, or straight after `/stop`).
 - **A second bot account for music:** music and listening run at once. The second account only joins voice and
   plays: `/play`, the music menu and "hey ModBot, play …" all stay on the main bot. While the bot reads an answer
-  aloud, it turns the music down, and back up after.
+  aloud, it turns the music down (to `Voice:MusicDuckPercent` of its volume, 25% by default), and back up after.
 
 To set up the second account:
 
@@ -128,6 +128,7 @@ available").
 | `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest isn't said. |
 | `ConversationSeconds` | `10` | How long after its last answer it can be replied to without its name (0-60; `0` = no conversations). |
 | `FollowUpCooldownSeconds` | `5` | In a conversation, the least time between one person's requests (0-60). A reply said sooner is dropped. |
+| `MusicDuckPercent` | `25` | With music on its own bot account, how loud it plays while the bot talks, as a percentage of its volume (0-100; `100` = no dip). |
 | `LogRequests` | `false` | Write each voice request, as heard, to the log, to work out why one wasn't understood. The line posted on joining tells people. |
 
 ## Patched Discord.Net

@@ -59,6 +59,12 @@ public class VoiceOptions
     public int FollowUpCooldownSeconds { get; set; } = 5;
 
     /// <summary>
+    /// With music on its own bot account (Bot:MusicToken), how loud the music plays while the bot reads an answer
+    /// over it, as a percentage of how loud it was (0-100; 100 leaves it as it is). It goes back up after.
+    /// </summary>
+    public int MusicDuckPercent { get; set; } = 25;
+
+    /// <summary>
     /// Write each voice request (as speech-to-text heard it) to the log, for working out why one wasn't understood:
     /// what was said after the bot's name, and in a conversation, the replies. Off by default: the log
     /// otherwise never holds what anyone said. While it's on, the line posted on joining voice says so.

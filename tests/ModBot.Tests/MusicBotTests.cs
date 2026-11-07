@@ -21,7 +21,7 @@ public class MusicBotTests
     public void With_one_it_plays_from_that_account()
     {
         using var main = new DiscordSocketClient();
-        using var music = new MusicBot(main, new DiscordSocketClient(MusicBot.ClientConfig));
+        using var music = new MusicBot(main, new DiscordSocketClient(MusicBot.NewClientConfig()));
 
         Assert.True(music.IsSeparate);
         Assert.NotSame(main, music.Client);
@@ -31,7 +31,7 @@ public class MusicBotTests
     public void The_music_account_asks_for_only_what_voice_needs()
     {
         // No privileged intents (members, presences, message content): it only joins voice.
-        Assert.Equal(GatewayIntents.Guilds | GatewayIntents.GuildVoiceStates, MusicBot.ClientConfig.GatewayIntents);
+        Assert.Equal(GatewayIntents.Guilds | GatewayIntents.GuildVoiceStates, MusicBot.NewClientConfig().GatewayIntents);
         Assert.True(MusicBot.InvitePermissions is { ViewChannel: true, Connect: true, Speak: true });
         Assert.Equal(3, MusicBot.InvitePermissions.ToList().Count);
     }
@@ -41,7 +41,7 @@ public class MusicBotTests
     {
         // The link needs the account's ID: a refused token mustn't hand out "client_id=".
         using var main = new DiscordSocketClient();
-        using var music = new MusicBot(main, new DiscordSocketClient(MusicBot.ClientConfig));
+        using var music = new MusicBot(main, new DiscordSocketClient(MusicBot.NewClientConfig()));
 
         Assert.False(music.IsSignedIn);
         Assert.Null(music.InviteLink);

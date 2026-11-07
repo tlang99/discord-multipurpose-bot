@@ -464,8 +464,10 @@ public partial class ChatHandler
                     }
                     else
                     {
-                        (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)asker, channel,
-                            message, request);
+                        var done = await RunActionAsync(action, (SocketGuildUser)asker, channel, message,
+                            request.Aloud);
+                        (text, suppressEmbeds) = (done.Text, done.SuppressEmbeds);
+                        (request.Heard, request.PostAnyway) = (done.Done, done.PostInChat);
                     }
                 }
                 catch (Exception ex)
@@ -531,10 +533,11 @@ public partial class ChatHandler
     /// same rules apply: in a voice channel to play, one open LFG each, the reminder limits). Music and LFG posts go to
     /// their own channels wherever the request was made; reminders are delivered here, replying to the request.
     /// Polls are posted right here, as a reply to the request. Returns the reply (empty when the action already
-    /// answered), and whether to hide link previews in it.
+    /// answered) and what came of it (see <see cref="ActionReply"/>).
     /// </summary>
-    private async Task<(string Text, bool SuppressEmbeds)> RunActionAsync(ChatAction action, SocketGuildUser asker,
-        SocketTextChannel channel, IUserMessage? request, ChatRequest said)
+    /// <param name="aloud">Asked in voice and answered aloud (nothing posted but what the action makes).</param>
+    private async Task<ActionReply> RunActionAsync(ChatAction action, SocketGuildUser asker,
+        SocketTextChannel channel, IUserMessage? request, bool aloud)
     {
         var guild = channel.Guild;
         var requestMessageId = request?.Id;
@@ -553,8 +556,7 @@ public partial class ChatHandler
                     ? await _musicControls.PlayAsync(asker, musicChannel, play.Query)
                     : await _musicControls.AddAsync(asker, musicChannel, play.Query);
                 var where = result.Success && musicChannel.Id != channel.Id ? $" (music's in {musicChannel.Mention})" : "";
-                said.Heard = result.Success; // done: a chime says so in voice
-                return ((result.Text ?? "Done.") + where, result.SuppressEmbeds);
+                return new((result.Text ?? "Done.") + where, result.SuppressEmbeds, Done: result.Success);
             }
 
             case CreateLfgAction lfg:
@@ -573,11 +575,10 @@ public partial class ChatHandler
 
                 // No note from chat: free text on a public card is left to /lfg.
                 var result = await _lfgPoster.PostAsync(asker, lfgChannel, lfg.Players, lfg.Details, note: null);
-                said.Heard = result.Success;
                 return result.Success && result.CardLink is not null
-                    ? ($"{result.Message}\n[Go to your LFG in #{lfgChannel.Name}]({result.CardLink}) - use `/lfg` " +
-                       "if you want to add a note.", true)
-                    : (result.Message, false);
+                    ? new($"{result.Message}\n[Go to your LFG in #{lfgChannel.Name}]({result.CardLink}) - use `/lfg` " +
+                          "if you want to add a note.", SuppressEmbeds: true, Done: true)
+                    : new(result.Message, Done: result.Success);
             }
 
             case SetReminderAction reminder:
@@ -591,16 +592,14 @@ public partial class ChatHandler
                 var result = await _reminders.CreateAtAsync(guild.Id, channel.Id, asker.Id, reminder.DueAt,
                     reminder.Text, applyWordFilter: !TextFilter.IsExempt(asker),
                     sourceMessageId: requestMessageId);
-                said.Heard = result.Success;
-                if (said.Aloud && result.Success)
+                if (aloud && result.Success)
                 {
                     // Said in voice, nothing would show what was set (the chime only says it was): post it in the voice
                     // channel's chat, with whose it is, so the time can be checked and it can be cancelled.
-                    said.PostAnyway = true;
-                    return ($"🎙️ {asker.Mention} {result.Message}", false);
+                    return new($"🎙️ {asker.Mention} {result.Message}", Done: true, PostInChat: true);
                 }
 
-                return (result.Message, false);
+                return new(result.Message, Done: result.Success);
             }
 
             case CreatePollAction poll:
@@ -614,8 +613,7 @@ public partial class ChatHandler
 
                 // The poll is the answer; only a problem gets a reply of its own.
                 var problem = await _polls.PostReplyAsync(asker, channel, draft, request, poll.FromModel);
-                said.Heard = problem is null;
-                return (problem ?? "", false);
+                return new(problem ?? "", Done: problem is null);
             }
 
             case UnclearPollAction:
@@ -627,8 +625,8 @@ public partial class ChatHandler
                 // The reply's own target, which is there even when Discord doesn't attach the message itself.
                 var ended = await _polls.EndRequestedAsync(asker, channel, request?.Reference?.MessageId.ToNullable(),
                     end.SaidMine);
-                said.Heard = ended.StartsWith(PollPoster.EndedText, StringComparison.Ordinal);
-                return (ended, true);
+                return new(ended, SuppressEmbeds: true,
+                    Done: ended.StartsWith(PollPoster.EndedText, StringComparison.Ordinal));
             }
 
             case UnclearSongAction:
@@ -637,6 +635,19 @@ public partial class ChatHandler
             default:
                 return ("I'm not sure how to do that yet.", false);
         }
+    }
+
+    /// <summary>What an action came to (see <see cref="RunActionAsync"/>).</summary>
+    /// <param name="Text">The reply (empty when the action already answered, as a posted poll does).</param>
+    /// <param name="SuppressEmbeds">Hide link previews in it.</param>
+    /// <param name="Done">It worked: said in voice, the "done" chime answers it (<see cref="ChatRequest.Heard"/>).</param>
+    /// <param name="PostInChat">Post the reply even when answering aloud (<see cref="ChatRequest.PostAnyway"/>).</param>
+    private sealed record ActionReply(string Text, bool SuppressEmbeds = false, bool Done = false,
+        bool PostInChat = false)
+    {
+        /// <summary>A reply that isn't a success (a problem, or a question back), with or without link previews.</summary>
+        public static implicit operator ActionReply((string Text, bool SuppressEmbeds) reply)
+            => new(reply.Text, reply.SuppressEmbeds);
     }
 
     /// <summary>The server feature an action belongs to, or null for ones that always work (ending your own poll,

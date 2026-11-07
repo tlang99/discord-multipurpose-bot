@@ -60,9 +60,9 @@ public sealed class MusicBot : IDisposable
     /// <summary>What the music account is invited with: only what playing in voice needs.</summary>
     public static GuildPermissions InvitePermissions { get; } = new(viewChannel: true, connect: true, speak: true);
 
-    /// <summary>The gateway settings for the music account: only what voice needs (servers and who's in which
-    /// voice channel), none of the privileged intents.</summary>
-    public static DiscordSocketConfig ClientConfig => new()
+    /// <summary>A new set of gateway settings for the music account (a client takes its own): only what voice needs
+    /// (servers, and who's in which voice channel), none of the privileged intents.</summary>
+    public static DiscordSocketConfig NewClientConfig() => new()
     {
         GatewayIntents = GatewayIntents.Guilds | GatewayIntents.GuildVoiceStates,
         LogLevel = LogSeverity.Info,

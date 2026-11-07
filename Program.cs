@@ -119,7 +119,7 @@ builder.Services.AddSingleton<DiscordSocketClient>();
 var separateMusicBot = MusicBot.IsSeparateToken(
     builder.Configuration[$"{BotOptions.SectionName}:MusicToken"], builder.Configuration[$"{BotOptions.SectionName}:Token"]);
 builder.Services.AddSingleton(sp => new MusicBot(sp.GetRequiredService<DiscordSocketClient>(),
-    separateMusicBot ? new DiscordSocketClient(MusicBot.ClientConfig) : null));
+    separateMusicBot ? new DiscordSocketClient(MusicBot.NewClientConfig()) : null));
 builder.Services.AddHostedService<MusicBotService>();
 
 builder.Services.AddSingleton(new InteractionServiceConfig
