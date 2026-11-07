@@ -55,7 +55,7 @@ jobs:
             {"id": "lfg-polls-reminders", "name": "LFG, polls and reminders",
              "paths": "Modules/Lfg/ Services/Lfg/ Modules/Polls/ Services/Polls/ Modules/Reminders/ Services/Reminders/ Hosting/LfgExpiryService.cs Hosting/ReminderDeliveryService.cs Hosting/DiscordReminderSender.cs Models/LfgGame.cs Models/LfgPost.cs Models/Reminder.cs Configuration/LfgOptions.cs Configuration/PollOptions.cs Configuration/ReminderOptions.cs"},
             {"id": "settings-news-and-core", "name": "Settings, news and core",
-             "paths": "Program.cs Common/ Hosting/DiscordBotService.cs Hosting/FileLogger.cs Hosting/NewsPollingService.cs Modules/Settings/ Services/Settings/ Modules/Help/ Modules/News/ Services/News/ Services/Storage/ Models/ServerSettings.cs Models/NewsSubscription.cs Configuration/BotOptions.cs Configuration/NewsOptions.cs ModBot.csproj nuget.config appsettings.example.json .github/workflows/"}
+             "paths": "Program.cs Common/ Hosting/DiscordBotService.cs Hosting/FileLogger.cs Hosting/NewsPollingService.cs Modules/Settings/ Services/Settings/ Modules/Help/ Modules/News/ Services/News/ Services/Storage/ Models/ServerSettings.cs Models/NewsSubscription.cs Configuration/BotOptions.cs Configuration/NewsOptions.cs ModBot.csproj nuget.config appsettings.example.json .github/workflows/ .github/actions/"}
           ]'
 
           # Every tracked file outside these (tests, docs, the upstream Discord.Net patch, git settings) must be in
@@ -252,6 +252,14 @@ jobs:
       matrix: ${{ fromJson(needs.areas.outputs.matrix) }}
     name: post (${{ matrix.name }})
     steps:
+      # Only for the shared posting action below (a local action needs the repo checked out). First: checking out
+      # clears the folder, which would delete the downloaded review.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions
+
       - uses: actions/download-artifact@v4
         id: download
         continue-on-error: true
@@ -260,55 +268,14 @@ jobs:
 
       - name: Post the review
         if: steps.download.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TITLE: "Full review: ${{ matrix.name }}"
-        run: |
-          # The review is model output from reading repo text, and this issue is public. Refuse anything that looks
-          # like a token or key (in case text in the repo talked the reviewer into copying one), and defuse every @
-          # with an invisible character after it, so nothing in the review can ping a real account.
-          # A safety net, not a guarantee: it knows the shapes of GitHub, Anthropic and Discord bot tokens and private
-          # keys. Secrets with no fixed shape (the Sightengine key, values in appsettings.json) can't be recognised;
-          # they're kept out by the reviewer only reading the repo, where they never are.
-          secrets='gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}'
-          secrets="$secrets|[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}|-----BEGIN [A-Z ]*PRIVATE KEY"
-          if grep -qE "($secrets)" full-review.md; then
-            echo "::error::The review contains something that looks like a token or key, so it wasn't posted. Check the artifact."
-            exit 1
-          fi
-          sed -i 's/@/@\xe2\x80\x8b/g' full-review.md
-          # Nothing in the review can load from elsewhere (a tracking pixel) when the issue is viewed: Markdown images
-          # become plain links, and HTML tags that fetch something get an invisible character after "<", so they show
-          # as text. (Not every "<": reviews quote C# like List<string>, which must stay readable.)
-          sed -i 's/!\[/[/g' full-review.md
-          sed -i -E 's/<(\/?)(img|picture|source|video|audio|track|iframe|frame|object|embed|svg|image|link|style|base|meta|input|form)\b/<\xe2\x80\x8b\1\2/Ig' full-review.md
-
-          # --force: fine if it already exists.
-          gh label create review --repo "$REPO" --color 5319e7 --force \
-            --description "Findings from the full repo review"
-
-          # GitHub's limit for an issue body is 65,536 characters. Over it, cut at the last whole line that fits (so
-          # no character is split), and close a code block left open by the cut.
-          if [ "$(wc -c < full-review.md)" -gt 65000 ]; then
-            head -c 64000 full-review.md | sed '$d' > body.md
-            if [ $(( $(grep -c '^```' body.md) % 2 )) -eq 1 ]; then
-              printf '\n```\n' >> body.md
-            fi
-            printf '\n\n_(Cut short: the review was longer than GitHub allows in one issue.)_\n' >> body.md
-          else
-            cp full-review.md body.md
-          fi
-
-          # The area's open issue from an earlier run is updated. If it was closed, a new one is opened.
-          number=$(gh issue list --repo "$REPO" --label review --state open --limit 100 \
-            --json number,title --jq '.[] | select(.title == env.TITLE) | .number' | head -n 1)
-          if [ -n "$number" ]; then
-            gh issue edit "$number" --repo "$REPO" --body-file body.md
-            echo "Updated issue #$number."
-          else
-            gh issue create --repo "$REPO" --title "$TITLE" --label review --body-file body.md
-          fi
+        uses: ./.github/actions/post-review-issue
+        with:
+          file: full-review.md
+          title: "Full review: ${{ matrix.name }}"
+          label: review
+          label-description: Findings from the full repo review
+          label-color: 5319e7
+          token: ${{ github.token }}
 
       - name: Note a missing review
         if: steps.download.outcome != 'success'
