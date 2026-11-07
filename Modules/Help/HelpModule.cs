@@ -89,6 +89,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "`/skip` - vote to skip (more than half the listeners; instant if it's your pick)\n" +
                 "`/pause` · `/resume` · `/stop` (the queue's kept; a vote with 3+ in voice) · `/loop`\n" +
                 "`/nowplaying` · `/queue` · `/remove` · `/remove-mine` · `/playnext` · `/shuffle-mine`\n" +
+                "`/volume` · `/seek` · `/restart` · `/previous` · `/history` · `/playagain`\n" +
                 "Or use the buttons on the pinned music menu. Controlling playback works from the bot's voice channel.");
         }
 

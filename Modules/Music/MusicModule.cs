@@ -73,6 +73,30 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     public Task RemoveAsync([Summary(description: "Its position, as shown by /queue")] [MinValue(1)] int position)
         => RunAsync((user, _) => _controls.RemoveAsync(user, position));
 
+    [SlashCommand("volume", "Sets how loud the music plays (kept for next time).")]
+    public Task VolumeAsync([Summary(description: "0-150 (100 is the song as it is)")] [MinValue(0)]
+        [MaxValue(MusicQueueRules.MaxVolume)] int percent)
+        => RunAsync((user, _) => _controls.VolumeAsync(user, to: percent));
+
+    [SlashCommand("seek", "Jumps to a point in the song that's playing.")]
+    public Task SeekAsync([Summary(description: "Where to, like 1:30 (or 90 for seconds)")] string time)
+        => RunAsync((user, _) => TextTools.ParseTime(time) is { } to
+            ? _controls.SeekAsync(user, to)
+            : Task.FromResult(MusicReply.Fail("Say where to as minutes and seconds, like `1:30`, or seconds, like " +
+                                              "`90`.")));
+
+    [SlashCommand("restart", "Starts the song that's playing again from the top.")]
+    public Task RestartAsync() => RunAsync((user, _) => _controls.SeekAsync(user, TimeSpan.Zero));
+
+    [SlashCommand("previous", "Goes back to the song before this one (this one goes back in the queue).")]
+    public Task PreviousAsync() => RunAsync((user, _) => _controls.BackAsync(user), slow: true);
+
+    [SlashCommand("history", "Shows the songs played lately.")]
+    public Task HistoryAsync() => RunAsync((user, _) => _controls.HistoryAsync(user));
+
+    [SlashCommand("playagain", "Adds the song played most recently to the queue again, for you.")]
+    public Task PlayAgainAsync() => RunAsync((user, channel) => _controls.AgainAsync(user, channel), slow: true);
+
     [SlashCommand("playnext", "Makes one of your songs the next of yours to play (nobody else's turn moves).")]
     public Task PlayNextAsync([Summary(description: "Its position, as shown by /queue")] [MinValue(1)] int position)
         => RunAsync((user, _) => _controls.PlayNextAsync(user, position));
@@ -142,6 +166,51 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 
     [ComponentInteraction(MusicQueueService.LoopButton)]
     public Task LoopButtonAsync() => ButtonAsync((user, _) => _controls.LoopNextAsync(user));
+
+    [ComponentInteraction(MusicQueueService.VolumeDownButton)]
+    public Task VolumeDownButtonAsync()
+        => ButtonAsync((user, _) => _controls.VolumeAsync(user, by: -MusicControls.VolumeStep));
+
+    [ComponentInteraction(MusicQueueService.VolumeUpButton)]
+    public Task VolumeUpButtonAsync()
+        => ButtonAsync((user, _) => _controls.VolumeAsync(user, by: MusicControls.VolumeStep));
+
+    [ComponentInteraction(MusicQueueService.BackButton)]
+    public Task BackButtonAsync() => ButtonAsync((user, _) => _controls.BackAsync(user));
+
+    /// <summary>"History": a private list of the songs played lately, to add one again.</summary>
+    [ComponentInteraction(MusicQueueService.HistoryButton)]
+    public async Task HistoryButtonAsync()
+    {
+        var history = await _queue.HistoryAsync(Context.Guild.Id);
+        if (history.Count == 0)
+        {
+            await RespondAsync("Nothing's been played yet.", ephemeral: true);
+            return;
+        }
+
+        // A list holds 25 choices, more than the history keeps (MusicQueueRules.HistoryLength).
+        var pick = new SelectMenuBuilder()
+            .WithCustomId(MusicQueueService.HistoryPick)
+            .WithPlaceholder("Pick a song to add again");
+        foreach (var song in history)
+        {
+            var title = string.IsNullOrWhiteSpace(song.Title) ? "Unknown track" : song.Title; // a choice can't be blank
+            pick.AddOption(TextTools.Truncate(title, 100),
+                song.Id.ToString(),
+                TextTools.Truncate($"{song.PickerName}'s pick · {MusicFormatting.SongLength(song)}", 100));
+        }
+
+        await RespondAsync("Played lately, newest first:",
+            components: new ComponentBuilder().WithSelectMenu(pick).Build(), ephemeral: true);
+    }
+
+    [ComponentInteraction(MusicQueueService.HistoryPick)]
+    public Task HistoryPickedAsync(string[] picked)
+        => ButtonAsync((user, channel) => Guid.TryParse(picked.FirstOrDefault(), out var id)
+            ? _controls.AgainAsync(user, channel, id)
+            : Task.FromResult(MusicReply.Fail("I couldn't tell which song that was - press History again.")),
+            alwaysPrivate: true);
 
     /// <summary>"Remove mine": a private list of the person's waiting songs, to take out one, or all of them.</summary>
     [ComponentInteraction(MusicQueueService.MineButton)]

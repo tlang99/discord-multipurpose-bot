@@ -30,6 +30,10 @@ Add to this list when the owner turns down a suggestion so it stops coming back.
 - **Skip votes don't name the voter.**
 - **A music action said by voice that worked is answered with the done chime, not words** ("Added Mr Brightside,
   you're third up"), so it doesn't talk over the music. Failures are still said. Don't suggest speaking them.
+- **Seek, restart and go back (Back, `/previous`) are for anyone in the bot's voice channel, with no vote**, like
+  pause. Going back cuts off the current song, but puts it back at the front of its picker's songs, so it isn't the
+  same as skipping it.
+- **Volume is for anyone in the bot's voice channel** (or anyone while nothing's playing), saved per server.
 - **Stopping takes a vote with 3 or more in the voice channel** (more than half); with fewer, for whoever started
   the music, or a moderator, it's at once. No undo button instead.
 - **Music code stays in `Modules/Music/`**, not moved into `Services/` behind interfaces. The same goes for
