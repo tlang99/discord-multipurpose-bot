@@ -1,0 +1,82 @@
+name: Post a review as an issue
+description: >
+  Posts a review file the review agent wrote as a public GitHub issue (made safe first), updating the open issue with
+  the same title from an earlier run instead of opening another. Shared by full-review.yml and polish-review.yml.
+
+inputs:
+  file:
+    description: The review file to post.
+    required: true
+  title:
+    description: The issue's title; an open issue with this title (and the label) is updated.
+    required: true
+  label:
+    description: The label the issue gets (made if it doesn't exist).
+    required: true
+  label-description:
+    description: The label's description.
+    required: true
+  label-color:
+    description: The label's colour (hex, no #).
+    required: true
+  token:
+    description: A token that can write issues.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+        FILE: ${{ inputs.file }}
+        TITLE: ${{ inputs.title }}
+        LABEL: ${{ inputs.label }}
+        LABEL_DESCRIPTION: ${{ inputs.label-description }}
+        LABEL_COLOR: ${{ inputs.label-color }}
+      run: |
+        # The review is model output from reading repo text, and this issue is public. Refuse anything that looks
+        # like a token or key (in case text in the repo talked the reviewer into copying one), and defuse every @
+        # with an invisible character after it, so nothing in the review can ping a real account.
+        # A safety net, not a guarantee: it knows the shapes of GitHub, Anthropic and Discord bot tokens and private
+        # keys. Secrets with no fixed shape (the Sightengine key, values in appsettings.json) can't be recognised;
+        # they're kept out by the reviewer only reading the repo, where they never are.
+        secrets='gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}'
+        secrets="$secrets|[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}|-----BEGIN [A-Z ]*PRIVATE KEY"
+        if grep -qE "($secrets)" "$FILE"; then
+          echo "::error::The review contains something that looks like a token or key, so it wasn't posted. Check the artifact."
+          exit 1
+        fi
+        cp "$FILE" safe.md
+        sed -i 's/@/@\xe2\x80\x8b/g' safe.md
+        # Nothing in the review can load from elsewhere (a tracking pixel) when the issue is viewed: Markdown images
+        # become plain links, and HTML tags that fetch something get an invisible character after "<", so they show
+        # as text. (Not every "<": reviews quote C# like List<string>, which must stay readable.)
+        sed -i 's/!\[/[/g' safe.md
+        sed -i -E 's/<(\/?)(img|picture|source|video|audio|track|iframe|frame|object|embed|svg|image|link|style|base|meta|input|form)\b/<\xe2\x80\x8b\1\2/Ig' safe.md
+
+        # --force: fine if it already exists.
+        gh label create "$LABEL" --repo "$REPO" --color "$LABEL_COLOR" --force --description "$LABEL_DESCRIPTION"
+
+        # GitHub's limit for an issue body is 65,536 characters. Over it, cut at the last whole line that fits (so
+        # no character is split), and close a code block left open by the cut.
+        if [ "$(wc -c < safe.md)" -gt 65000 ]; then
+          head -c 64000 safe.md | sed '$d' > body.md
+          if [ $(( $(grep -c '^```' body.md) % 2 )) -eq 1 ]; then
+            printf '\n```\n' >> body.md
+          fi
+          printf '\n\n_(Cut short: the review was longer than GitHub allows in one issue.)_\n' >> body.md
+        else
+          cp safe.md body.md
+        fi
+
+        # The open issue from an earlier run is updated. If it was closed, a new one is opened.
+        number=$(gh issue list --repo "$REPO" --label "$LABEL" --state open --limit 100 \
+          --json number,title --jq '.[] | select(.title == env.TITLE) | .number' | head -n 1)
+        if [ -n "$number" ]; then
+          gh issue edit "$number" --repo "$REPO" --body-file body.md
+          echo "Updated issue #$number."
+        else
+          gh issue create --repo "$REPO" --title "$TITLE" --label "$LABEL" --body-file body.md
+        fi
