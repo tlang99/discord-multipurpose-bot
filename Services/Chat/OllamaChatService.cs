@@ -70,6 +70,11 @@ public class OllamaChatService : IChatService
         try
         {
             using var slot = await _limiter.AcquireAsync(cancellationToken);
+            if (DateTime.UtcNow.Ticks - Interlocked.Read(ref _lastUsed) < (keptFor - TimeSpan.FromSeconds(30)).Ticks)
+            {
+                return; // a question (or another warm-up) loaded it while this one waited
+            }
+
             using var response = await _httpClient.PostAsJsonAsync("api/chat",
                 new OllamaChatRequest(_options.Model, [], Stream: false, KeepAlive: KeepAlive), JsonOptions,
                 cancellationToken);

@@ -86,7 +86,7 @@ public partial class WebSearchAnswerer
     /// <param name="quick">Said in voice: the answer is spoken once this returns, so the page's picture only gets as
     /// long as the answer takes, and a moment more. Typed, it gets its full time.</param>
     public async Task<SearchAnswer> AnswerAsync(ulong guildId, string serverName, string botName, string query,
-        bool quick = false, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, bool quick = false)
     {
         query = query.Trim();
         if (_options.SetupProblem is { } problem)

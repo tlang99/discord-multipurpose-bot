@@ -220,8 +220,8 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     [GeneratedRegex(
         @"^\W*(?:(?:ok(?:ay)?|alright|all\s+right|cool|great|perfect|awesome|nice|got\s+it|sounds\s+good|no|nope)[\s,.!]+)*" +
         @"(?:thanks?(?:\s+you)?|thank\s+you|thx|cheers|that'?s\s+(?:all|it|everything)|never\s*mind|forget\s+it|" +
-        @"(?:we'?re|i'?m)\s+(?:done|good|all\s+set)|nothing(?:\s+else)?|good\s*bye|bye(?:[\s-]+bye)?|see\s+ya|later|" +
-        @"stop(?:\s+talking)?|shut\s+up|be\s+quiet|(?:that'?s\s+)?enough)" +
+        @"(?:we'?re|i'?m)\s+(?:done|good|all\s+set)|nothing(?:\s+else)?|good\s*bye|bye(?:[\s-]+bye)?|see\s+ya|" +
+        @"stop(?:\s+talking)?|shut\s+up|be\s+quiet|that'?s\s+enough)" +
         @"(?:[\s,.!]+(?:so\s+much|a\s+lot|man|dude|bro|buddy|for\s+(?:that|the\s+help)|that'?s\s+(?:all|it)|bye|goodbye))*\W*$",
         RegexOptions.IgnoreCase)]
     private static partial Regex GoodbyeRegex();
