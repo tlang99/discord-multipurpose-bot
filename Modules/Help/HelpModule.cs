@@ -84,8 +84,8 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
             var musicWhere = (await _settings.MusicChannelAsync(Context.Guild)).Where;
             builder.AddField("🎵 Music" + (musicWhere is null ? "" : $" - in {musicWhere}"),
                 "One queue for everyone, kept between listening sessions. Songs play in turns: one from each person.\n" +
-                "`/add` - add a song name or YouTube link (any time, from anywhere)\n" +
-                "`/play` - add it and start the music in your voice channel · `/start` - play the queue\n" +
+                "`/play` or `/add` - add a song name or YouTube link (any time, from anywhere); it starts the music " +
+                "in your voice channel if it isn't playing · `/start` - play the queue\n" +
                 "`/skip` - vote to skip (more than half the listeners; instant if it's your pick)\n" +
                 "`/pause` · `/resume` · `/stop` (the queue's kept) · `/loop`\n" +
                 "`/nowplaying` · `/queue` · `/remove` · `/remove-mine`\n" +

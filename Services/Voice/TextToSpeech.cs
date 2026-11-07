@@ -57,7 +57,9 @@ public sealed class TextToSpeech : IDisposable
         try
         {
             var raw = await RunPiperAsync(text, cancellationToken);
-            return raw is null ? null : VoiceAudio.FromSpeech(raw, _sampleRate.Value);
+            return raw is null
+                ? null
+                : VoiceAudio.FromSpeech(raw, _sampleRate.Value, VoiceAudio.Share(_options.SpeechVolumePercent));
         }
         finally
         {

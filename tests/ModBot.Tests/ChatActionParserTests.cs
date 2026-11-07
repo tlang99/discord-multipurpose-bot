@@ -69,15 +69,15 @@ public sealed class ChatActionParserTests : IDisposable
     }
 
     [Theory]
-    [InlineData("play mr brightside", true)]
-    [InlineData("add mr brightside", false)]
-    [InlineData("can you queue up mr brightside", false)]
-    [InlineData("put mr brightside in the queue", false)]
-    public async Task Add_only_queues_while_play_also_starts_the_music(string message, bool starts)
+    [InlineData("play mr brightside")]
+    [InlineData("add mr brightside")]
+    [InlineData("can you queue up mr brightside")]
+    [InlineData("put mr brightside in the queue")]
+    public async Task Play_and_add_are_the_same_song_request(string message)
     {
         var chat = new FakeChat("""{"action":"play_music","query":"mr brightside"}""");
 
-        Assert.Equal(new PlayMusicAction("mr brightside", starts), await Parser(chat).ParseAsync(message));
+        Assert.Equal(new PlayMusicAction("mr brightside"), await Parser(chat).ParseAsync(message));
     }
 
     [Fact]

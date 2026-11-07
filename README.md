@@ -96,18 +96,20 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   moderators, skip it outright.
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
   pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
-  **Add song** (a pop-up), **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and
-  **Remove mine** (a private list of your waiting songs: take out one, or all of them). The buttons keep working
-  across restarts. Running `/music-menu` again replaces it.
+  **Add song** (a pop-up that works like `/play`: it also starts the music if nothing's playing and you're in voice),
+  **Play** (or **Vote skip**, **Pause**/**Resume** and **Stop** while playing) and **Remove mine** (a private list of
+  your waiting songs: take out one, or all of them). The buttons keep working across restarts. Running `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
   minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
-  notice. Servers with a menu don't get a "Now playing" post for each song either, since the menu shows it.
+  notice. Servers with a menu don't get a "Now playing" post for each song either, since the menu shows it. To keep
+  the channel quiet, the menu also shows news instead of posting it: who added the latest song, a saved song that had
+  to be skipped, and when the music last left voice.
   `Music:KeepMenuAtBottom: false` turns the reposting off.
 
 Commands:
-- `/add query` — a song name (searches YouTube), or a YouTube song or playlist link. Just queues it.
-- `/play query` — the same, and if nothing's playing and you're in a voice channel, starts the music there.
+- `/add query` or `/play query` (the same thing) — a song name (searches YouTube), or a YouTube song or playlist
+  link. It joins the queue, and if nothing's playing and you're in a voice channel, the music starts there.
 - `/start` — plays the queue in your voice channel.
 - `/skip` (a vote), `/pause`, `/resume`, `/stop` (leaves voice; the queue's kept), `/nowplaying`, `/queue [page]`.
 - `/remove position` (your own songs; moderators: anyone's), `/remove-mine`, `/clearqueue` (moderators),
@@ -339,8 +341,8 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
     Otherwise the model pulls them out, and only answers the person actually wrote are kept, because small models
     add their own. With no answers it's a Yes/No poll. "@bot end my poll" ends their newest open poll in the
     channel, or the one they replied to.
-  - **Music:** "@bot add mr brightside" (or "queue up…", "put … in the queue") just queues a song, like `/add`;
-    "play …" also starts the music, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
+  - **Music:** "@bot play mr brightside" (or "add…", "queue up…", "put … in the queue") adds a song and starts the
+    music if it isn't playing, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
     this song", "remove song 3", "remove mr brightside from the queue", "remove my songs", "start the music",
     "where's the music menu?" and the rest of the music commands work by asking too, through the same code as the
     slash commands (so a skip is a vote).
@@ -604,7 +606,7 @@ somewhere else.
 | `/purge` | Manage Messages | Manage Messages |
 | `/modlog`, `/automod`, `/chat personality` | Manage Server | — |
 | `/news` | Manage Server | View Channel, Send Messages, Embed Links (in the news channel) |
-| `/add`, `/play`, `/start` | — (`/play` starts the music, and `/start` plays the queue, in your voice channel; adding works from anywhere) | View Channel, Connect, Speak (in the voice channel) |
+| `/add`, `/play`, `/start` | — (`/add` and `/play` start the music if it isn't playing, and `/start` plays the queue, in your voice channel; adding works from anywhere) | View Channel, Connect, Speak (in the voice channel) |
 | Other music commands | — (controlling playback needs you in the bot's voice channel unless you have Move Members or Manage Messages; `/queue`, `/nowplaying`, `/remove` and `/remove-mine` work from anywhere; all music commands must be used in the music channel, once the server picks one with `/settings channel`) | — |
 | `/music-menu` | Manage Server, plus Send Messages and Pin Messages in that channel | Send Messages, Embed Links; Pin Messages to pin the menu; Manage Messages to delete the pin notices (optional) |
 | `/clearqueue`, removing others' songs | Move Members or Manage Messages | — |

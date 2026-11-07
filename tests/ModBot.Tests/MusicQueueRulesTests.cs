@@ -14,6 +14,9 @@ public sealed class MusicQueueRulesTests
         => Assert.Equal(QueueAddResult.Added,
             MusicQueueRules.Add(state, titles.Select(t => Song(picker, t)).ToList(), picker, 10, 200, out _));
 
+    private static QueuedSong Timed(ulong picker, string title, int minutes)
+        => new() { PickerId = picker, Title = title, Track = title, Duration = TimeSpan.FromMinutes(minutes) };
+
     private static List<string> Titles(IEnumerable<QueuedSong> songs) => songs.Select(s => s.Title).ToList();
 
     [Fact]
@@ -73,6 +76,22 @@ public sealed class MusicQueueRulesTests
         Assert.Equal(QueueAddResult.PersonFull,
             MusicQueueRules.Add(state, [Song(Alice, "a13")], Alice, 10, 200, out _));
         Assert.Equal(QueueAddResult.Added, MusicQueueRules.Add(state, [Song(Bob, "b1")], Bob, 10, 200, out _));
+    }
+
+    [Theory]
+    // 190 waiting (none Alice's) and a cap of 10 each: Alice's own room (10) runs out before the queue's (10) - a
+    // tie goes to the person - so a 15-song playlist that leaves the queue exactly full blames her limit, not the queue.
+    [InlineData(190, 0, QueueAddResult.PersonFull)]
+    // 195 waiting: the queue has room for 5, Alice for 10, so the queue is what stops her.
+    [InlineData(195, 0, QueueAddResult.QueueFull)]
+    // Alice already has 8 of 190: her room (2) is tighter than the queue's (10).
+    [InlineData(190, 8, QueueAddResult.PersonFull)]
+    public void The_tighter_limit_is_the_one_named(int waiting, int alices, QueueAddResult expected)
+    {
+        var state = new MusicQueueState();
+        state.Songs.AddRange(Enumerable.Range(0, waiting).Select(i => Song(i < alices ? Alice : Bob, $"s{i}")));
+
+        Assert.Equal(expected, MusicQueueRules.TighterLimit(state, Alice, perPerson: 10, maxTotal: 200));
     }
 
     [Fact]
@@ -178,4 +197,36 @@ public sealed class MusicQueueRulesTests
             }
         }
     }
+
+    [Fact]
+    public void The_wait_before_a_song_is_the_songs_ahead_of_it_in_turn_order()
+    {
+        var state = new MusicQueueState();
+        MusicQueueRules.Add(state, [Timed(Alice, "a1", 3), Timed(Alice, "a2", 4)], Alice, 10, 200, out _);
+        MusicQueueRules.Add(state, [Timed(Bob, "b1", 5)], Bob, 10, 200, out var bob);
+        var a2 = state.Songs.Single(s => s.Title == "a2");
+
+        Assert.Equal(TimeSpan.FromMinutes(3), MusicQueueRules.WaitBefore(state, bob[0].Id)); // a1, then b1
+        Assert.Equal(TimeSpan.FromMinutes(8), MusicQueueRules.WaitBefore(state, a2.Id)); // a1, b1, then a2
+        Assert.Null(MusicQueueRules.WaitBefore(state, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public void A_live_stream_ahead_makes_the_wait_unknown()
+    {
+        var state = new MusicQueueState();
+        Add(state, Alice, "a1");
+        MusicQueueRules.Add(state, [Song(Bob, "b1")], Bob, 10, 200, out var bob);
+        state.Songs[0].IsLiveStream = true;
+
+        Assert.Null(MusicQueueRules.WaitBefore(state, bob[0].Id));
+    }
+
+    [Theory]
+    [InlineData(30, "under a minute")]
+    [InlineData(60, "about 1 min")]
+    [InlineData(61, "about 2 min")]
+    [InlineData(725, "about 13 min")]
+    public void Waits_read_as_rough_minutes(int seconds, string expected)
+        => Assert.Equal(expected, MusicFormatting.RoughWait(TimeSpan.FromSeconds(seconds)));
 }

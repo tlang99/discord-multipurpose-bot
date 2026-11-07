@@ -67,13 +67,6 @@ public sealed class VoiceListener
     /// <summary>After a join by itself fails, it doesn't try again in that server for this long.</summary>
     private static readonly TimeSpan AfterFailedJoin = TimeSpan.FromMinutes(1);
 
-    /// <summary>Made on first use, so a problem making it can only ever break the chime, never the listener.</summary>
-    private static readonly Lazy<byte[]> ChimeSound = new(VoiceAudio.Chime);
-
-    private static readonly Lazy<byte[]> ExitChimeSound = new(VoiceAudio.ExitChime);
-
-    private static readonly Lazy<byte[]> DoneChimeSound = new(VoiceAudio.DoneChime);
-
     /// <summary>After the bot stops talking, it goes on ignoring what it hears for this long: its own voice can still be
     /// coming back through someone's mic.</summary>
     private static readonly TimeSpan EchoTail = TimeSpan.FromMilliseconds(500);
@@ -113,6 +106,10 @@ public sealed class VoiceListener
     /// (Voice:FollowUpCooldownSeconds).</summary>
     private readonly UserCooldowns _followUps;
 
+    /// <summary>The chimes, at Voice:ChimeVolumePercent. Made on first use, so a problem making one can only ever
+    /// break the chime, never the listener.</summary>
+    private readonly Lazy<byte[]> _chimeSound, _exitChimeSound, _doneChimeSound;
+
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, TextToSpeech voiceOut, IAudioService audio,
         Lazy<ChatHandler> chat, IChatService model, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
         IOptions<VoiceOptions> options, MusicBot musicBot, ILogger<VoiceListener> logger)
@@ -129,6 +126,10 @@ public sealed class VoiceListener
         _options = options.Value;
         _logger = logger;
         _followUps = new UserCooldowns(Math.Clamp(_options.FollowUpCooldownSeconds, 0, 60));
+        var chimeVolume = VoiceAudio.Share(_options.ChimeVolumePercent);
+        _chimeSound = new Lazy<byte[]>(() => VoiceAudio.Chime(chimeVolume));
+        _exitChimeSound = new Lazy<byte[]>(() => VoiceAudio.ExitChime(chimeVolume));
+        _doneChimeSound = new Lazy<byte[]>(() => VoiceAudio.DoneChime(chimeVolume));
         _client.UserVoiceStateUpdated += OnVoiceStateUpdatedAsync;
         // On connecting (and reconnecting), join anyone already sitting in voice.
         _client.GuildAvailable += guild =>
@@ -342,9 +343,12 @@ public sealed class VoiceListener
         // One short line, so whoever's in the channel knows it's listening. (No heads-up for each person who joins,
         // and nothing when it stops: those were just noise.)
         var name = guild.CurrentUser.DisplayName;
+        // Said when answers should be spoken but can't be (no Speak, or no Piper), so the quiet isn't a mystery. Not
+        // when spoken replies are turned off: answering in chat is then the choice.
+        var cantSpeak = _options.SpokenReplies && (!canPlay || _voiceOut.Problem is not null);
         try
         {
-            await replyChannel.SendMessageAsync(ListeningLine(name, _options.LogRequests),
+            await replyChannel.SendMessageAsync(ListeningLine(name, _options.LogRequests, cantSpeak),
                 allowedMentions: AllowedMentions.None);
         }
         catch (Exception ex)
@@ -360,9 +364,11 @@ public sealed class VoiceListener
     /// it.</summary>
     /// <param name="logsRequests">Voice:LogRequests is on: what's asked is written to the bot's log, and people
     /// should know.</param>
-    public static string ListeningLine(string name, bool logsRequests = false)
-        => $"🎙️ Listening for \"hey {name}\". Speech is turned into text on the bot's own computer, only what's said " +
-           $"after my name, or a reply in the moments after I answer, is used, and no audio is kept." +
+    /// <param name="cantSpeak">Answers can't be read aloud here, so they come in chat.</param>
+    public static string ListeningLine(string name, bool logsRequests = false, bool cantSpeak = false)
+        => $"🎙️ Listening for \"hey {name}\"" + (cantSpeak ? " (I can't speak here, so I'll answer in chat)" : "") +
+           ". Speech is turned into text on the bot's own computer, only what's said " +
+           "after my name, or a reply in the moments after I answer, is used, and no audio is kept." +
            (logsRequests ? " What's said to me is written to the bot's log, to fix what I mishear." : "") +
            $" \"Hey {name}, stop listening\" sends me away.";
 
@@ -949,7 +955,7 @@ public sealed class VoiceListener
             // name again.) If the chime can't be played, the answer's said (or posted) as usual instead, so it's
             // never left unconfirmed.
             var chimed = answer is { Heard: true } && aloud && _options.Chime && conversation.Still(mark) &&
-                         await PlayAsync(session, _ => Task.FromResult<byte[]?>(DoneChimeSound.Value), speech: false,
+                         await PlayAsync(session, _ => Task.FromResult<byte[]?>(_doneChimeSound.Value), speech: false,
                              couldntPlay: null, wait: true);
             if (!chimed && answer is not null && aloud && conversation.Still(mark))
             {
@@ -1063,7 +1069,7 @@ public sealed class VoiceListener
     {
         if (_options.Chime)
         {
-            Play(session, _ => Task.FromResult<byte[]?>(ChimeSound.Value), speech: false, couldntPlay: null);
+            Play(session, _ => Task.FromResult<byte[]?>(_chimeSound.Value), speech: false, couldntPlay: null);
         }
     }
 
@@ -1074,7 +1080,7 @@ public sealed class VoiceListener
         _logger.LogInformation("Voice conversation in guild {GuildId} ended: {Why}.", session.Guild.Id, why);
         if (_options.Chime)
         {
-            Background.Run(_logger, () => PlayAsync(session, _ => Task.FromResult<byte[]?>(ExitChimeSound.Value),
+            Background.Run(_logger, () => PlayAsync(session, _ => Task.FromResult<byte[]?>(_exitChimeSound.Value),
                 speech: false, couldntPlay: null, wait: true), LogLevel.Warning,
                 "Couldn't play the closing chime in guild {GuildId}.", session.Guild.Id);
         }

@@ -42,10 +42,10 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
         [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] [MaxLength(200)] string query)
         => RunAsync((user, channel) => _controls.PlayAsync(user, channel, query), slow: true);
 
-    [SlashCommand("add", "Adds a song or playlist to the queue without starting the music.")]
+    [SlashCommand("add", "Adds a song or playlist to the queue, and starts the music if it isn't playing.")]
     public Task AddAsync(
         [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] [MaxLength(200)] string query)
-        => RunAsync((user, channel) => _controls.AddAsync(user, channel, query), slow: true);
+        => RunAsync((user, channel) => _controls.PlayAsync(user, channel, query), slow: true);
 
     [SlashCommand("start", "Starts playing the queue in your voice channel.")]
     public Task StartAsync() => RunAsync((user, channel) => _controls.StartAsync(user, channel), slow: true);
@@ -112,9 +112,11 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     [ComponentInteraction(MusicQueueService.AddButton)]
     public Task AddButtonAsync() => RespondWithModalAsync<AddSongModal>(AddModalId);
 
+    /// <summary>Like /play: adds the song, and starts the music too if nothing's playing and they're in voice. The
+    /// reply stays private; the menu shows the change.</summary>
     [ModalInteraction(AddModalId)]
     public Task AddSubmittedAsync(AddSongModal modal)
-        => ButtonAsync((user, channel) => _controls.AddAsync(user, channel, modal.Query ?? ""), alwaysPrivate: true);
+        => ButtonAsync((user, channel) => _controls.PlayAsync(user, channel, modal.Query ?? ""), alwaysPrivate: true);
 
     [ComponentInteraction(MusicQueueService.PlayButton)]
     public Task PlayButtonAsync() => ButtonAsync((user, channel) => _controls.StartAsync(user, channel));

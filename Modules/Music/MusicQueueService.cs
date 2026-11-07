@@ -52,6 +52,17 @@ public class MusicQueueService : IHostedService
     /// <summary>Skip votes for the song playing in each server. In memory: they only matter for that one song.</summary>
     private readonly ConcurrentDictionary<ulong, SkipVotes> _votes = new();
 
+    /// <summary>The newest thing worth knowing (who added a song, a saved song that had to be skipped), shown on the
+    /// menu rather than posted, so the music channel stays quiet. In memory: it's only news until the next one.</summary>
+    private readonly ConcurrentDictionary<ulong, (string Text, DateTimeOffset At)> _menuNotes = new();
+
+    /// <summary>Puts <paramref name="text"/> on the server's menu as its newest note, dated so an old one reads as old.</summary>
+    private void NoteOnMenu(ulong guildId, string text) => _menuNotes[guildId] = (text, DateTimeOffset.UtcNow);
+
+    /// <summary>When the music last left voice in each server (/stop, the idle timeout, a disconnect), shown on the
+    /// menu while nothing's playing, so a bot that left on its own doesn't look like it crashed.</summary>
+    private readonly ConcurrentDictionary<ulong, DateTimeOffset> _leftVoiceAt = new();
+
     private const string MenuTitle = "🎶 Music queue";
 
     /// <summary>Keeping the menu at the bottom: wait for this long a quiet spell before reposting it...</summary>
@@ -101,10 +112,9 @@ public class MusicQueueService : IHostedService
 
     public Task<MusicQueueState> GetAsync(ulong guildId) => _store.GetAsync(guildId);
 
-    /// <summary>Adds songs for <paramref name="user"/>. With <paramref name="startIfIdle"/> (/play, "play X"), the
-    /// music also starts if nothing's playing and they're in a voice channel; otherwise the songs just wait.</summary>
-    public async Task<MusicReply> AddAsync(SocketGuildUser user, string query, ITextChannel fallbackChannel,
-        bool startIfIdle)
+    /// <summary>Adds songs for <paramref name="user"/>. The music also starts if nothing's playing and they're in a
+    /// voice channel; otherwise the songs just wait.</summary>
+    public async Task<MusicReply> AddAsync(SocketGuildUser user, string query, ITextChannel fallbackChannel)
     {
         if (MusicService.CheckQuery(query) is { } badQuery)
         {
@@ -151,10 +161,14 @@ public class MusicQueueService : IHostedService
             PickerName = user.DisplayName,
         }).ToList();
 
-        var (result, added, position) = await _store.MutateAsync(user.Guild.Id, state =>
+        var (result, added, position, wait, limit) = await _store.MutateAsync(user.Guild.Id, state =>
         {
+            // Read before the add: which limit a playlist that doesn't all fit was stopped by.
+            var tighter = MusicQueueRules.TighterLimit(state, user.Id, SongsPerPerson, MaxQueueLength);
             var outcome = MusicQueueRules.Add(state, songs, user.Id, SongsPerPerson, MaxQueueLength, out var taken);
-            return (outcome, taken, taken.Count > 0 ? MusicQueueRules.PositionOf(state, taken[0].Id) : -1);
+            var first = taken.Count > 0 ? taken[0].Id : Guid.Empty;
+            return (outcome, taken, MusicQueueRules.PositionOf(state, first), MusicQueueRules.WaitBefore(state, first),
+                tighter);
         });
 
         switch (result)
@@ -166,23 +180,30 @@ public class MusicQueueService : IHostedService
                 return MusicReply.Fail($"The queue is full ({MaxQueueLength} songs).");
         }
 
+        // A playlist that didn't all fit says so plainly, so nobody thinks the rest are coming.
+        var cap = limit == QueueAddResult.QueueFull
+            ? $"the queue holds {MaxQueueLength}"
+            : $"each person can have {SongsPerPerson} waiting";
         var what = lookup.IsPlaylist
-            ? $"**{added.Count}** songs from **{TextTools.Escape(playlistName!)}**" +
-              (added.Count < songs.Count ? $" (the most you can have waiting is {SongsPerPerson})" : "") +
+            ? (added.Count < songs.Count
+                  ? $"the first **{added.Count}** of {songs.Count} songs from **{TextTools.Escape(playlistName!)}** " +
+                    $"(the rest weren't added - {cap})"
+                  : $"**{added.Count}** songs from **{TextTools.Escape(playlistName!)}**") +
               (filtered > 0 ? $" (skipped {filtered} whose titles break the word filter)" : "")
             : $"{MusicFormatting.SongLink(added[0])} ({MusicFormatting.SongLength(added[0])})";
         var text = new StringBuilder($"➕ {user.Mention} added {what}");
 
         var player = _music.GetPlayer(user.Guild.Id);
         var idle = player?.CurrentItem is null;
-        if (startIfIdle && idle && user.VoiceChannel is not null)
+        if (idle && user.VoiceChannel is not null)
         {
             var start = await StartAsync(user, fallbackChannel);
             text.Append(start.Success ? $". {start.Text}" : $". (Couldn't start the music: {start.Text})");
         }
         else
         {
-            text.Append(position > 0 ? $" - #{position} in the turns." : ".");
+            var eta = idle ? null : TimeUntil(player!, wait);
+            text.Append(position > 0 ? $" - #{position} in the turns{(eta is null ? "" : $", {eta} away")}." : ".");
             if (idle)
             {
                 text.Append(" Nothing's playing yet: join a voice channel and press **Play** on the music menu " +
@@ -190,8 +211,23 @@ public class MusicQueueService : IHostedService
             }
         }
 
+        NoteOnMenu(user.Guild.Id, $"➕ <@{user.Id}> added {what}.");
         RefreshMenu(user.Guild.Id);
         return MusicReply.Ok(text.ToString());
+    }
+
+    /// <summary>Roughly how long until a song plays, given how long the songs ahead of it last: what's left of the
+    /// current one plus those. Null when that can't be known (a live stream, or a song looping until skipped).</summary>
+    private static string? TimeUntil(MusicPlayer player, TimeSpan? songsAhead)
+    {
+        if (songsAhead is not { } ahead || player.CurrentItem?.Track is not { IsLiveStream: false } track ||
+            player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track)
+        {
+            return null;
+        }
+
+        var left = track.Duration - (player.Position?.Position ?? TimeSpan.Zero);
+        return MusicFormatting.RoughWait(ahead + (left > TimeSpan.Zero ? left : TimeSpan.Zero));
     }
 
     /// <summary>Starts the music: the bot joins <paramref name="user"/>'s voice channel and plays the next turn.</summary>
@@ -286,8 +322,9 @@ public class MusicQueueService : IHostedService
         if (count < needed)
         {
             RefreshMenu(user.Guild.Id);
-            return MusicReply.Ok($"🗳️ {user.Mention} voted to skip {MusicFormatting.TrackLink(current.Track)} " +
-                                 $"(**{count}/{needed}** - more than half the listeners skips it).") with { Announce = false };
+            // Short: how skipping works is on the menu, and this is read out again on every vote.
+            return MusicReply.Ok($"🗳️ Skip vote **{count}/{needed}** for {MusicFormatting.TrackLink(current.Track)}.")
+                with { Announce = false };
         }
 
         // Null when the song had already finished.
@@ -513,6 +550,8 @@ public class MusicQueueService : IHostedService
             {
                 _logger.LogWarning("Dropping a saved song that can't be read: '{Title}' in guild {GuildId}.",
                     song.Title, player.GuildId);
+                NoteOnMenu(player.GuildId, $"⚠️ Skipped {MusicFormatting.SongLink(song)} (<@{song.PickerId}>'s " +
+                                           "pick): its saved copy couldn't be read. Add it again to hear it.");
                 continue;
             }
 
@@ -526,6 +565,7 @@ public class MusicQueueService : IHostedService
     private Task OnTrackStartedAsync(MusicPlayer player, ITrackQueueItem item)
     {
         _votes.TryRemove(player.GuildId, out _);
+        _leftVoiceAt.TryRemove(player.GuildId, out _); // playing again: the last "left voice" time is old news
         RefreshMenu(player.GuildId);
         return Task.CompletedTask;
     }
@@ -563,6 +603,7 @@ public class MusicQueueService : IHostedService
     private Task OnPlayerClosedAsync(ulong guildId)
     {
         _votes.TryRemove(guildId, out _);
+        _leftVoiceAt[guildId] = DateTimeOffset.UtcNow;
         RefreshMenu(guildId);
         return Task.CompletedTask;
     }
@@ -640,13 +681,24 @@ public class MusicQueueService : IHostedService
         }
         else
         {
-            embed.WithDescription("Not playing right now. Add songs any time - they wait here. When you're ready, " +
-                                  "join a voice channel and press **Play**.");
+            var left = _leftVoiceAt.TryGetValue(state.GuildId, out var at)
+                ? $" (left voice <t:{at.ToUnixTimeSeconds()}:R>)"
+                : "";
+            embed.WithDescription($"Not playing right now{left}. Add songs any time - they wait here. When you're " +
+                                  "ready, join a voice channel and press **Play**.");
+        }
+
+        if (_menuNotes.TryGetValue(state.GuildId, out var note))
+        {
+            // Dated with Discord's relative time ("2 hours ago"), kept even when a long note is cut to a field's limit.
+            var when = $" <t:{note.At.ToUnixTimeSeconds()}:R>";
+            var room = 1024 - when.Length;
+            embed.AddField("Latest", (note.Text.Length <= room ? note.Text : note.Text[..(room - 1)] + "…") + when);
         }
 
         var order = MusicQueueRules.Order(state);
         embed.AddField("Up next", order.Count == 0
-            ? "*Nothing yet - press **Add song**, use `/add`, or ask me.*"
+            ? "*Nothing yet - press **Add song**, use `/play`, or ask me.*"
             : FitField(order.Take(10).Select((s, i) => $"`{i + 1}.` {MusicFormatting.SongLink(s)} - <@{s.PickerId}>"),
                 order.Count, "\n"));
 

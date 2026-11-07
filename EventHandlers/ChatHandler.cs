@@ -551,10 +551,8 @@ public partial class ChatHandler
                     return (music.Missing("Music goes"), false);
                 }
 
-                // Into the standing queue, in the person's turns. "Play" also starts the music if it isn't playing.
-                var result = play.StartPlaying
-                    ? await _musicControls.PlayAsync(asker, musicChannel, play.Query)
-                    : await _musicControls.AddAsync(asker, musicChannel, play.Query);
+                // Into the standing queue, in the person's turns, starting the music if it isn't playing (play or add alike).
+                var result = await _musicControls.PlayAsync(asker, musicChannel, play.Query);
                 var where = result.Success && musicChannel.Id != channel.Id ? $" (music's in {musicChannel.Mention})" : "";
                 return new((result.Text ?? "Done.") + where, result.SuppressEmbeds, Done: result.Success);
             }

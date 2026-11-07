@@ -1,3 +1,5 @@
+using ModBot.Configuration;
+
 namespace ModBot.Services.Voice;
 
 /// <summary>The audio formats involved: what Discord gives the bot, and what speech-to-text (Whisper) wants.</summary>
@@ -37,8 +39,9 @@ public static class VoiceAudio
     /// <summary>One 20 ms frame of Discord audio, the unit it's encoded and sent in.</summary>
     public const int FrameBytes = DiscordBytesPerSecond / 50;
 
-    /// <summary>The loudest the chime gets, as a share of full volume: soft, so it doesn't make anyone jump.</summary>
-    public const double ChimeVolume = 0.2;
+    /// <summary>The loudest the chimes get unless set otherwise (Voice:ChimeVolumePercent), as a share of full volume:
+    /// soft, so they don't make anyone jump.</summary>
+    public const double ChimeVolume = VoiceOptions.DefaultChimeVolumePercent / 100.0;
 
     /// <summary>
     /// The "I heard my name" chime, in Discord's format (48 kHz stereo 16-bit): two soft marimba-like notes rising (G5,
@@ -46,19 +49,20 @@ public static class VoiceAudio
     /// download. Each note strikes quickly and dies away naturally, with a short fade at the end to keep it from
     /// clicking.
     /// </summary>
-    public static byte[] Chime() => Notes(784.0, 1046.5);
+    public static byte[] Chime(double volume = ChimeVolume) => Notes(volume, 784.0, 1046.5);
 
     /// <summary>The "I'm done listening" chime, for when a conversation ends: <see cref="Chime"/> the other way round,
     /// falling (C6, then G5).</summary>
-    public static byte[] ExitChime() => Notes(1046.5, 784.0);
+    public static byte[] ExitChime(double volume = ChimeVolume) => Notes(volume, 1046.5, 784.0);
 
     /// <summary>The "done" chime, for a request whose result you can hear (the music started, stopped or skipped):
     /// three notes, low, high, low (C6, E6, C6; the last left to ring, as in every chime), a step above
     /// <see cref="Chime"/> so it's told apart from "I heard my name" and the closing chime.</summary>
-    public static byte[] DoneChime() => Notes(1046.5, 1318.5, 1046.5);
+    public static byte[] DoneChime(double volume = ChimeVolume) => Notes(volume, 1046.5, 1318.5, 1046.5);
 
-    /// <summary>Quick marimba-like notes in a row, the last one left to ring out.</summary>
-    private static byte[] Notes(params double[] frequencies)
+    /// <summary>Quick marimba-like notes in a row, the last one left to ring out, peaking at <paramref name="volume"/>
+    /// (a share of full volume).</summary>
+    private static byte[] Notes(double volume, params double[] frequencies)
     {
         // A marimba's bar rings at its note plus faint overtones at 4x and 10x, which die away faster than the note.
         (double Ratio, double Level)[] overtones = [(4.0, 0.25), (10.0, 0.05)];
@@ -67,17 +71,23 @@ public static class VoiceAudio
                 : Note(frequency, 0.32, decay: 0.10, overtones))
             .ToArray();
         var peak = samples.Max(Math.Abs);
-        return ToDiscord(samples, ChimeVolume / peak);
+        return ToDiscord(samples, volume / peak);
     }
 
-    /// <summary>The share of full volume spoken replies are played at: a little under, so they don't clip or blare.</summary>
-    public const double SpeechVolume = 0.8;
+    /// <summary>The share of full volume spoken replies are played at unless set otherwise
+    /// (Voice:SpeechVolumePercent): a little under, so they don't clip or blare.</summary>
+    public const double SpeechVolume = VoiceOptions.DefaultSpeechVolumePercent / 100.0;
+
+    /// <summary>A volume setting, a percentage of full volume (0-100), as the share the chimes and
+    /// <see cref="FromSpeech"/> take.</summary>
+    public static double Share(int percent) => Math.Clamp(percent, 0, 100) / 100.0;
 
     /// <summary>
     /// Speech from text-to-speech (16-bit mono at <paramref name="sampleRate"/>, Piper's raw output) in Discord's
-    /// format, resampled to 48 kHz by straight-line interpolation between samples, which is plenty for a voice.
+    /// format, resampled to 48 kHz by straight-line interpolation between samples, which is plenty for a voice, at
+    /// <paramref name="volume"/> (a share of full volume).
     /// </summary>
-    public static byte[] FromSpeech(ReadOnlySpan<byte> mono16, int sampleRate)
+    public static byte[] FromSpeech(ReadOnlySpan<byte> mono16, int sampleRate, double volume = SpeechVolume)
     {
         var count = mono16.Length / 2;
         if (count == 0 || sampleRate <= 0)
@@ -97,7 +107,7 @@ public static class VoiceAudio
                         BitConverter.ToInt16(mono16[(after * 2)..]) * weight;
         }
 
-        return ToDiscord(output, SpeechVolume / short.MaxValue);
+        return ToDiscord(output, volume / short.MaxValue);
     }
 
     /// <summary>48 kHz mono <paramref name="samples"/>, times <paramref name="gain"/> to make full volume 1, as

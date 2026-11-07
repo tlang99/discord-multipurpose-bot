@@ -38,12 +38,11 @@ public static class MusicQueueRules
     public static QueueAddResult Add(MusicQueueState state, IReadOnlyList<QueuedSong> songs, ulong pickerId,
         int perPerson, int maxTotal, out List<QueuedSong> added)
     {
-        var mine = state.Songs.Count(s => s.PickerId == pickerId);
-        var room = Math.Min(perPerson - mine, maxTotal - state.Songs.Count);
+        var room = Math.Min(perPerson - state.Songs.Count(s => s.PickerId == pickerId), maxTotal - state.Songs.Count);
         if (room <= 0)
         {
             added = [];
-            return mine >= perPerson ? QueueAddResult.PersonFull : QueueAddResult.QueueFull;
+            return TighterLimit(state, pickerId, perPerson, maxTotal);
         }
 
         added = songs.Take(room).ToList();
@@ -55,6 +54,13 @@ public static class MusicQueueRules
 
         return QueueAddResult.Added;
     }
+
+    /// <summary>Which limit an add for <paramref name="pickerId"/> runs into first, checked before the add: the
+    /// person's own (PersonFull) or the whole queue's (QueueFull). The person's own when both have the same room.</summary>
+    public static QueueAddResult TighterLimit(MusicQueueState state, ulong pickerId, int perPerson, int maxTotal)
+        => perPerson - state.Songs.Count(s => s.PickerId == pickerId) <= maxTotal - state.Songs.Count
+            ? QueueAddResult.PersonFull
+            : QueueAddResult.QueueFull;
 
     /// <summary>Takes the next song off the queue (it's someone else's turn after it), or null if none are waiting.</summary>
     public static QueuedSong? TakeNext(MusicQueueState state)
@@ -169,6 +175,18 @@ public static class MusicQueueRules
     /// <summary>Where a song is in play order: 1 = next; -1 if it's not waiting.</summary>
     public static int PositionOf(MusicQueueState state, Guid songId)
         => Order(state).FindIndex(s => s.Id == songId) is var index and >= 0 ? index + 1 : -1;
+
+    /// <summary>How long the songs ahead of this one in play order last together (not counting what's playing now),
+    /// or null if it's not waiting or a live stream ahead makes that unknowable.</summary>
+    public static TimeSpan? WaitBefore(MusicQueueState state, Guid songId)
+    {
+        var order = Order(state);
+        var index = order.FindIndex(s => s.Id == songId);
+        var ahead = order.Take(Math.Max(0, index)).ToList();
+        return index < 0 || ahead.Any(s => s.IsLiveStream)
+            ? null
+            : ahead.Aggregate(TimeSpan.Zero, (sum, s) => sum + s.Duration);
+    }
 
     /// <summary>Drops people with nothing waiting from the turns, so the list doesn't grow forever. Whoever played
     /// last stays until the turn moves on, since the next turn is worked out from where they are.</summary>
