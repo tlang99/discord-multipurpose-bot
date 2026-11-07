@@ -127,7 +127,9 @@ public partial class ChatHandler
 
     /// <summary>An answer to a spoken request: what to say (after the word filter), and whether it's in chat already
     /// (a web search's embed, or an answer that couldn't be said aloud).</summary>
-    public sealed record VoiceAnswer(string Text, bool InChat);
+    /// <param name="Heard">Done, and audibly so (see <see cref="ChatRequest.Heard"/>): confirm with a chime, not
+    /// the words.</param>
+    public sealed record VoiceAnswer(string Text, bool InChat, bool Heard = false);
 
     /// <summary>
     /// Something said in voice after the bot's name (<see cref="VoiceListener"/>), handled exactly like the same words
@@ -188,7 +190,7 @@ public partial class ChatHandler
 
         var said = new ChatRequest(channel, heard, speaker, request, request, Spoken: true, Earlier: earlier);
         await RespondAsync(allowed, said);
-        return said.Answer is { } answer ? new VoiceAnswer(answer, said.AnswerInChat) : null;
+        return said.Answer is { } answer ? new VoiceAnswer(answer, said.AnswerInChat, said.Heard) : null;
     }
 
     /// <summary>For an answer that was to be spoken but couldn't be (text-to-speech failed): posts what was heard and
@@ -250,6 +252,10 @@ public partial class ChatHandler
 
         /// <summary>Whether the answer was posted in chat too.</summary>
         public bool AnswerInChat { get; set; }
+
+        /// <summary>Done, and the people in voice can hear that it was (the music started, stopped or skipped):
+        /// said in voice, a confirmation chime answers it instead of reading the reply out.</summary>
+        public bool Heard { get; set; }
     }
 
     /// <summary>True (after a ⏳ on the message) if the asker has to wait. Counts the request otherwise.</summary>
@@ -428,6 +434,12 @@ public partial class ChatHandler
                         var music = await RunMusicControlAsync(action, (SocketGuildUser)asker, channel,
                             request.Spoken);
                         (text, suppressEmbeds, embed) = (music.Text ?? "", music.SuppressEmbeds, music.Embed);
+                        // Said in voice, a change you can hear is its own answer: a chime, not the words.
+                        request.Heard = music.Success && action is MusicControlAction
+                        {
+                            Request.Command: MusicCommand.Skip or MusicCommand.Stop or MusicCommand.Pause or
+                            MusicCommand.Resume or MusicCommand.Start,
+                        };
                     }
                     else if (action is WebSearchAction search)
                     {
@@ -447,7 +459,7 @@ public partial class ChatHandler
                     else
                     {
                         (text, suppressEmbeds) = await RunActionAsync(action, (SocketGuildUser)asker, channel,
-                            message);
+                            message, request);
                     }
                 }
                 catch (Exception ex)
@@ -516,7 +528,7 @@ public partial class ChatHandler
     /// answered), and whether to hide link previews in it.
     /// </summary>
     private async Task<(string Text, bool SuppressEmbeds)> RunActionAsync(ChatAction action, SocketGuildUser asker,
-        SocketTextChannel channel, IUserMessage? request)
+        SocketTextChannel channel, IUserMessage? request, ChatRequest said)
     {
         var guild = channel.Guild;
         var requestMessageId = request?.Id;
@@ -535,6 +547,7 @@ public partial class ChatHandler
                     ? await _musicControls.PlayAsync(asker, musicChannel, play.Query)
                     : await _musicControls.AddAsync(asker, musicChannel, play.Query);
                 var where = result.Success && musicChannel.Id != channel.Id ? $" (music's in {musicChannel.Mention})" : "";
+                said.Heard = result.Success; // the song starting, or going in the queue: a chime says so in voice
                 return ((result.Text ?? "Done.") + where, result.SuppressEmbeds);
             }
 

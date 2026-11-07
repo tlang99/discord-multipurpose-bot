@@ -52,11 +52,21 @@ public static class VoiceAudio
     /// falling (C6, then G5).</summary>
     public static byte[] ExitChime() => TwoNotes(1046.5, 784.0);
 
-    private static byte[] TwoNotes(double first, double second)
+    /// <summary>The "done" chime, for a request whose result you can hear (the music started, stopped or skipped):
+    /// three notes, low, high, low (C6, E6, C6), a step above <see cref="Chime"/> so it's told apart from "I heard my
+    /// name" and the closing chime.</summary>
+    public static byte[] DoneChime() => Notes(1046.5, 1318.5, 1046.5);
+
+    private static byte[] TwoNotes(double first, double second) => Notes(first, second);
+
+    /// <summary>Quick marimba-like notes in a row, the last one left to ring out.</summary>
+    private static byte[] Notes(params double[] frequencies)
     {
         // A marimba's bar rings at its note plus faint overtones at 4x and 10x, which die away faster than the note.
         (double Ratio, double Level)[] overtones = [(4.0, 0.25), (10.0, 0.05)];
-        var samples = Note(first, 0.16, decay: 0.06, overtones).Concat(Note(second, 0.32, decay: 0.10, overtones))
+        var samples = frequencies.SelectMany((frequency, i) => i < frequencies.Length - 1
+                ? Note(frequency, 0.16, decay: 0.06, overtones)
+                : Note(frequency, 0.32, decay: 0.10, overtones))
             .ToArray();
         var peak = samples.Max(Math.Abs);
         return ToDiscord(samples, ChimeVolume / peak);

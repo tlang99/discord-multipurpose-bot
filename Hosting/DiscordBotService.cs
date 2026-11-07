@@ -246,7 +246,11 @@ public class DiscordBotService : BackgroundService
         return Task.CompletedTask;
     }
 
-    private Task LogAsync(LogMessage message)
+    private Task LogAsync(LogMessage message) => Forward(_logger, message);
+
+    /// <summary>Writes a Discord.Net log message to <paramref name="logger"/>, at the matching level (for the music bot
+    /// account too, see <see cref="MusicBotService"/>).</summary>
+    internal static Task Forward(ILogger logger, LogMessage message)
     {
         var level = message.Severity switch
         {
@@ -279,7 +283,7 @@ public class DiscordBotService : BackgroundService
             level = LogLevel.Debug;
         }
 
-        _logger.Log(level, message.Exception, "[{Source}] {Message}", message.Source, message.Message);
+        logger.Log(level, message.Exception, "[{Source}] {Message}", message.Source, message.Message);
         return Task.CompletedTask;
     }
 }

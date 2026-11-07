@@ -166,6 +166,10 @@ public partial class ChatActionParser
             return new MusicControlAction(control);
         }
 
+        // Speech-to-text puts a comma wherever someone paused: "Play, stay fly." reads to the model as chat ("stay
+        // cool"), while "Play stay fly." is plainly a song.
+        message = PauseAfterPlay(message);
+
         string kind;
         try
         {
@@ -195,6 +199,14 @@ public partial class ChatActionParser
                 return null;
         }
     }
+
+    /// <summary>"Play, stay fly." as "Play stay fly.": punctuation straight after a leading "play" / "put on" /
+    /// "queue" is a pause in speech, not a break in meaning.</summary>
+    public static string PauseAfterPlay(string message) => PauseAfterPlayRegex().Replace(message, "$1 ", 1);
+
+    [GeneratedRegex(@"^(\W*(?:(?:hey|ok(?:ay)?|please|can\s+you|could\s+you)[\s,]+)*(?:play|put\s+on|queue(?:\s+up)?))\s*[,.:;!\-–]+\s*",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex PauseAfterPlayRegex();
 
     private async Task<ChatAction> ReadMusicControlAsync(string message, CancellationToken cancellationToken)
     {

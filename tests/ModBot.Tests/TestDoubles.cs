@@ -33,9 +33,15 @@ internal sealed class FakeChat(string reply, bool fail = false, bool failJson = 
         return fail ? throw new ChatServiceException("boom") : Task.FromResult(reply);
     }
 
+    /// <summary>The last message <see cref="CompleteJsonAsync"/> was given.</summary>
+    public string? LastMessage { get; private set; }
+
     public Task<string> CompleteJsonAsync(string systemPrompt, string userMessage, string jsonSchema,
         CancellationToken cancellationToken = default)
-        => failJson ? throw new ChatServiceException("boom") : Task.FromResult(reply);
+    {
+        LastMessage = userMessage;
+        return failJson ? throw new ChatServiceException("boom") : Task.FromResult(reply);
+    }
 }
 
 /// <summary>A JSON reminder store in a temp folder, deleted afterwards.</summary>
