@@ -129,7 +129,12 @@ public partial class ChatHandler
     /// (a web search's embed, or an answer that couldn't be said aloud).</summary>
     /// <param name="Heard">An action that worked (see <see cref="ChatRequest.Heard"/>): confirm with a chime, not
     /// the words.</param>
-    public sealed record VoiceAnswer(string Text, bool InChat, bool Heard = false);
+    /// <param name="Busy">Not answered because the speaker asked again too soon (the chatbot's cooldown): there's no
+    /// <paramref name="Text"/>, and the bot plays its "not right now" chime instead.</param>
+    public sealed record VoiceAnswer(string Text, bool InChat, bool Heard = false, bool Busy = false)
+    {
+        public static readonly VoiceAnswer TooSoon = new("", InChat: false, Busy: true);
+    }
 
     /// <summary>
     /// Something said in voice after the bot's name (<see cref="VoiceListener"/>), handled exactly like the same words
@@ -137,7 +142,8 @@ public partial class ChatHandler
     /// <para>With <paramref name="aloud"/>, the answer is only spoken, not posted: nothing goes in chat but what an
     /// action posts itself (a poll, an LFG card, a web search's embed under "🎙️ @name searched: …"). Otherwise, what
     /// was heard is posted ("🎙️ @name: …") and the answer replies to it, as typed.</para>
-    /// Returns the answer, or null if there was none.
+    /// Returns the answer, <see cref="VoiceAnswer.TooSoon"/> if the speaker's on the cooldown, or null if there was
+    /// none.
     /// </summary>
     /// <param name="earlier">In a voice conversation (see <see cref="VoiceConversation"/>): what was said and answered
     /// so far, for the chatbot to follow on from. Its requests skip the cooldown (VoiceListener holds
@@ -162,11 +168,11 @@ public partial class ChatHandler
         }
 
         // The cooldown is checked (and counted) here, before anything's posted: typed, a request during it gets a ⏳,
-        // but said, there'd be nothing to put that on but a fresh post of what was heard. So it's just dropped, and a
-        // chatty speaker or a noisy mic can't flood the channel.
+        // but said, there'd be nothing to put that on but a fresh post of what was heard. So nothing's posted (a chatty
+        // speaker or a noisy mic can't flood the channel), and the listener plays its "not right now" chime instead.
         if (earlier is not { Count: > 0 } && IsOnCooldown(guild.Id, speaker.Id))
         {
-            return null;
+            return VoiceAnswer.TooSoon;
         }
 
         // What was heard is posted in the bot's name, so it follows the rules for the bot's own posts: the server's word

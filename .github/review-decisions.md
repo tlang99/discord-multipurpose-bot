@@ -9,10 +9,14 @@ Add to this list when the owner turns down a suggestion so it stops coming back.
 - **No status posts beyond the one join line.** When it joins (by hand or auto-join) it posts one line, including
   the privacy note, every time. No "stopped listening" or "left" posts and no DMs, even when it leaves on its own
   (the time limit, a lost connection, being moved or kicked). The wake chime is the signal: if "hey `@ModBot`" gets
-  no chime, it isn't listening.
+  no chime, it isn't listening. The one exception (approved 2026-11-07): in one-bot mode, when someone starts music
+  and listening has to stop, it says why aloud once ("Starting the music. I can't listen while it's on…") before
+  leaving. That's spoken, not posted, and it's because someone asked for music, not because it left on its own.
 - **Answers are spoken only, not posted.** A spoken answer longer than `Voice:MaxSpokenCharacters` is cut, and the
   cut is logged. The full answer isn't posted in chat. (It falls back to chat only when it can't speak.)
 - **The join line's privacy wording stays in full**, on every join, not shortened on later auto-joins.
+- **The closing chime plays at the end of every conversation**, even after a single question. That's by design:
+  don't suggest skipping it, or a setting to turn it off.
 - **Auto-join is opt-in** (its own feature) and needs Set Voice Channel Status.
 - **Anyone may start voice listening**, not just moderators.
 

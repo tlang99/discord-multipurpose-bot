@@ -60,6 +60,10 @@ public static class VoiceAudio
     /// <see cref="Chime"/> so it's told apart from "I heard my name" and the closing chime.</summary>
     public static byte[] DoneChime(double volume = ChimeVolume) => Notes(volume, 1046.5, 1318.5, 1046.5);
 
+    /// <summary>The "heard you, but not right now" chime, for a request dropped because the person asked again too
+    /// soon: two notes falling, lower than the others (E5, then C5), so it's told apart from the closing chime.</summary>
+    public static byte[] BusyChime(double volume = ChimeVolume) => Notes(volume, 659.3, 523.3);
+
     /// <summary>Quick marimba-like notes in a row, the last one left to ring out, peaking at <paramref name="volume"/>
     /// (a share of full volume).</summary>
     private static byte[] Notes(double volume, params double[] frequencies)
