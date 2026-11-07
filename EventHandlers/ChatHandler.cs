@@ -466,7 +466,7 @@ public partial class ChatHandler
                     {
                         var done = await RunActionAsync(action, (SocketGuildUser)asker, channel, message,
                             request.Aloud);
-                        (text, suppressEmbeds) = (done.Text, done.SuppressEmbeds);
+                        (text, suppressEmbeds, spoken) = (done.Text, done.SuppressEmbeds, done.Spoken);
                         (request.Heard, request.PostAnyway) = (done.Done, done.PostInChat);
                     }
                 }
@@ -596,7 +596,9 @@ public partial class ChatHandler
                 {
                     // Said in voice, nothing would show what was set (the chime only says it was): post it in the voice
                     // channel's chat, with whose it is, so the time can be checked and it can be cancelled.
-                    return new($"🎙️ {asker.Mention} {result.Message}", Done: true, PostInChat: true);
+                    // Said, if it's said at all (no chime), without the mention and emoji the post needs.
+                    return new($"🎙️ {asker.Mention} {result.Message}", Done: true, PostInChat: true,
+                        Spoken: result.Message);
                 }
 
                 return new(result.Message, Done: result.Success);
@@ -642,8 +644,9 @@ public partial class ChatHandler
     /// <param name="SuppressEmbeds">Hide link previews in it.</param>
     /// <param name="Done">It worked: said in voice, the "done" chime answers it (<see cref="ChatRequest.Heard"/>).</param>
     /// <param name="PostInChat">Post the reply even when answering aloud (<see cref="ChatRequest.PostAnyway"/>).</param>
+    /// <param name="Spoken">What to say aloud when it isn't <paramref name="Text"/> (null: the text).</param>
     private sealed record ActionReply(string Text, bool SuppressEmbeds = false, bool Done = false,
-        bool PostInChat = false)
+        bool PostInChat = false, string? Spoken = null)
     {
         /// <summary>A reply that isn't a success (a problem, or a question back), with or without link previews.</summary>
         public static implicit operator ActionReply((string Text, bool SuppressEmbeds) reply)
