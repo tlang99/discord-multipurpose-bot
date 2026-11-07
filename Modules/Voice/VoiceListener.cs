@@ -75,6 +75,9 @@ public sealed class VoiceListener
     /// coming back through someone's mic.</summary>
     private static readonly TimeSpan EchoTail = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>The start of <see cref="SpeechHint"/>: words speech-to-text is told to expect.</summary>
+    private const string HintWords = "Patch notes, LFG, loadout";
+
     private readonly DiscordSocketClient _client;
     private readonly SpeechToText _speech;
     private readonly TextToSpeech _voiceOut;
@@ -347,8 +350,8 @@ public sealed class VoiceListener
     /// should know.</param>
     public static string ListeningLine(string name, bool logsRequests = false)
         => $"🎙️ Listening for \"hey {name}\". Speech is turned into text on the bot's own computer, only what's said " +
-           $"after my name (or in reply, right after I answer) is used, and no audio is kept." +
-           (logsRequests ? " What you ask me is written to the bot's log, to fix what I mishear." : "") +
+           $"after my name, or anything said in the moments after I answer, is used, and no audio is kept." +
+           (logsRequests ? " What's said to me is written to the bot's log, to fix what I mishear." : "") +
            $" \"Hey {name}, stop listening\" sends me away.";
 
     /// <summary>The voice channel status while it listens: shown under the channel's name in the channel list, so
@@ -741,13 +744,24 @@ public sealed class VoiceListener
 
                 Background.Run(_logger, async () =>
                 {
+                    // Its place in the queue is given back once it's been turned into text (the queue only holds
+                    // speech waiting for that), or at the latest when it's been handled.
+                    var done = 0;
+                    void Release()
+                    {
+                        if (Interlocked.Exchange(ref done, 1) == 0)
+                        {
+                            session.SpeechDone(userId);
+                        }
+                    }
+
                     try
                     {
-                        await HandleSpeechAsync(session, userId, said);
+                        await HandleSpeechAsync(session, userId, said, Release);
                     }
                     finally
                     {
-                        session.SpeechDone(userId);
+                        Release();
                     }
                 }, LogLevel.Warning, "Couldn't handle speech in guild {GuildId}.", session.Guild.Id);
             }
@@ -756,7 +770,8 @@ public sealed class VoiceListener
 
     /// <summary>Turns one sentence into text and, if it was said to the bot (or in a conversation with it), hands it
     /// on as a request.</summary>
-    private async Task HandleSpeechAsync(Session session, ulong userId, byte[] said)
+    /// <param name="transcribed">Called once it's been turned into text, which frees its place in the queue.</param>
+    private async Task HandleSpeechAsync(Session session, ulong userId, byte[] said, Action transcribed)
     {
         var name = session.Guild.CurrentUser.DisplayName;
         var timer = Stopwatch.StartNew();
@@ -770,6 +785,10 @@ public sealed class VoiceListener
         {
             return; // stopped listening while it was being turned into text
         }
+        finally
+        {
+            transcribed();
+        }
 
         var heardIn = timer.Elapsed;
         if (text.Length == 0 || session.Stopping.IsCancellationRequested || IsHintEcho(text))
@@ -781,6 +800,14 @@ public sealed class VoiceListener
         var conversation = session.Conversation;
         var request = WakeWord.FindRequest(text, names);
         var inConversation = conversation.IsOpen;
+        // In a conversation, the bot's own answer coming back through a mic isn't a request, even if it says its name.
+        if (inConversation && conversation.IsEcho(WakeWord.Tidy(text)))
+        {
+            _logger.LogInformation("Ignored what sounded like my own answer coming back in guild {GuildId}.",
+                session.Guild.Id);
+            return;
+        }
+
         if (request is not null)
         {
             // Heard its name (not again for the request that follows a lone "hey ModBot", or mid-conversation, when
@@ -805,12 +832,8 @@ public sealed class VoiceListener
         }
         else if (inConversation)
         {
-            // In a conversation, whatever's said is said to the bot, except its own voice coming back.
+            // In a conversation, whatever's said is said to the bot (its own voice coming back is dropped above).
             request = WakeWord.Tidy(text);
-            if (conversation.IsEcho(request))
-            {
-                return;
-            }
         }
         else
         {
@@ -946,8 +969,6 @@ public sealed class VoiceListener
     /// </summary>
     private static bool IsHintEcho(string text)
         => text.Contains(HintWords, StringComparison.OrdinalIgnoreCase);
-
-    private const string HintWords = "Patch notes, LFG, loadout";
 
     /// <summary>
     /// The words speech-to-text is told to expect, so they come out spelled right: the bot's name, and gaming words it

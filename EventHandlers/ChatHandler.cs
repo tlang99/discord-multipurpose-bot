@@ -433,7 +433,8 @@ public partial class ChatHandler
                         // The answer in the server's personality, its sources in an embed under it.
                         var found = _search.TryStart(guild.Id, asker.Id) is { } reason
                             ? new SearchAnswer(reason, null)
-                            : await _search.AnswerAsync(guild.Id, guild.Name, bot.DisplayName, search.Query);
+                            : await _search.AnswerAsync(guild.Id, guild.Name, bot.DisplayName, search.Query,
+                                quick: request.Aloud);
                         (text, embed) = (found.Text, found.Embed);
                         // Said, it's posted like /search (where Discord shows who searched for what); the answer
                         // is read aloud.

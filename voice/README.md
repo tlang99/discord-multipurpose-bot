@@ -43,10 +43,9 @@ misheard) and replies to that instead.
   Nothing is sent to any other service. (A web search sends only the search words to Ollama, as typed searches do.)
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
   the bot's name, and thrown away. Only what's said after the name, or in a conversation with it (above), is acted
-  on. The log notes that a voice
-  request happened, never what was said, unless `Voice:LogRequests` is turned on to work out what it mishears;
-  then each request is logged as heard (never anything said without the bot's name), and the line posted on
-  joining says so.
+  on. The log notes that a voice request happened, never what was said, unless `Voice:LogRequests` is turned on to
+  work out what it mishears: then each request is logged as heard, which in a conversation is everything said in
+  the channel, and the line posted on joining says so. Nothing else is ever logged.
 - Server settings (turning features on or off, news notifications) can't be changed by voice, only by typing: a
   friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
 - It only listens while the chatbot is on, since every request goes through it.
