@@ -22,6 +22,9 @@ public class OllamaChatService : IChatService
     private readonly ChatRequestLimiter _limiter;
     private readonly ChatOptions _options;
 
+    /// <summary>When the model last answered (ticks, UTC): within the keep-alive since, it's still loaded.</summary>
+    private long _lastUsed;
+
     public OllamaChatService(HttpClient httpClient, ChatRequestLimiter limiter, IOptions<ChatOptions> options)
     {
         _httpClient = httpClient;
@@ -54,6 +57,15 @@ public class OllamaChatService : IChatService
 
     public async Task WarmUpAsync(CancellationToken cancellationToken = default)
     {
+        // Only a local Ollama unloads models (on ollama.com it'd be a call for nothing), and only after it's been idle:
+        // used within the keep-alive, it's still loaded.
+        var keptFor = TimeSpan.FromMinutes(_options.KeepAliveMinutes > 0 ? _options.KeepAliveMinutes : 5);
+        if (SearchOptions.IsOllamaCom(_options.OllamaUrl) ||
+            DateTime.UtcNow.Ticks - Interlocked.Read(ref _lastUsed) < (keptFor - TimeSpan.FromSeconds(30)).Ticks)
+        {
+            return;
+        }
+
         // Ollama loads the model for a chat request with no messages, and answers nothing.
         try
         {
@@ -61,6 +73,10 @@ public class OllamaChatService : IChatService
             using var response = await _httpClient.PostAsJsonAsync("api/chat",
                 new OllamaChatRequest(_options.Model, [], Stream: false, KeepAlive: KeepAlive), JsonOptions,
                 cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                Interlocked.Exchange(ref _lastUsed, DateTime.UtcNow.Ticks);
+            }
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -124,6 +140,7 @@ public class OllamaChatService : IChatService
 
             // Reasoning models put their thinking in message.thinking, separately, so content is just the answer.
             var reply = payload?.Message?.Content?.Trim();
+            Interlocked.Exchange(ref _lastUsed, DateTime.UtcNow.Ticks); // the model's loaded now
             if (string.IsNullOrEmpty(reply))
             {
                 throw new ChatServiceException("Ollama returned an empty reply.");

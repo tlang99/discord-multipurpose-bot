@@ -34,8 +34,8 @@ public class ChatOptions
     /// memory on the first question after it's been idle.</summary>
     public int TimeoutSeconds { get; set; } = 120;
 
-    /// <summary>How long a local Ollama keeps the model loaded after a question, in minutes (0 = Ollama's own default,
-    /// 5 minutes). Loading it again takes a few seconds, which a spoken answer is kept waiting for; kept loaded, it
+    /// <summary>How long a local Ollama keeps the model loaded after a question, in minutes (0 or less = Ollama's own
+    /// default, 5 minutes). Loading it again takes a few seconds, which a spoken answer is kept waiting for; kept loaded, it
     /// holds on to that memory (about 3 GB of graphics memory for llama3.2).</summary>
     public int KeepAliveMinutes { get; set; } = 5;
 

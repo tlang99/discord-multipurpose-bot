@@ -15,9 +15,14 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     /// <summary>Earlier questions and answers kept for follow-ups, at most (each question and answer counts one).</summary>
     public const int MaxTurns = 8;
 
+    /// <summary>The longest a conversation lasts, however much is said: a TV or a game in the background, picked up
+    /// by a mic, would otherwise keep it open, and everything it says would be a request.</summary>
+    public static readonly TimeSpan LongestConversation = TimeSpan.FromMinutes(3);
+
     private readonly Lock _lock = new();
     private readonly List<ChatTurn> _turns = [];
-    private bool _open;
+    private volatile bool _open;
+    private DateTimeOffset _openedAt;
     private int _busy;
     private DateTimeOffset _lastActivity;
     private string _lastSaid = "";
@@ -57,6 +62,11 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
                 return; // nothing was answered: an open conversation carries on, but none starts
             }
 
+            if (!_open)
+            {
+                _openedAt = now;
+            }
+
             _open = true;
             _lastSaid = said ?? "";
             _turns.Add(new ChatTurn(ChatRole.User, $"{asker} said: {request}"));
@@ -71,6 +81,11 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     /// <summary>Someone's talking (it keeps an open conversation from ending mid-sentence).</summary>
     public void Heard(DateTimeOffset now)
     {
+        if (!_open)
+        {
+            return; // the usual case, checked without the lock: this runs for every bit of audio
+        }
+
         lock (_lock)
         {
             if (_open && now > _lastActivity)
@@ -89,14 +104,15 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
         }
     }
 
-    /// <summary>Ends the conversation if it's gone quiet: nothing being answered, and <c>quiet</c> since anyone last
-    /// spoke, the bot included (<paramref name="talkingUntil"/>). True once, when it ends.</summary>
+    /// <summary>Ends the conversation if it's gone quiet (nothing being answered, and <c>quiet</c> since anyone last
+    /// spoke, the bot included: <paramref name="talkingUntil"/>), or once it's gone on for
+    /// <see cref="LongestConversation"/>. True once, when it ends.</summary>
     public bool TryEndQuiet(DateTimeOffset now, DateTimeOffset talkingUntil)
     {
         lock (_lock)
         {
             var last = talkingUntil > _lastActivity ? talkingUntil : _lastActivity;
-            return _open && _busy == 0 && now - last >= quiet && EndLocked();
+            return _open && _busy == 0 && (now - last >= quiet || now - _openedAt >= LongestConversation) && EndLocked();
         }
     }
 
