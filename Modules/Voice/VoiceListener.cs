@@ -367,8 +367,8 @@ public sealed class VoiceListener
     /// <param name="cantSpeak">Answers can't be read aloud here, so they come in chat.</param>
     public static string ListeningLine(string name, bool logsRequests = false, bool cantSpeak = false)
         => $"🎙️ Listening for \"hey {name}\"" + (cantSpeak ? " (I can't speak here, so I'll answer in chat)" : "") +
-           $". Speech is turned into text on the bot's own computer, only what's said " +
-           $"after my name, or a reply in the moments after I answer, is used, and no audio is kept." +
+           ". Speech is turned into text on the bot's own computer, only what's said " +
+           "after my name, or a reply in the moments after I answer, is used, and no audio is kept." +
            (logsRequests ? " What's said to me is written to the bot's log, to fix what I mishear." : "") +
            $" \"Hey {name}, stop listening\" sends me away.";
 

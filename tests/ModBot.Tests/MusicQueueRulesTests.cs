@@ -78,6 +78,22 @@ public sealed class MusicQueueRulesTests
         Assert.Equal(QueueAddResult.Added, MusicQueueRules.Add(state, [Song(Bob, "b1")], Bob, 10, 200, out _));
     }
 
+    [Theory]
+    // 190 waiting (none Alice's) and a cap of 10 each: Alice's own room (10) runs out before the queue's (10) - a
+    // tie goes to the person - so a 15-song playlist that leaves the queue exactly full blames her limit, not the queue.
+    [InlineData(190, 0, QueueAddResult.PersonFull)]
+    // 195 waiting: the queue has room for 5, Alice for 10, so the queue is what stops her.
+    [InlineData(195, 0, QueueAddResult.QueueFull)]
+    // Alice already has 8 of 190: her room (2) is tighter than the queue's (10).
+    [InlineData(190, 8, QueueAddResult.PersonFull)]
+    public void The_tighter_limit_is_the_one_named(int waiting, int alices, QueueAddResult expected)
+    {
+        var state = new MusicQueueState();
+        state.Songs.AddRange(Enumerable.Range(0, waiting).Select(i => Song(i < alices ? Alice : Bob, $"s{i}")));
+
+        Assert.Equal(expected, MusicQueueRules.TighterLimit(state, Alice, perPerson: 10, maxTotal: 200));
+    }
+
     [Fact]
     public void The_whole_queue_has_a_cap()
     {

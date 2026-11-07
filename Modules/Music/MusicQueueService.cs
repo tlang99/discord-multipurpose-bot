@@ -54,7 +54,10 @@ public class MusicQueueService : IHostedService
 
     /// <summary>The newest thing worth knowing (who added a song, a saved song that had to be skipped), shown on the
     /// menu rather than posted, so the music channel stays quiet. In memory: it's only news until the next one.</summary>
-    private readonly ConcurrentDictionary<ulong, string> _menuNotes = new();
+    private readonly ConcurrentDictionary<ulong, (string Text, DateTimeOffset At)> _menuNotes = new();
+
+    /// <summary>Puts <paramref name="text"/> on the server's menu as its newest note, dated so an old one reads as old.</summary>
+    private void NoteOnMenu(ulong guildId, string text) => _menuNotes[guildId] = (text, DateTimeOffset.UtcNow);
 
     /// <summary>When the music last left voice in each server (/stop, the idle timeout, a disconnect), shown on the
     /// menu while nothing's playing, so a bot that left on its own doesn't look like it crashed.</summary>
@@ -158,12 +161,14 @@ public class MusicQueueService : IHostedService
             PickerName = user.DisplayName,
         }).ToList();
 
-        var (result, added, position, wait, queueFull) = await _store.MutateAsync(user.Guild.Id, state =>
+        var (result, added, position, wait, limit) = await _store.MutateAsync(user.Guild.Id, state =>
         {
+            // Read before the add: which limit a playlist that doesn't all fit was stopped by.
+            var tighter = MusicQueueRules.TighterLimit(state, user.Id, SongsPerPerson, MaxQueueLength);
             var outcome = MusicQueueRules.Add(state, songs, user.Id, SongsPerPerson, MaxQueueLength, out var taken);
             var first = taken.Count > 0 ? taken[0].Id : Guid.Empty;
             return (outcome, taken, MusicQueueRules.PositionOf(state, first), MusicQueueRules.WaitBefore(state, first),
-                state.Songs.Count >= MaxQueueLength);
+                tighter);
         });
 
         switch (result)
@@ -176,8 +181,9 @@ public class MusicQueueService : IHostedService
         }
 
         // A playlist that didn't all fit says so plainly, so nobody thinks the rest are coming.
-        // A full queue is checked first: when both limits are hit at once, it's the one that stopped the rest.
-        var cap = queueFull ? $"the queue holds {MaxQueueLength}" : $"each person can have {SongsPerPerson} waiting";
+        var cap = limit == QueueAddResult.QueueFull
+            ? $"the queue holds {MaxQueueLength}"
+            : $"each person can have {SongsPerPerson} waiting";
         var what = lookup.IsPlaylist
             ? (added.Count < songs.Count
                   ? $"the first **{added.Count}** of {songs.Count} songs from **{TextTools.Escape(playlistName!)}** " +
@@ -205,7 +211,7 @@ public class MusicQueueService : IHostedService
             }
         }
 
-        _menuNotes[user.Guild.Id] = $"➕ <@{user.Id}> added {what}.";
+        NoteOnMenu(user.Guild.Id, $"➕ <@{user.Id}> added {what}.");
         RefreshMenu(user.Guild.Id);
         return MusicReply.Ok(text.ToString());
     }
@@ -544,8 +550,8 @@ public class MusicQueueService : IHostedService
             {
                 _logger.LogWarning("Dropping a saved song that can't be read: '{Title}' in guild {GuildId}.",
                     song.Title, player.GuildId);
-                _menuNotes[player.GuildId] = $"⚠️ Skipped {MusicFormatting.SongLink(song)} (<@{song.PickerId}>'s " +
-                                             "pick): its saved copy couldn't be read. Add it again to hear it.";
+                NoteOnMenu(player.GuildId, $"⚠️ Skipped {MusicFormatting.SongLink(song)} (<@{song.PickerId}>'s " +
+                                           "pick): its saved copy couldn't be read. Add it again to hear it.");
                 continue;
             }
 
@@ -684,7 +690,10 @@ public class MusicQueueService : IHostedService
 
         if (_menuNotes.TryGetValue(state.GuildId, out var note))
         {
-            embed.AddField("Latest", note.Length <= 1024 ? note : note[..1023] + "…"); // a field's limit
+            // Dated with Discord's relative time ("2 hours ago"), kept even when a long note is cut to a field's limit.
+            var when = $" <t:{note.At.ToUnixTimeSeconds()}:R>";
+            var room = 1024 - when.Length;
+            embed.AddField("Latest", (note.Text.Length <= room ? note.Text : note.Text[..(room - 1)] + "…") + when);
         }
 
         var order = MusicQueueRules.Order(state);

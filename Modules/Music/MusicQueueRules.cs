@@ -38,12 +38,11 @@ public static class MusicQueueRules
     public static QueueAddResult Add(MusicQueueState state, IReadOnlyList<QueuedSong> songs, ulong pickerId,
         int perPerson, int maxTotal, out List<QueuedSong> added)
     {
-        var mine = state.Songs.Count(s => s.PickerId == pickerId);
-        var room = Math.Min(perPerson - mine, maxTotal - state.Songs.Count);
+        var room = Math.Min(perPerson - state.Songs.Count(s => s.PickerId == pickerId), maxTotal - state.Songs.Count);
         if (room <= 0)
         {
             added = [];
-            return mine >= perPerson ? QueueAddResult.PersonFull : QueueAddResult.QueueFull;
+            return TighterLimit(state, pickerId, perPerson, maxTotal);
         }
 
         added = songs.Take(room).ToList();
@@ -55,6 +54,13 @@ public static class MusicQueueRules
 
         return QueueAddResult.Added;
     }
+
+    /// <summary>Which limit an add for <paramref name="pickerId"/> runs into first, checked before the add: the
+    /// person's own (PersonFull) or the whole queue's (QueueFull). The person's own when both have the same room.</summary>
+    public static QueueAddResult TighterLimit(MusicQueueState state, ulong pickerId, int perPerson, int maxTotal)
+        => perPerson - state.Songs.Count(s => s.PickerId == pickerId) <= maxTotal - state.Songs.Count
+            ? QueueAddResult.PersonFull
+            : QueueAddResult.QueueFull;
 
     /// <summary>Takes the next song off the queue (it's someone else's turn after it), or null if none are waiting.</summary>
     public static QueuedSong? TakeNext(MusicQueueState state)
