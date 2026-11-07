@@ -51,10 +51,20 @@ public sealed class MusicBotService(MusicBot music, IOptions<BotOptions> options
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (music.IsSeparate)
+        if (!music.IsSeparate)
+        {
+            return;
+        }
+
+        try
         {
             await music.Client.StopAsync();
             await music.Client.LogoutAsync();
+        }
+        catch (Exception ex)
+        {
+            // Shutting down anyway (and it may never have signed in): nothing to stop for.
+            logger.LogDebug(ex, "Couldn't sign the music bot out cleanly.");
         }
     }
 }

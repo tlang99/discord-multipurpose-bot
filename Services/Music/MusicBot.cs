@@ -15,6 +15,10 @@ public sealed class MusicBot : IDisposable
 {
     private readonly DiscordSocketClient? _separate;
 
+    /// <summary>The music account's servers have loaded (Ready fired once). Not reset on a disconnect: a resumed
+    /// session doesn't fire Ready again, and <see cref="IsSignedIn"/> checks the connection itself.</summary>
+    private volatile bool _ready;
+
     /// <param name="separate">The music account's own client, or null to play through <paramref name="main"/>.</param>
     public MusicBot(DiscordSocketClient main, DiscordSocketClient? separate)
     {
@@ -30,8 +34,6 @@ public sealed class MusicBot : IDisposable
             };
         }
     }
-
-    private volatile bool _ready;
 
     /// <summary>The client Lavalink joins voice with.</summary>
     public DiscordSocketClient Client { get; }

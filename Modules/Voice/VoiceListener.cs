@@ -944,15 +944,14 @@ public sealed class VoiceListener
             var answer = await _chat.Value.HandleVoiceRequestAsync(speaker, session.ReplyChannel, request, aloud,
                 talking ? conversation.Earlier() : null);
             var answeredIn = timer.Elapsed;
-            if (answer is { Heard: true } && aloud && _options.Chime && conversation.Still(mark))
-            {
-                // An action that worked (a song, a reminder, an LFG, a poll): the "done" chime says so, rather than
-                // reading out what chat would show. (Nothing's said, so no conversation opens: the next request takes
-                // the name again.)
-                await PlayAsync(session, _ => Task.FromResult<byte[]?>(DoneChimeSound.Value), speech: false,
-                    couldntPlay: null, wait: true);
-            }
-            else if (answer is not null && aloud && conversation.Still(mark))
+            // An action that worked (a song, a reminder, an LFG, a poll): the "done" chime says so, rather than
+            // reading out what chat would show. (Nothing's said, so no conversation opens: the next request takes the
+            // name again.) If the chime can't be played, the answer's said (or posted) as usual instead, so it's
+            // never left unconfirmed.
+            var chimed = answer is { Heard: true } && aloud && _options.Chime && conversation.Still(mark) &&
+                         await PlayAsync(session, _ => Task.FromResult<byte[]?>(DoneChimeSound.Value), speech: false,
+                             couldntPlay: null, wait: true);
+            if (!chimed && answer is not null && aloud && conversation.Still(mark))
             {
                 answered = answer.Text;
                 spoken = await SpeakAsync(session, answer.Text, heardIn, answeredIn, hushes, couldntSay: answer.InChat
@@ -1162,12 +1161,13 @@ public sealed class VoiceListener
                 var before = player.Volume;
                 await player.SetVolumeAsync(before * DuckedVolume);
                 session.VolumeBeforeDucking = before;
+                session.DuckedTo = player.Volume; // as the player has it, rounded or not
             }
             else if (session.VolumeBeforeDucking is { } before)
             {
                 // Unless the volume was changed meanwhile: then that's what it should stay at.
                 session.VolumeBeforeDucking = null;
-                if (Math.Abs(player.Volume - before * DuckedVolume) < 0.01f)
+                if (session.DuckedTo is { } ducked && Math.Abs(player.Volume - ducked) < 0.01f)
                 {
                     await player.SetVolumeAsync(before);
                 }
@@ -1383,6 +1383,9 @@ public sealed class VoiceListener
 
         /// <summary>The music's volume before the bot turned it down, to put it back to.</summary>
         public float? VolumeBeforeDucking { get; set; }
+
+        /// <summary>The volume it was turned down to, as the player reported it after.</summary>
+        public float? DuckedTo { get; set; }
 
         /// <summary>What the bot's saying right now ("" when it isn't), for telling its own voice from someone
         /// talking over it.</summary>
