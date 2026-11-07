@@ -93,10 +93,11 @@ public sealed partial class VoiceListener
     /// <summary>The longest the music waits for <see cref="LeavingForMusicLine"/> to be said.</summary>
     private static readonly TimeSpan LeavingForMusicWait = TimeSpan.FromSeconds(8);
 
-    /// <summary>What it says, before leaving, when music needs the voice connection (no music account of its
-    /// own).</summary>
-    public const string LeavingForMusicLine =
-        "Starting the music. I can't listen while it's on, so use the music menu, and I'll be back when it's done.";
+    /// <summary>What it says, before leaving, when music needs the voice connection (no music account of its own).
+    /// It only promises to come back when it will: with voice auto-join on.</summary>
+    public static string LeavingForMusicLine(bool comesBack)
+        => "Starting the music. I can't listen while it's on, so use the music menu" +
+           (comesBack ? ", and I'll be back when it's done." : ".");
 
     private readonly DiscordSocketClient _client;
     private readonly IMusicQueueStore _queue;
@@ -592,20 +593,27 @@ public sealed partial class VoiceListener
         if (_sessions.TryGetValue(guildId, out var session) && requester?.VoiceChannel?.Id == session.Channel.Id &&
             session.CanPlay && _voiceOut.Problem is null && CanSpeakIn(session.Channel))
         {
-            var saying = SpeakAsync(session, LeavingForMusicLine, TimeSpan.Zero, TimeSpan.Zero, session.Hushes,
-                couldntSay: null);
-            // Still going after the wait, it's left to finish (or be cut off by StopAsync); a problem then is logged.
-            _ = saying.ContinueWith(t => _logger.LogDebug(t.Exception, "Couldn't say why it's leaving for music in " +
-                                                                       "guild {GuildId}.", guildId),
-                TaskContinuationOptions.OnlyOnFaulted);
+            Task? saying = null;
             try
             {
+                // Whatever it's saying now is cut off first: the music is about to take over, and mustn't wait
+                // behind it.
+                await session.HushAsync();
+                var comesBack = (await _settings.GetAsync(guildId)).AutoJoinsVoice;
+                saying = SpeakAsync(session, LeavingForMusicLine(comesBack), TimeSpan.Zero, TimeSpan.Zero,
+                    session.Hushes, couldntSay: null);
                 await saying.WaitAsync(LeavingForMusicWait);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Timed out, cut off or failed (a failure's logged above): either way, the music doesn't wait longer.
+                // Timed out, cut off or failed: either way, the music doesn't wait longer.
+                _logger.LogDebug(ex, "Didn't finish saying why it's leaving for music in guild {GuildId}.", guildId);
             }
+
+            // Still going after the wait, it's left to finish (or be cut off by StopAsync); a problem then is logged.
+            _ = saying?.ContinueWith(t => _logger.LogDebug(t.Exception, "Couldn't say why it's leaving for music " +
+                                                                        "in guild {GuildId}.", guildId),
+                TaskContinuationOptions.OnlyOnFaulted);
         }
 
         await StopAsync(guildId);

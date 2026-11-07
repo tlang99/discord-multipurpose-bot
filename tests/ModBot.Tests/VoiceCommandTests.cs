@@ -93,6 +93,13 @@ public class WakeWordTests
         Assert.EndsWith("Hey ModBot.", hint);
     }
 
+    [Fact]
+    public void Leaving_for_music_only_promises_to_come_back_with_auto_join()
+    {
+        Assert.Contains("I'll be back", Modules.Voice.VoiceListener.LeavingForMusicLine(comesBack: true));
+        Assert.DoesNotContain("back", Modules.Voice.VoiceListener.LeavingForMusicLine(comesBack: false));
+    }
+
     [Theory]
     [InlineData("Sam", "Sam")]
     [InlineData("xX_Sam_Xx", "xX Sam Xx")]
