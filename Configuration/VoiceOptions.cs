@@ -52,6 +52,13 @@ public class VoiceOptions
     public int ConversationSeconds { get; set; } = 10;
 
     /// <summary>
+    /// In a conversation, the least time between one person's requests, counted from their last one (0-60). Replies
+    /// there skip the chatbot's own cooldown (Chat:CooldownSeconds), which would cut a back-and-forth short; this
+    /// shorter one still keeps anyone from firing off requests back to back. One said too soon is dropped.
+    /// </summary>
+    public int FollowUpCooldownSeconds { get; set; } = 5;
+
+    /// <summary>
     /// Write each voice request (as speech-to-text heard it) to the log, for working out why one wasn't understood:
     /// what was said after the bot's name, and in a conversation, the replies. Off by default: the log
     /// otherwise never holds what anyone said. While it's on, the line posted on joining voice says so.

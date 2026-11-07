@@ -103,6 +103,10 @@ public sealed class VoiceListener
     /// connection while any are.</summary>
     private readonly ConcurrentDictionary<ulong, int> _musicStarting = new();
 
+    /// <summary>Each person's last request in voice, for the shorter cooldown on conversation replies
+    /// (Voice:FollowUpCooldownSeconds).</summary>
+    private readonly UserCooldowns _followUps;
+
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, TextToSpeech voiceOut, IAudioService audio,
         Lazy<ChatHandler> chat, IChatService model, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
         IOptions<VoiceOptions> options, ILogger<VoiceListener> logger)
@@ -117,6 +121,7 @@ public sealed class VoiceListener
         _chatOptions = chatOptions.Value;
         _options = options.Value;
         _logger = logger;
+        _followUps = new UserCooldowns(Math.Clamp(_options.FollowUpCooldownSeconds, 0, 60));
         _client.UserVoiceStateUpdated += OnVoiceStateUpdatedAsync;
         // On connecting (and reconnecting), join anyone already sitting in voice.
         _client.GuildAvailable += guild =>
@@ -835,6 +840,7 @@ public sealed class VoiceListener
         }
 
         var inConversation = conversation.IsOpen;
+        var followUp = false; // said to the bot without its name, in a conversation
         // In a conversation, the bot's own answer coming back through a mic isn't a request, even if it says its name.
         if (inConversation && conversation.IsEcho(WakeWord.Tidy(text)))
         {
@@ -873,6 +879,7 @@ public sealed class VoiceListener
         {
             // In a conversation, whatever they say is said to the bot (its own voice coming back is dropped above).
             request = WakeWord.Tidy(text);
+            followUp = true;
         }
         else
         {
@@ -888,6 +895,16 @@ public sealed class VoiceListener
         if (request.Length == 0)
         {
             session.HeardWakeWord(userId);
+            return;
+        }
+
+        // Every request starts the person's follow-up cooldown; only a reply without the name is held to it (one with
+        // the name has the chatbot's own, longer cooldown).
+        if (!_followUps.TryClaim(session.Guild.Id, userId, out _) && followUp)
+        {
+            _logger.LogInformation("Dropped a voice reply from {User} ({UserId}): under " +
+                                   "Voice:FollowUpCooldownSeconds since their last request.", speaker.Username,
+                speaker.Id);
             return;
         }
 

@@ -138,8 +138,8 @@ public partial class ChatHandler
     /// Returns the answer, or null if there was none.
     /// </summary>
     /// <param name="earlier">In a voice conversation (see <see cref="VoiceConversation"/>): what was said and answered
-    /// so far, for the chatbot to follow on from. Its requests skip the cooldown: a back-and-forth is the point, and
-    /// each one waits for the last answer anyway.</param>
+    /// so far, for the chatbot to follow on from. Its requests skip the cooldown (VoiceListener holds
+    /// them to the shorter Voice:FollowUpCooldownSeconds): a back-and-forth is the point.</param>
     public async Task<VoiceAnswer?> HandleVoiceRequestAsync(SocketGuildUser speaker, SocketTextChannel channel,
         string request, bool aloud, IReadOnlyList<ChatTurn>? earlier = null)
     {

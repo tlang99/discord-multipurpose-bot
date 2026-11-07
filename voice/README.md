@@ -40,7 +40,8 @@ misheard) and replies to that instead.
   once it's finished, or when they say "thanks", "goodbye", "that's all" or "stop" (anyone can, by name: "thanks
   ModBot"; even over the bot, or while it's still working on an answer: it stops talking, and answers on their way
   aren't said); then a closing chime (the chime falling) says it's back to waiting for its name, and the
-  conversation is forgotten.
+  conversation is forgotten. Replies skip the chatbot's usual wait between questions (`Chat:CooldownSeconds`),
+  but each person's are still at least `Voice:FollowUpCooldownSeconds` (5 by default) apart.
 - An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
   history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
   posted there instead, as typed answers are.
@@ -105,7 +106,8 @@ available").
 | `PiperPath` | `voice/piper/piper.exe` | Piper's program. |
 | `SpeakingVoicePath` | `voice/models/en_US-kusal-medium.onnx` | The voice it speaks with; any [Piper voice](https://huggingface.co/rhasspy/piper-voices) works (keep its `.onnx.json` next to it). |
 | `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest isn't said. |
-| `ConversationSeconds` | `10` | How long after its last answer anyone can reply without its name (0-60; `0` = no conversations). |
+| `ConversationSeconds` | `10` | How long after its last answer it can be replied to without its name (0-60; `0` = no conversations). |
+| `FollowUpCooldownSeconds` | `5` | In a conversation, the least time between one person's requests (0-60). A reply said sooner is dropped. |
 | `LogRequests` | `false` | Write each voice request, as heard, to the log, to work out why one wasn't understood. The line posted on joining tells people. |
 
 ## Patched Discord.Net
