@@ -36,6 +36,15 @@ public class DjPicker
     private readonly ChatOptions _chatOptions;
     private readonly ILogger<DjPicker> _logger;
 
+    /// <summary>Most a song can ask to keep the model loaded for: a long song shouldn't hold memory all night.</summary>
+    private static readonly TimeSpan LongestHold = TimeSpan.FromMinutes(20);
+
+    /// <summary>Past the end of the song: time for the pick itself, and a song ending a little late.</summary>
+    private static readonly TimeSpan HoldSpare = TimeSpan.FromMinutes(2);
+
+    /// <summary>When each server's hold on the model ends (see <see cref="WarmUpAsync"/>).</summary>
+    private readonly ConcurrentDictionary<ulong, DateTime> _holds = new();
+
     public DjPicker(IChatService chat, MusicService music, IGuildSettingsStore settings,
         IOptions<ChatOptions> chatOptions, ILogger<DjPicker> logger)
     {
@@ -107,41 +116,32 @@ public class DjPicker
         return null;
     }
 
-    /// <summary>Most a song can ask to keep the model loaded for: a long song (or a live stream, which can't be timed)
-    /// shouldn't hold graphics memory all night.</summary>
-    private static readonly TimeSpan LongestHold = TimeSpan.FromMinutes(20);
-
-    /// <summary>Past the end of the song: time for the pick itself, and a song ending a little late.</summary>
-    private static readonly TimeSpan HoldSpare = TimeSpan.FromMinutes(2);
-
     /// <summary>
     /// Loads the chat model and keeps it loaded until just after the song playing ends (<paramref name="left"/> from
-    /// now), so a pick then doesn't wait for the model to load first. Loading takes seconds on its own and can take
-    /// a minute or more while a game has the graphics card busy, long enough for the music to stop. Never fails.
+    /// now, at most <see cref="LongestHold"/>), so a pick then doesn't wait for the model to load first. Loading takes
+    /// seconds on its own and can take a minute or more while a game has the graphics card busy, long enough for the
+    /// music to stop. Replaces the server's last hold. Never fails.
     /// </summary>
-    public Task WarmUpAsync(ulong guildId, TimeSpan? left, CancellationToken cancellationToken = default)
+    public Task WarmUpAsync(ulong guildId, TimeSpan left, CancellationToken cancellationToken = default)
     {
         if (!CanPick)
         {
             return Task.CompletedTask;
         }
 
-        var hold = left is { } l && l + HoldSpare < LongestHold ? l + HoldSpare : LongestHold;
+        var hold = left + HoldSpare < LongestHold ? left + HoldSpare : LongestHold;
         _holds[guildId] = DateTime.UtcNow + hold;
         return _chat.WarmUpAsync(cancellationToken, LongestHoldLeft());
     }
 
-    /// <summary>The server no longer needs the model kept loaded (another song's queued, DJ mode's off, or the music
-    /// stopped): its hold ends, so graphics memory isn't held for a pick that won't come. Other servers' holds stay.
-    /// Never fails.</summary>
+    /// <summary>The server no longer needs the model kept loaded (the song that started has others queued after it,
+    /// is a live stream, or DJ mode's off; or the music stopped): its hold ends, so memory isn't held for a pick that
+    /// won't come. Other servers' holds stay. Never fails.</summary>
     public Task ReleaseAsync(ulong guildId)
         => _holds.TryRemove(guildId, out _) ? _chat.WarmUpAsync(keepLoadedFor: LongestHoldLeft()) : Task.CompletedTask;
 
     /// <summary>Whether DJ mode can pick at all: the chatbot's set up.</summary>
     public bool CanPick => _chatOptions.IsEnabled;
-
-    /// <summary>When each server's hold on the model ends (see <see cref="WarmUpAsync"/>).</summary>
-    private readonly ConcurrentDictionary<ulong, DateTime> _holds = new();
 
     /// <summary>How much longer the longest hold still running lasts (zero if none), forgetting ones that are over.</summary>
     private TimeSpan LongestHoldLeft()

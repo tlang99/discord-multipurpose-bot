@@ -42,6 +42,12 @@ Add to this list when the owner turns down a suggestion so it stops coming back.
   the music, or a moderator, it's at once. No undo button instead.
 - **Music code stays in `Modules/Music/`**, not moved into `Services/` behind interfaces. The same goes for
   `PollPoster`. This is an exception to the README's "business logic in Services/ behind interfaces".
+- **DJ mode's hold on the chat model is checked only as each song starts** (decided 2026-11-08). A song queued, or DJ
+  mode turned off, during the last song leaves its hold to run out with that song (at most 20 minutes). Don't
+  suggest releasing it from the add-song path or the setting change. `WarmUpAsync(keepLoadedFor)` both sets and
+  ends a hold; don't suggest splitting it into two methods.
+- **Two people saying "hey ModBot" in the same instant can both hear a chime** (one wake, one not-right-now). That's
+  accepted; only one of them is answered.
 
 ## Settings
 - **New servers start with auto-mod off and no default channel names**, and existing servers aren't seeded with

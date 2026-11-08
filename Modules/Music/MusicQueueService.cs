@@ -921,8 +921,9 @@ public class MusicQueueService : IHostedService
     }
 
     /// <summary>With DJ mode on and nothing queued after the song that just started, DJ mode picks when it ends: the
-    /// chat model is loaded now and kept loaded until then, so that pick isn't kept waiting for it. Otherwise any hold
-    /// from an earlier song (skipped, or something got queued since) ends.</summary>
+    /// chat model is loaded now and kept loaded until then, so that pick isn't kept waiting for it. Otherwise (and
+    /// for a live stream, which doesn't end by itself) any hold from an earlier song ends. Checked as each song
+    /// starts: a song queued, or DJ mode turned off, during the last one leaves its hold to run out with it.</summary>
     private async Task WarmUpDjAsync(MusicPlayer player, ITrackQueueItem item)
     {
         if (!_dj.CanPick)
@@ -932,7 +933,8 @@ public class MusicQueueService : IHostedService
 
         var state = await _store.GetAsync(player.GuildId);
         // Looping (the song, or the queue, which puts each song back) means the music carries on without a pick.
-        if (state.LoopQueue || player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track ||
+        if (item.Track is not { IsLiveStream: false } track || state.LoopQueue ||
+            player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track ||
             MusicQueueRules.Order(state).Count > 0 ||
             !(await _serverSettings.GetAsync(player.GuildId)).IsEnabled(ServerFeature.MusicDj))
         {
@@ -940,7 +942,7 @@ public class MusicQueueService : IHostedService
             return;
         }
 
-        await _dj.WarmUpAsync(player.GuildId, item.Track is { IsLiveStream: false } track ? track.Duration : null);
+        await _dj.WarmUpAsync(player.GuildId, track.Duration);
     }
 
     /// <summary>DJ mode, when the server has it on: the queue's run out, so the chatbot picks a song like the recent
