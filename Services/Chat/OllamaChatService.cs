@@ -164,10 +164,13 @@ public class OllamaChatService : IChatService
     private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken,
         TimeSpan? timeout = null)
     {
-        var (keepAlive, keptFor) = KeepAlive();
-        request = Prepare(request, keepAlive);
         // One slot per request, shared by chat and news, so a local Ollama isn't asked to do too much at once.
         using var slot = await _limiter.AcquireAsync(cancellationToken);
+
+        // Worked out once the slot is ours: a hold set while this waited is sent too, and each request resets how
+        // long Ollama keeps the model, so the newest request's keep-alive is the one that counts.
+        var (keepAlive, keptFor) = KeepAlive();
+        request = Prepare(request, keepAlive);
 
         // The timeout starts once the slot is ours, so waiting behind other requests doesn't count against the model.
         // Running out cancels the request; the filters below check the caller's own token, so it surfaces as a
