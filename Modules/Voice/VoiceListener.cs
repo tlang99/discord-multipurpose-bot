@@ -885,10 +885,13 @@ public sealed partial class VoiceListener
         var request = WakeWord.FindRequest(text, names);
 
         // "ModBot, stop" or "thanks ModBot": the bot stops talking at once, and answers still on their way aren't said.
-        // Said to it by name, like every request. Heard over the bot, it mustn't be the bot's own words coming back
-        // through a mic (speech-to-text turns unclear audio into "Thank you." all too often).
+        // Only while there's something to stop (it's talking, or working on an answer): said to an idle bot, it's an
+        // ordinary request, chimed and answered, so it never sounds like the bot isn't listening. Said to it by name,
+        // like every request. Heard over the bot, it mustn't be the bot's own words coming back through a mic
+        // (speech-to-text turns unclear audio into "Thank you." all too often).
         var maybeGoodbye = request ?? WakeWord.Tidy(text);
-        if (maybeGoodbye.Length > 0 && VoiceGoodbye.IsGoodbye(maybeGoodbye, names, out var nameInIt) &&
+        if ((overBot || session.IsTalking || session.IsAnswering) && maybeGoodbye.Length > 0 &&
+            VoiceGoodbye.IsGoodbye(maybeGoodbye, names, out var nameInIt) &&
             (request is not null || nameInIt) && !(overBot && VoiceGoodbye.Repeats(session.Saying, maybeGoodbye)))
         {
             await StopTalkingAsync(session);

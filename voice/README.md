@@ -51,7 +51,8 @@ misheard) and replies to that instead.
   thing each time ("hey ModBot, what's the weather tomorrow?", not "and tomorrow?").
 - **"Hey ModBot, stop"** (or "thanks ModBot", "ModBot, that's all") stops it talking at once, even mid-answer or
   while it's still working on one: answers on their way aren't said. It leaves the music playing: to stop the music,
-  say so ("hey ModBot, stop the music"), since stopping can't be undone.
+  say so ("hey ModBot, stop the music"), since stopping can't be undone. Said while it's idle, it's an ordinary request
+  and gets an answer.
 - An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
   history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
   posted there instead, as typed answers are.
@@ -137,6 +138,9 @@ available").
 | `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest isn't said. |
 | `MusicDuckPercent` | `25` | With music on its own bot account, how loud it plays while the bot talks, as a percentage of its volume (0-100; `100` = no dip). |
 | `LogRequests` | `false` | Write each voice request, as heard, to the log, to work out why one wasn't understood. The line posted on joining tells people. |
+
+`Voice:ConversationSeconds` and `Voice:FollowUpCooldownSeconds` are gone (there are no conversations now): if your
+`appsettings.json` still has them, they're ignored, and you can delete them.
 
 ## Patched Discord.Net
 

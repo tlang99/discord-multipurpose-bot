@@ -70,11 +70,11 @@ public class OllamaChatService : IChatService
 
         if (keepLoadedFor is { } hold)
         {
-            var until = DateTime.UtcNow.Add(hold).Ticks;
-            long seen;
-            while ((seen = Interlocked.Read(ref _holdUntil)) < until &&
-                   Interlocked.CompareExchange(ref _holdUntil, until, seen) != seen)
+            // Replaces the last hold, so one that's no longer wanted (the song was skipped) can be cut short.
+            Interlocked.Exchange(ref _holdUntil, hold > TimeSpan.Zero ? DateTime.UtcNow.Add(hold).Ticks : 0);
+            if (hold <= TimeSpan.Zero)
             {
+                return; // just ending it: the next request sends the usual keep-alive, and Ollama goes by that
             }
         }
 

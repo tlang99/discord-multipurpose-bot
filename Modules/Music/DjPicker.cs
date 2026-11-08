@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -118,15 +119,48 @@ public class DjPicker
     /// now), so a pick then doesn't wait for the model to load first. Loading takes seconds on its own and can take
     /// a minute or more while a game has the graphics card busy, long enough for the music to stop. Never fails.
     /// </summary>
-    public Task WarmUpAsync(TimeSpan? left, CancellationToken cancellationToken = default)
+    public Task WarmUpAsync(ulong guildId, TimeSpan? left, CancellationToken cancellationToken = default)
     {
-        if (!_chatOptions.IsEnabled)
+        if (!CanPick)
         {
             return Task.CompletedTask;
         }
 
         var hold = left is { } l && l + HoldSpare < LongestHold ? l + HoldSpare : LongestHold;
-        return _chat.WarmUpAsync(cancellationToken, hold);
+        _holds[guildId] = DateTime.UtcNow + hold;
+        return _chat.WarmUpAsync(cancellationToken, LongestHoldLeft());
+    }
+
+    /// <summary>The server no longer needs the model kept loaded (another song's queued, DJ mode's off, or the music
+    /// stopped): its hold ends, so graphics memory isn't held for a pick that won't come. Other servers' holds stay.
+    /// Never fails.</summary>
+    public Task ReleaseAsync(ulong guildId)
+        => _holds.TryRemove(guildId, out _) ? _chat.WarmUpAsync(keepLoadedFor: LongestHoldLeft()) : Task.CompletedTask;
+
+    /// <summary>Whether DJ mode can pick at all: the chatbot's set up.</summary>
+    public bool CanPick => _chatOptions.IsEnabled;
+
+    /// <summary>When each server's hold on the model ends (see <see cref="WarmUpAsync"/>).</summary>
+    private readonly ConcurrentDictionary<ulong, DateTime> _holds = new();
+
+    /// <summary>How much longer the longest hold still running lasts (zero if none), forgetting ones that are over.</summary>
+    private TimeSpan LongestHoldLeft()
+    {
+        var now = DateTime.UtcNow;
+        var longest = TimeSpan.Zero;
+        foreach (var (guildId, until) in _holds)
+        {
+            if (until <= now)
+            {
+                _holds.TryRemove(new KeyValuePair<ulong, DateTime>(guildId, until));
+            }
+            else if (until - now > longest)
+            {
+                longest = until - now;
+            }
+        }
+
+        return longest;
     }
 
     /// <summary>The search the model's answer asks for, or null if the answer isn't the JSON asked for.</summary>

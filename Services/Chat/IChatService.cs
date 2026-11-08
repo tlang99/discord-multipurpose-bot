@@ -40,7 +40,8 @@ public interface IChatService
     /// idle), so the next question isn't kept waiting for that. Only a head start: it never fails, except that cancelling
     /// it throws. A question asked meanwhile waits for the load, as it would have anyway.</summary>
     /// <param name="keepLoadedFor">Keep it loaded for at least this long from now, if that's longer than the usual
-    /// keep-alive (questions asked meanwhile don't cut it short). Null keeps it the usual time.</param>
+    /// keep-alive (questions asked meanwhile don't cut it short). Replaces any earlier hold; zero (or less) ends the
+    /// hold without loading anything, so the usual keep-alive applies again. Null leaves the hold as it is.</param>
     Task WarmUpAsync(CancellationToken cancellationToken = default, TimeSpan? keepLoadedFor = null)
         => Task.CompletedTask;
 }

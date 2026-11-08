@@ -921,19 +921,26 @@ public class MusicQueueService : IHostedService
     }
 
     /// <summary>With DJ mode on and nothing queued after the song that just started, DJ mode picks when it ends: the
-    /// chat model is loaded now and kept loaded until then, so that pick isn't kept waiting for it.</summary>
+    /// chat model is loaded now and kept loaded until then, so that pick isn't kept waiting for it. Otherwise any hold
+    /// from an earlier song (skipped, or something got queued since) ends.</summary>
     private async Task WarmUpDjAsync(MusicPlayer player, ITrackQueueItem item)
     {
+        if (!_dj.CanPick)
+        {
+            return; // no chatbot, no DJ: nothing to read
+        }
+
         var state = await _store.GetAsync(player.GuildId);
         // Looping (the song, or the queue, which puts each song back) means the music carries on without a pick.
         if (state.LoopQueue || player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track ||
             MusicQueueRules.Order(state).Count > 0 ||
             !(await _serverSettings.GetAsync(player.GuildId)).IsEnabled(ServerFeature.MusicDj))
         {
+            await _dj.ReleaseAsync(player.GuildId);
             return;
         }
 
-        await _dj.WarmUpAsync(item.Track is { IsLiveStream: false } track ? track.Duration : null);
+        await _dj.WarmUpAsync(player.GuildId, item.Track is { IsLiveStream: false } track ? track.Duration : null);
     }
 
     /// <summary>DJ mode, when the server has it on: the queue's run out, so the chatbot picks a song like the recent
@@ -1006,6 +1013,9 @@ public class MusicQueueService : IHostedService
         _starters.TryRemove(guildId, out _);
         _leftVoiceAt[guildId] = DateTimeOffset.UtcNow;
         RefreshMenu(guildId);
+        // The music's over: no DJ pick is coming, so the model needn't be kept loaded for one.
+        Background.Run(_logger, () => _dj.ReleaseAsync(guildId), LogLevel.Debug,
+            "Couldn't end DJ mode's hold on the chat model in guild {GuildId}.", guildId);
         return Task.CompletedTask;
     }
 
