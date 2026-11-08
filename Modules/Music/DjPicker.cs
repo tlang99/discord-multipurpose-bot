@@ -58,22 +58,26 @@ public class DjPicker
 
         var recent = history.Take(RecentShown).Select(s => s.Title).ToList();
         var settings = await _settings.GetAsync(guildId);
+        var suggested = new List<string>();
         for (var attempt = 0; attempt < Tries; attempt++)
         {
             try
             {
                 // Told what it already suggested this time round too, so a retry isn't the same song.
-                using var json = JsonDocument.Parse(await _chat.CompleteJsonAsync(Prompt,
-                    "Played lately:\n" + string.Join('\n', recent), Schema, cancellationToken));
+                var asked = "Played lately:\n" + string.Join('\n', recent) +
+                            (suggested.Count == 0 ? "" : "\n\nAlready suggested (pick another):\n" +
+                                                         string.Join('\n', suggested));
+                using var json = JsonDocument.Parse(await _chat.CompleteJsonAsync(Prompt, asked, Schema,
+                    cancellationToken));
                 var query = json.RootElement.GetProperty("query").GetString()?.Trim();
                 if (string.IsNullOrEmpty(query) || MusicService.CheckQuery(query) is not null)
                 {
                     continue;
                 }
 
+                suggested.Add(query);
                 var found = await _music.FindTracksAsync(query.Length > 200 ? query[..200] : query, guildId);
                 var track = found.Tracks.FirstOrDefault(t => !t.IsLiveStream);
-                recent.Insert(0, query);
                 // Not a repeat of something played lately, and not a title the server's word filter blocks: it ends
                 // up on the menu for everyone.
                 if (track is null || history.Any(s => s.Track == track.ToString()) ||
@@ -92,9 +96,14 @@ public class DjPicker
                     PickerName = dj.Name,
                 };
             }
-            catch (Exception ex) when (ex is ChatServiceException or JsonException or KeyNotFoundException or
-                                           InvalidOperationException)
+            catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
             {
+                // An answer that isn't the JSON asked for: ask again.
+                _logger.LogDebug(ex, "DJ mode got an answer it couldn't read in guild {GuildId}.", guildId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The model or the song lookup is down: trying again now won't help, and the music just stops.
                 _logger.LogInformation(ex, "DJ mode couldn't pick a song in guild {GuildId}.", guildId);
                 return null;
             }

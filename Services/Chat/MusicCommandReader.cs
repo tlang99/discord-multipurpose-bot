@@ -101,7 +101,7 @@ public static partial class MusicCommandReader
             _ => new(MusicCommand.Restart)),
         // "Replay the last song" and "play the last song (again)" go back to it, so it plays now; "queue the last song
         // again" (below) adds it to the queue instead.
-        (Rx(@"(go|skip) back( a song| one| to the (last|previous) (song|one|track))?|(play )?(the )?previous( song| track| one)?( again)?|back to the (last|previous) (song|one|track)|(re ?play|play)( the)? (last|previous|other) (song|one|track)( again)?|(re ?play|play) the (song|one|track) (before|before this( one)?)"),
+        (Rx(@"(go|skip) back( a song| one| to the (last|previous) (song|one|track))?|(play )?(the )?previous( song| track| one)?( again)?|back to the (last|previous) (song|one|track)|(re ?play|play)( the)? (last|previous) (song|one|track)( again)?|(re ?play|play) the (song|one|track) (before|before this( one)?)"),
             _ => new(MusicCommand.Previous)),
         (Rx(@"(play|queue|add) (that|this|it)( song| track| one)? again|(queue|add)( the)? (last|previous) (song|track|one) again|(play it|play that|play the song) one more time"),
             _ => new(MusicCommand.PlayAgain)),

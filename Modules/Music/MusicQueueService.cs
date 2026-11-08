@@ -58,6 +58,12 @@ public class MusicQueueService : IHostedService
     private readonly ILogger<MusicQueueService> _logger;
     private readonly DjPicker _dj;
 
+    /// <summary>Who DJ mode's songs show as picked by.</summary>
+    private const string DjName = "DJ mode";
+
+    /// <summary>Servers where DJ mode is picking a song right now.</summary>
+    private readonly ConcurrentDictionary<ulong, byte> _djPicking = new();
+
     /// <summary>Skip votes for the song playing in each server. In memory: they only matter for that one song.</summary>
     private readonly ConcurrentDictionary<ulong, Votes> _votes = new();
 
@@ -910,13 +916,34 @@ public class MusicQueueService : IHostedService
             return;
         }
 
-        // Picking takes the model a few seconds: done outside the playback lock, then played only if nothing else
-        // started (or got queued) meanwhile.
-        var history = (await _store.GetAsync(guild.Id)).History;
-        if (await _dj.PickAsync(guild.Id, history, (guild.CurrentUser.Id, DjName)) is not { } pick ||
-            !LavalinkTrack.TryParse(pick.Track, null, out var track))
+        // Nobody left listening: no DJ, so the player goes idle and leaves as usual, rather than playing all night.
+        if (guild.GetVoiceChannel(player.VoiceChannelId)?.ConnectedUsers.Any(u => !u.IsBot) != true)
         {
             return;
+        }
+
+        // One pick at a time per server: a skip and the song it ended can both ask for one.
+        if (!_djPicking.TryAdd(guild.Id, 0))
+        {
+            return;
+        }
+
+        QueuedSong? pick;
+        LavalinkTrack? track;
+        try
+        {
+            // Picking takes the model a few seconds: done outside the playback lock, then played only if nothing
+            // else started (or got queued) meanwhile.
+            var history = (await _store.GetAsync(guild.Id)).History;
+            pick = await _dj.PickAsync(guild.Id, history, (guild.CurrentUser.Id, DjName));
+            if (pick is null || !LavalinkTrack.TryParse(pick.Track, null, out track))
+            {
+                return;
+            }
+        }
+        finally
+        {
+            _djPicking.TryRemove(guild.Id, out _);
         }
 
         var played = await _music.WithPlaybackLockAsync(guild.Id, async () =>
@@ -937,9 +964,6 @@ public class MusicQueueService : IHostedService
                                  "song and it plays next.");
         }
     }
-
-    /// <summary>Who DJ mode's songs show as picked by.</summary>
-    private const string DjName = "DJ mode";
 
     private Task OnPlayerClosedAsync(ulong guildId)
     {
