@@ -957,8 +957,11 @@ public class MusicQueueService : IHostedService
 
         var played = await _music.WithPlaybackLockAsync(guild.Id, async () =>
         {
+            // Checked again now the pick's ready (that took seconds): something may have started, been queued, or
+            // everyone may have left meanwhile.
             if (player.State == PlayerState.Destroyed || player.CurrentItem is not null ||
-                MusicQueueRules.Order(await _store.GetAsync(guild.Id)).Count > 0)
+                MusicQueueRules.Order(await _store.GetAsync(guild.Id)).Count > 0 ||
+                guild.GetVoiceChannel(player.VoiceChannelId)?.ConnectedUsers.Any(u => !u.IsBot) != true)
             {
                 return false;
             }
