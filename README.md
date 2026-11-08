@@ -570,7 +570,8 @@ first (`Chat:TimeoutSeconds`, default 120, allows for that). Ollama keeps the mo
 In voice, the bot starts loading it as soon as it hears its name; with DJ mode on, as the last queued song starts.
 Ollama runs the model on the graphics card if it can. If you game on the same PC, set `Chat:UseGpu` to `false` to keep
 it on the processor: a small model like llama3.2 still answers in a second or two, and it doesn't fight the game for
-the graphics card (while a game has it busy, an answer can take a minute or more).
+the graphics card (while a game has it busy, an answer can take a minute or more). After changing it, the first answer
+is slower while Ollama loads the model again.
 
 **Using Ollama's cloud instead:** set `Chat:OllamaUrl` to `https://ollama.com`, set `Chat:Model` to a name from
 [ollama.com/api/tags](https://ollama.com/api/tags), and create an API key at

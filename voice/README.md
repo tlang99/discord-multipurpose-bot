@@ -140,7 +140,8 @@ available").
 | `LogRequests` | `false` | Write each voice request, as heard, to the log, to work out why one wasn't understood. The line posted on joining tells people. |
 
 `Voice:ConversationSeconds` and `Voice:FollowUpCooldownSeconds` are gone (there are no conversations now): if your
-`appsettings.json` still has them, they're ignored, and you can delete them.
+`appsettings.json` still has them, they're ignored, and you can delete them. `/settings voice-follow-ups` is gone too;
+a server that had set it keeps a `VoiceFollowUpsFromAnyone` line in `data/server-settings.json`, which is ignored.
 
 ## Patched Discord.Net
 

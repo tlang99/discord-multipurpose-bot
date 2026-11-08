@@ -936,14 +936,26 @@ public class MusicQueueService : IHostedService
         if (item.Track is not { IsLiveStream: false } track || state.LoopQueue ||
             player.RepeatMode == Lavalink4NET.Players.Queued.TrackRepeatMode.Track ||
             MusicQueueRules.Order(state).Count > 0 ||
-            !(await _serverSettings.GetAsync(player.GuildId)).IsEnabled(ServerFeature.MusicDj))
+            !await IsDjOnAsync(player.GuildId))
         {
             await _dj.ReleaseAsync(player.GuildId);
             return;
         }
 
+        // The player may have closed meanwhile (this runs in the background, as its release does): then no pick's
+        // coming, and a hold set now would outlast the release.
+        if (player.State == PlayerState.Destroyed)
+        {
+            return;
+        }
+
         await _dj.WarmUpAsync(player.GuildId, track.Duration);
     }
+
+    /// <summary>Whether the server has DJ mode on: the one check for both holding the model for a pick and making
+    /// one.</summary>
+    private async Task<bool> IsDjOnAsync(ulong guildId)
+        => (await _serverSettings.GetAsync(guildId)).IsEnabled(ServerFeature.MusicDj);
 
     /// <summary>DJ mode, when the server has it on: the queue's run out, so the chatbot picks a song like the recent
     /// ones and it plays. It isn't queued or anyone's turn, so the next song someone adds plays as soon as this one
@@ -951,7 +963,7 @@ public class MusicQueueService : IHostedService
     private async Task PlayDjPickAsync(MusicPlayer player)
     {
         var guild = _client.GetGuild(player.GuildId);
-        if (guild is null || !(await _serverSettings.GetAsync(guild.Id)).IsEnabled(ServerFeature.MusicDj))
+        if (guild is null || !await IsDjOnAsync(guild.Id))
         {
             return;
         }

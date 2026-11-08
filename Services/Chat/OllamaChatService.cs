@@ -70,7 +70,9 @@ public class OllamaChatService : IChatService
 
         if (keepLoadedFor is { } hold)
         {
-            // Replaces the last hold, so one that's no longer wanted (the song was skipped) can be cut short.
+            // Replaces the last hold, so one that's no longer wanted (the song was skipped) can be cut short. Nothing
+            // is sent to shorten it: Ollama goes on by the last keep-alive it was sent until the next request (a
+            // question, or another warm-up) sends the shorter one, so the memory is freed at most that much later.
             Interlocked.Exchange(ref _holdUntil, hold > TimeSpan.Zero ? DateTime.UtcNow.Add(hold).Ticks : 0);
             if (hold <= TimeSpan.Zero)
             {
