@@ -44,7 +44,8 @@ public sealed partial class VoiceListener
     /// <summary>Said just the wake word, then paused: their next sentence counts as the request, within this long.</summary>
     private static readonly TimeSpan WakeWordWait = TimeSpan.FromSeconds(8);
 
-    /// <summary>After someone says its name, nobody else can call it for this long: it's theirs for the moment.</summary>
+    /// <summary>After someone says its name and gets the chime, someone else saying it within this long isn't chimed
+    /// for again (they're still heard).</summary>
     private static readonly TimeSpan WakeClaim = TimeSpan.FromSeconds(5);
 
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
@@ -936,19 +937,15 @@ public sealed partial class VoiceListener
             // Heard its name (not again for the request that follows a lone "hey ModBot", or mid-conversation, when
             // it's already listening). Only for someone whose requests can be answered: a request is only run where
             // its speaker could have typed it (ChatHandler).
-            // One at a time: someone who called it a moment ago has it, so a second "hey ModBot" on top of theirs
-            // isn't chimed for or taken (two chimes, then two answers at once, just muddle both).
-            if (!inConversation && !session.TryClaimWake(userId, DateTimeOffset.UtcNow, WakeClaim))
-            {
-                _logger.LogInformation("Ignored my name from {UserId} in guild {GuildId}: someone else had just " +
-                                       "called me.", userId, session.Guild.Id);
-                return;
-            }
-
+            // Two people calling it a moment apart are both heard (and answered in turn, by name), but only the first
+            // gets the chime: two chimes on top of each other just sound like a glitch.
             if (!inConversation && session.Guild.GetUser(userId) is { IsBot: false } caller &&
                 ChannelAccess.CanPost(caller, session.ReplyChannel))
             {
-                Chime(session);
+                if (session.TryClaimWake(userId, DateTimeOffset.UtcNow, WakeClaim))
+                {
+                    Chime(session);
+                }
                 if (request.Length == 0)
                 {
                     WarmUpModel(session); // the request follows in the next sentence: load the model meanwhile
@@ -1709,8 +1706,8 @@ public sealed partial class VoiceListener
         private readonly Lock _wakeLock = new();
         private (ulong UserId, DateTimeOffset At)? _wakeClaim;
 
-        /// <summary>Whether <paramref name="userId"/> may call the bot by name now: true (and it's theirs from now)
-        /// unless someone else called it within <paramref name="within"/>.</summary>
+        /// <summary>Whether <paramref name="userId"/> saying the bot's name gets the chime: true (and the chime's
+        /// theirs from now) unless someone else got it within <paramref name="within"/>.</summary>
         public bool TryClaimWake(ulong userId, DateTimeOffset now, TimeSpan within)
         {
             lock (_wakeLock)
