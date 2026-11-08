@@ -300,8 +300,6 @@ saved in `data/server-settings.json`:
   still finish: LFG posts can be cancelled, polls ended, and reminders are delivered.
 - `/settings voice-channel` — voice auto-join only joins this voice channel; leave it out for whichever one is
   busiest.
-- `/settings voice-follow-ups` — after the bot answers in voice, who can reply without its name: only whoever said it
-  (the default), or anyone in the voice channel.
 - `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.
   Channels are saved by ID, so renaming one doesn't break it.
 - `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn

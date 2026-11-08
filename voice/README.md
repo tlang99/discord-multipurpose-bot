@@ -28,16 +28,16 @@ misheard) and replies to that instead.
   of words, so it doesn't talk over the music. A reminder is also posted in the voice channel's chat (with its time
   and how to cancel it), since nothing else would show it. If it couldn't do it, it says why. Questions (what's
   playing, the queue, a web search, chat) are answered aloud. With `Voice:Chime` off, it says what it did, as before.
-- Asked again by name too soon (within `Chat:CooldownSeconds` of your last question, or
-  `Voice:FollowUpCooldownSeconds` in a conversation), it plays two low falling notes: "heard you, but not right
-  now". Wait a moment and ask again. (With `Voice:Chime` on; at most once every 10 seconds each.)
+- **One request at a time.** While it's working on or saying someone's answer, anyone else's "hey ModBot" gets two low
+  falling notes, "not right now", and isn't taken: ask again once it's done ("hey ModBot, stop" still works). The
+  same notes play if you ask again too soon (within `Chat:CooldownSeconds` of your last question): "heard
+  you, but not right now". Wait a moment and ask again. (With `Voice:Chime` on; at most once every 10 seconds each.)
 - To spell things right, speech-to-text is told what to expect: gaming words, the bot's name, and this server's own
   words (the next songs in the queue, the people in the channel, and its LFG game and playlists). Like the speech
   itself, these words stay on the bot's own computer (Whisper runs there).
 - When more than one person has asked it something in the last 30 seconds, a spoken answer starts with the asker's
   name ("Sam, it's 8 degrees…"), so everyone can tell whose it is. A nickname that breaks the server's word filter
-  isn't said. Two people saying "hey ModBot" within a few seconds are both heard: the first gets the chime, and
-  the second a softer single note once it's done, so the two never sound at once.
+  isn't said.
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
   for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"), which cuts
@@ -45,31 +45,22 @@ misheard) and replies to that instead.
   (wait for it to finish before asking again). An answer that would have to wait more than 15 seconds behind another
   is posted instead. Needs **Speak**; turn it off for every server with `Voice:SpokenReplies`. After installing Piper,
   restart the bot.
-- **Conversations:** after an answer read aloud, whoever said "hey ModBot" can say the next thing without the name
-  ("and what about tomorrow?"), and the bot remembers what was said and answered so far, in memory only. Anyone else
-  still says the name, and then they're in the conversation too: everyone who's asked something in it can follow up
-  without the name until it goes quiet. `/settings voice-follow-ups` lets anyone in the
-  channel reply without the name instead (then everything said while it's open counts as a request, side chatter
-  included). It ends after `Voice:ConversationSeconds` (10 by default) with nobody it's talking with saying anything
-  once it's finished, or when they say "thanks", "goodbye", "that's all" or "stop" (anyone can, by name: "thanks
-  ModBot"; even over the bot, or while it's still working on an answer: it stops talking, and answers on their way
-  aren't said); then a closing chime (the chime falling) says it's back to waiting for its name, and the
-  conversation is forgotten. Replies skip the chatbot's usual wait between questions (`Chat:CooldownSeconds`), but
-  each person's are still at least `Voice:FollowUpCooldownSeconds` (5 by default) apart.
-- **"Stop" on its own** means "stop talking" while it's talking or a conversation is open (it's one of the goodbyes
-  above), and leaves the music playing. To stop the music, always say so: "hey ModBot, stop the music". A bare "hey
-  ModBot, stop" with no conversation open isn't taken as stopping the music (stopping can't be undone, so the bot
-  asks for it plainly).
+- **Every request starts with its name**, from anyone: "hey ModBot, skip this song", then "hey ModBot, turn it up".
+  It answers (or does it and plays the "done" chime) and goes back to waiting for its name; anything said without
+  the name is ignored, the person who just asked included. It doesn't remember earlier requests, so say the whole
+  thing each time ("hey ModBot, what's the weather tomorrow?", not "and tomorrow?").
+- **"Hey ModBot, stop"** (or "thanks ModBot", "ModBot, that's all") stops it talking at once, even mid-answer or
+  while it's still working on one: answers on their way aren't said. It leaves the music playing: to stop the music,
+  say so ("hey ModBot, stop the music"), since stopping can't be undone.
 - An answer is only said aloud when everyone in the voice channel can read the channel the bot answers in, and its
   history (the chatbot reads that channel's recent messages, so an answer could repeat them). If anyone can't, it's
   posted there instead, as typed answers are.
 - Speech is turned into text, and answers into speech, **on the machine running the bot** (Whisper and Piper).
   Nothing is sent to any other service. (A web search sends only the search words to Ollama, as typed searches do.)
 - No audio is kept: each sentence is held in memory only until it's turned into text (about a second), checked for
-  the bot's name, and thrown away. Only what's said after the name, or in a conversation with it (above), is acted
-  on. The log notes that a voice request happened, never what was said, unless `Voice:LogRequests` is turned on to
-  work out what it mishears: then each request is logged as heard (in a conversation open to anyone, that's
-  everything said in the channel), and the line posted on joining says so. Nothing else is ever logged.
+  the bot's name, and thrown away. Only what's said after the name is acted on. The log notes that a voice request
+  happened, never what was said, unless `Voice:LogRequests` is turned on to work out what it mishears: then each
+  request is logged as heard, and the line posted on joining says so. Nothing else is ever logged.
 - Server settings (turning features on or off, news notifications) can't be changed by voice, only by typing: a
   friend near an admin's mic, a soundboard or a mishearing mustn't change them as that admin.
 - It only listens while the chatbot is on, since every request goes through it.
@@ -144,8 +135,6 @@ available").
 | `PiperPath` | `voice/piper/piper.exe` | Piper's program. |
 | `SpeakingVoicePath` | `voice/models/en_US-kusal-medium.onnx` | The voice it speaks with; any [Piper voice](https://huggingface.co/rhasspy/piper-voices) works (keep its `.onnx.json` next to it). |
 | `MaxSpokenCharacters` | `300` | How much of an answer is read aloud, in whole sentences; the rest isn't said. |
-| `ConversationSeconds` | `10` | How long after its last answer it can be replied to without its name (0-60; `0` = no conversations). |
-| `FollowUpCooldownSeconds` | `5` | In a conversation, the least time between one person's requests (0-60). A reply said sooner is dropped. |
 | `MusicDuckPercent` | `25` | With music on its own bot account, how loud it plays while the bot talks, as a percentage of its volume (0-100; `100` = no dip). |
 | `LogRequests` | `false` | Write each voice request, as heard, to the log, to work out why one wasn't understood. The line posted on joining tells people. |
 

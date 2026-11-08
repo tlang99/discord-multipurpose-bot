@@ -15,11 +15,12 @@ Add to this list when the owner turns down a suggestion so it stops coming back.
 - **Answers are spoken only, not posted.** A spoken answer longer than `Voice:MaxSpokenCharacters` is cut, and the
   cut is logged. The full answer isn't posted in chat. (It falls back to chat only when it can't speak.)
 - **The join line's privacy wording stays in full**, on every join, not shortened on later auto-joins.
-- **The closing chime plays at the end of every conversation**, even after a single question. That's by design:
-  don't suggest skipping it, or a setting to turn it off.
-- **Two people saying "hey ModBot" within 5 seconds:** both are heard and answered (each by name). The first gets
-  the chime, the second a softer one-note "heard you too" after it, never both at once.
-- **In a conversation, everyone who's asked something can follow up without the name**, not just the last asker.
+- **Every voice request needs the bot's name, from anyone, every time** (decided 2026-11-08). There are no
+  conversations, follow-ups without the name, or memory of earlier spoken requests: they made it too hard to tell
+  who it was listening to. Don't suggest bringing them back.
+- **Only three chimes:** heard its name, done (an action worked), and not right now (asked again within
+  `Chat:CooldownSeconds`, or while it's busy with someone else's request: one at a time). There's no closing or
+  "heard you too" chime; don't suggest adding more.
 - **Auto-join is opt-in** (its own feature) and needs Set Voice Channel Status.
 - **Anyone may start voice listening**, not just moderators.
 
