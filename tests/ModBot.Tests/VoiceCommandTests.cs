@@ -414,7 +414,8 @@ public class VoiceCommandsSwitchTests
         ServerFeature[] voice = [ServerFeature.VoiceCommands, ServerFeature.VoiceAutoJoin];
 
         Assert.All(voice, f => Assert.False(settings.IsEnabled(f)));
-        Assert.All(Enum.GetValues<ServerFeature>().Except(voice), f => Assert.True(settings.IsEnabled(f)));
+        Assert.All(Enum.GetValues<ServerFeature>().Except(voice).Where(f => !ServerSettings.IsOptIn(f)),
+            f => Assert.True(settings.IsEnabled(f))); // the other opt-in one, DJ mode, is tested on its own
     }
 
     [Fact]
