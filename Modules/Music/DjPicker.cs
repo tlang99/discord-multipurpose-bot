@@ -106,6 +106,29 @@ public class DjPicker
         return null;
     }
 
+    /// <summary>Most a song can ask to keep the model loaded for: a long song (or a live stream, which can't be timed)
+    /// shouldn't hold graphics memory all night.</summary>
+    private static readonly TimeSpan LongestHold = TimeSpan.FromMinutes(20);
+
+    /// <summary>Past the end of the song: time for the pick itself, and a song ending a little late.</summary>
+    private static readonly TimeSpan HoldSpare = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Loads the chat model and keeps it loaded until just after the song playing ends (<paramref name="left"/> from
+    /// now), so a pick then doesn't wait for the model to load first. Loading takes seconds on its own and can take
+    /// a minute or more while a game has the graphics card busy, long enough for the music to stop. Never fails.
+    /// </summary>
+    public Task WarmUpAsync(TimeSpan? left, CancellationToken cancellationToken = default)
+    {
+        if (!_chatOptions.IsEnabled)
+        {
+            return Task.CompletedTask;
+        }
+
+        var hold = left is { } l && l + HoldSpare < LongestHold ? l + HoldSpare : LongestHold;
+        return _chat.WarmUpAsync(cancellationToken, hold);
+    }
+
     /// <summary>The search the model's answer asks for, or null if the answer isn't the JSON asked for.</summary>
     private static string? ReadQuery(string answer)
     {
