@@ -7,7 +7,7 @@ using ModBot.Models;
 
 namespace ModBot.Modules.Music;
 
-public static class MusicFormatting
+public static partial class MusicFormatting
 {
     private const int ProgressBarLength = 18;
 

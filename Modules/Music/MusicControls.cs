@@ -196,6 +196,7 @@ public class MusicControls
         }
 
         await player.SeekAsync(to);
+        _queue.RefreshMenu(user.Guild.Id); // its "ends in" time
         return MusicReply.Ok(to == TimeSpan.Zero
             ? $"⏪ {user.Mention} restarted {MusicFormatting.TrackLink(track)}."
             : $"⏩ {user.Mention} jumped to {MusicFormatting.Duration(to)} in {MusicFormatting.TrackLink(track)}.",
