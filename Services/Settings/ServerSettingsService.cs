@@ -110,6 +110,7 @@ public class ServerSettingsService
         ServerFeature.WebSearch => "Web search",
         ServerFeature.VoiceCommands => "Voice commands",
         ServerFeature.VoiceAutoJoin => "Voice auto-join",
+        ServerFeature.MusicDj => "DJ mode",
         _ => feature.ToString(),
     };
 

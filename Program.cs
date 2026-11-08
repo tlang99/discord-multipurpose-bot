@@ -164,6 +164,7 @@ builder.Services.AddHttpClient<ModBot.Modules.Music.AlbumArt>(client =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("ModBot/1.0 (Discord bot album art)");
 })
 .ConfigurePrimaryHttpMessageHandler(PublicNetworkHttpHandler.Create);
+builder.Services.AddSingleton<ModBot.Modules.Music.DjPicker>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicQueueService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ModBot.Modules.Music.MusicQueueService>());
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicControls>();

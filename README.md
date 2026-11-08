@@ -105,10 +105,16 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
 - **History:** the last 20 songs played are kept. The menu's **History** button lists them privately to add one
   again for yourself; "play that again" (or `/playagain`) adds the newest, and "what was that song?" (or
   `/history`) lists them.
+- **DJ mode** (off until a server admin turns it on: `/settings feature` → DJ mode): when the queue runs out, the
+  chatbot picks a song like the ones played lately, and it plays instead of the music stopping. It keeps going one
+  song at a time, never repeats one of the last 20 played, follows the word filter, and shows each pick on the menu.
+  DJ songs aren't queued or anyone's turn, so a song someone adds plays as soon as the current one ends. Skip one
+  and it picks another. Needs the chatbot (Ollama) set up.
 - **Seek and go back:** `/seek 1:30` (or "skip to 1:30") jumps within the song, `/restart` (or "restart this
-  song") starts it over, and `/previous` (the menu's **Back**, or "go back") plays the song before this one. The
-  song that was playing goes back at the front of its picker's songs, so nothing's lost, and going back doesn't use
-  up anyone's turn. Like pause, these are for anyone in the bot's voice channel, or a moderator.
+  song") starts it over, and `/previous` (the menu's **Back**, "go back", or "replay the last song") plays the song
+  before this one. The song that was playing goes back at the front of its picker's songs, so nothing's lost, and
+  going back doesn't use up anyone's turn. With nothing playing, going back adds the last song played again (and
+  starts it if you're in voice). Like pause, these are for anyone in the bot's voice channel, or a moderator.
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
   pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
   **Add song** (a pop-up that works like `/play`: it also starts the music if nothing's playing and you're in voice),

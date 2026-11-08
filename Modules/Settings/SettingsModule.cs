@@ -67,6 +67,8 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         VoiceCommands = ServerFeature.VoiceCommands,
         [ChoiceDisplay("Voice auto-join (joins voice by itself; off by default)")]
         VoiceAutoJoin = ServerFeature.VoiceAutoJoin,
+        [ChoiceDisplay("DJ mode (keeps the music going when the queue runs out; off by default)")]
+        MusicDj = ServerFeature.MusicDj,
     }
 
     /// <summary>The features with their own channel.</summary>

@@ -110,14 +110,25 @@ public sealed class MusicCommandReaderTests
     [InlineData("start the song over", MusicCommand.Restart)]
     [InlineData("go back to the start", MusicCommand.Restart)]
     [InlineData("go back", MusicCommand.Previous)]
+    [InlineData("stop the song", MusicCommand.Stop)]
+    [InlineData("stop playing this", MusicCommand.Stop)]
+    [InlineData("stop playing", MusicCommand.Stop)]
+    [InlineData("turn it off", MusicCommand.Stop)]
+    [InlineData("kill the music", MusicCommand.Stop)]
     [InlineData("play the previous song", MusicCommand.Previous)]
+    [InlineData("replay the last song", MusicCommand.Previous)] // asked by voice, and missed, in v0.5.4
+    [InlineData("can you replay the previous song", MusicCommand.Previous)]
+    [InlineData("play the last song again", MusicCommand.Previous)]
+    [InlineData("play the song before this one", MusicCommand.Previous)]
+    [InlineData("replay this song", MusicCommand.Restart)] // this one, over again: still a restart
+    [InlineData("play the other song", null)] // a different song, not the one before: left to the model
     [InlineData("play that again", MusicCommand.PlayAgain)]
     [InlineData("queue the last song again", MusicCommand.PlayAgain)]
     [InlineData("what was that song?", MusicCommand.ShowHistory)]
     [InlineData("show me the recently played songs", MusicCommand.ShowHistory)]
     [InlineData("play again", MusicCommand.Resume)] // still unpausing, as before
     [InlineData("turn the music off", MusicCommand.Stop)] // still a stop, not a volume
-    public void Reads_volume_going_back_and_history(string message, MusicCommand expected)
+    public void Reads_volume_going_back_and_history(string message, MusicCommand? expected)
         => Assert.Equal(expected, MusicCommandReader.Read(message)?.Command);
 
     [Theory]

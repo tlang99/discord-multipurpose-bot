@@ -99,9 +99,11 @@ public static partial class MusicCommandReader
         // Before resume ("play again" there means unpause): these are the song played before, or once more.
         (Rx(@"(restart|replay)( this| the| current| that)?( song| track| one)?|start (this|the|that)( song| track| one)? (over|again|from the (start|beginning|top))|play (this|it|that)( song| one)? from the (start|beginning|top)|(go )?back to the (start|beginning)( of (this|the) song)?"),
             _ => new(MusicCommand.Restart)),
-        (Rx(@"(go|skip) back( a song| one| to the (last|previous) (song|one|track))?|(play )?(the )?previous( song| track| one)?|back to the (last|previous) (song|one|track)"),
+        // "Replay the last song" and "play the last song (again)" go back to it, so it plays now; "queue the last song
+        // again" (below) adds it to the queue instead.
+        (Rx(@"(go|skip) back( a song| one| to the (last|previous) (song|one|track))?|(play )?(the )?previous( song| track| one)?( again)?|back to the (last|previous) (song|one|track)|(re ?play|play)( the)? (last|previous) (song|one|track)( again)?|(re ?play|play) the (song|one|track) (before|before this( one)?)"),
             _ => new(MusicCommand.Previous)),
-        (Rx(@"(play|queue|add) (that|this|it)( song| track| one)? again|(play|queue|add)( the)? (last|previous) (song|track|one) again|(play it|play that|play the song) one more time"),
+        (Rx(@"(play|queue|add) (that|this|it)( song| track| one)? again|(queue|add)( the)? (last|previous) (song|track|one) again|(play it|play that|play the song) one more time"),
             _ => new(MusicCommand.PlayAgain)),
         (Rx(@"(what|which) (was|were) (that|the last|the previous|the) (song|track|one|songs)( called| before| just now)?|(show|list|see|view)( me| us)?( the)? (history|song history|recent songs|recently played( songs)?|last (few )?songs)|whats? (been|was) (played|playing)( (lately|before|earlier))?|what did (we|you) (just )?(play|listen to)|recently played"),
             _ => new(MusicCommand.ShowHistory)),
@@ -126,7 +128,7 @@ public static partial class MusicCommandReader
         (Rx(@"(start|open|begin|make|create|kick off|set up|run|host|do|have)( up)?( a| the| us a| our| another| a new)?( new)? (music |song |listening )?session|(start|begin|kick off|play)( the| our)? (music|songs|playlist|queue)( now)?|start playing( (the|our) (songs|queue|playlist))?( now)?|(lets go|go ahead), start( it| the music)?"),
             _ => new(MusicCommand.Start)),
 
-        (Rx(@"stop( (the|this|that))?( (music|song|track|playing|player))?( and leave)?|(leave|disconnect from|disconnect|get out of)( the)?( voice( channel| chat)?| vc| call)|turn( the)? music off|turn off( the)? music|shut( the)? music off|shut off( the)? music"),
+        (Rx(@"stop( (the|this|that))?( (music|song|songs|track|playing|player|tunes))?( and leave)?|stop playing( (this|that|it|the music|music|songs|the song|this song))?|(leave|disconnect from|disconnect|get out of)( the)?( voice( channel| chat)?| vc| call)|turn( the| this| that)? (music|song|it|this|that) off|turn off( the| this)? (music|song)|shut( the| this| that)? (music|song|it) off|shut off( the)? music|kill( the| this)? (music|song|tunes)|end( the| this)? music|no more music|enough music"),
             _ => new(MusicCommand.Stop)),
 
         (Rx(@"whats? (this|the) (song|track)( called)?|what (song|track) is (this|playing|on)( right now| now)?|whats? (playing|on)( right now| now)?|now playing|what are (we|you) (listening to|playing)( right now| now)?"),

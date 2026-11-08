@@ -36,7 +36,8 @@ misheard) and replies to that instead.
   itself, these words stay on the bot's own computer (Whisper runs there).
 - When more than one person has asked it something in the last 30 seconds, a spoken answer starts with the asker's
   name ("Sam, it's 8 degrees…"), so everyone can tell whose it is. A nickname that breaks the server's word filter
-  isn't said.
+  isn't said. Two people saying "hey ModBot" within a few seconds are both heard: the first gets the chime, and
+  the second a softer single note once it's done, so the two never sound at once.
 - It reads the first few sentences of its answer aloud, without links, emoji or formatting (an answer with nothing to
   say aloud, like only a link, is posted instead). Typed requests are only answered in chat. While it's talking, and
   for a moment after, it only listens for a goodbye said to it by name ("thanks ModBot", "ModBot, stop"), which cuts
@@ -46,7 +47,8 @@ misheard) and replies to that instead.
   restart the bot.
 - **Conversations:** after an answer read aloud, whoever said "hey ModBot" can say the next thing without the name
   ("and what about tomorrow?"), and the bot remembers what was said and answered so far, in memory only. Anyone else
-  still says the name, and then the conversation is with them. `/settings voice-follow-ups` lets anyone in the
+  still says the name, and then they're in the conversation too: everyone who's asked something in it can follow up
+  without the name until it goes quiet. `/settings voice-follow-ups` lets anyone in the
   channel reply without the name instead (then everything said while it's open counts as a request, side chatter
   included). It ends after `Voice:ConversationSeconds` (10 by default) with nobody it's talking with saying anything
   once it's finished, or when they say "thanks", "goodbye", "that's all" or "stop" (anyone can, by name: "thanks

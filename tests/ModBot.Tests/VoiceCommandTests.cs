@@ -414,7 +414,8 @@ public class VoiceCommandsSwitchTests
         ServerFeature[] voice = [ServerFeature.VoiceCommands, ServerFeature.VoiceAutoJoin];
 
         Assert.All(voice, f => Assert.False(settings.IsEnabled(f)));
-        Assert.All(Enum.GetValues<ServerFeature>().Except(voice), f => Assert.True(settings.IsEnabled(f)));
+        Assert.All(Enum.GetValues<ServerFeature>().Except(voice).Where(f => !ServerSettings.IsOptIn(f)),
+            f => Assert.True(settings.IsEnabled(f))); // the other opt-in one, DJ mode, is tested on its own
     }
 
     [Fact]
@@ -637,14 +638,18 @@ public class VoiceConversationTests
     }
 
     [Fact]
-    public void Whoever_says_the_name_next_takes_over()
+    public void Someone_else_saying_the_name_joins_and_both_can_follow_up()
     {
         var conversation = Answered(Start);
         var mark = conversation.Asking(Start.AddSeconds(2), Other);
         conversation.Answered(mark, Start.AddSeconds(3), "jynx", "and tomorrow?", "Rain.", "Rain.");
 
         Assert.True(conversation.Hears(Other));
-        Assert.False(conversation.Hears(Bloo));
+        Assert.True(conversation.Hears(Bloo)); // the first asker isn't cut out by the second
+
+        conversation.End();
+        Assert.False(conversation.Hears(Bloo)); // a new conversation starts with nobody in it
+        Assert.False(conversation.Hears(Other));
     }
 
     [Fact]
@@ -755,6 +760,15 @@ public class VoiceConversationTests
         Assert.True(done.Length < VoiceAudio.Chime().Length * 2); // but still a quick chime
         Assert.NotEqual(VoiceAudio.ExitChime(), done);
         Assert.Equal(0, done.Length % VoiceAudio.FrameBytes);
+    }
+
+    [Fact]
+    public void The_heard_you_too_chime_is_one_soft_note()
+    {
+        var tooChime = VoiceAudio.HeardTooChime();
+
+        Assert.True(tooChime.Length < VoiceAudio.Chime().Length); // one note to the wake chime's two
+        Assert.Equal(0, tooChime.Length % VoiceAudio.FrameBytes);
     }
 
     [Fact]
