@@ -207,7 +207,7 @@ public class MusicControls
     /// voice), as "play that again" does.</summary>
     public async Task<MusicReply> BackAsync(SocketGuildUser user, ITextChannel channel)
     {
-        if (_music.GetPlayer(user.Guild.Id) is null)
+        if (_music.GetPlayer(user.Guild.Id)?.CurrentItem is null)
         {
             return await AgainAsync(user, channel);
         }

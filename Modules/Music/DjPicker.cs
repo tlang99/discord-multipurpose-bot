@@ -67,9 +67,8 @@ public class DjPicker
                 var asked = "Played lately:\n" + string.Join('\n', recent) +
                             (suggested.Count == 0 ? "" : "\n\nAlready suggested (pick another):\n" +
                                                          string.Join('\n', suggested));
-                using var json = JsonDocument.Parse(await _chat.CompleteJsonAsync(Prompt, asked, Schema,
-                    cancellationToken));
-                var query = json.RootElement.GetProperty("query").GetString()?.Trim();
+                // An answer that isn't the JSON asked for gives no query: ask again.
+                var query = ReadQuery(await _chat.CompleteJsonAsync(Prompt, asked, Schema, cancellationToken));
                 if (string.IsNullOrEmpty(query) || MusicService.CheckQuery(query) is not null)
                 {
                     continue;
@@ -96,11 +95,6 @@ public class DjPicker
                     PickerName = dj.Name,
                 };
             }
-            catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
-            {
-                // An answer that isn't the JSON asked for: ask again.
-                _logger.LogDebug(ex, "DJ mode got an answer it couldn't read in guild {GuildId}.", guildId);
-            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // The model or the song lookup is down: trying again now won't help, and the music just stops.
@@ -110,5 +104,19 @@ public class DjPicker
         }
 
         return null;
+    }
+
+    /// <summary>The search the model's answer asks for, or null if the answer isn't the JSON asked for.</summary>
+    private static string? ReadQuery(string answer)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(answer);
+            return json.RootElement.GetProperty("query").GetString()?.Trim();
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 }
