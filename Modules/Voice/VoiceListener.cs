@@ -952,6 +952,13 @@ public sealed partial class VoiceListener
             return;
         }
 
+        // One request at a time: claimed here, so two said at once can't both get through.
+        if (!session.TryStartAnswering(out var claim))
+        {
+            BusyChime(session, userId);
+            return;
+        }
+
         // Not what was said, unless Voice:LogRequests is on (to work out what it mishears; the join line says so).
         if (_options.LogRequests)
         {
@@ -964,20 +971,13 @@ public sealed partial class VoiceListener
                 session.Channel.Name);
         }
 
-        // One request at a time: claimed here, so two said at once can't both get through.
-        if (!session.TryStartAnswering())
-        {
-            BusyChime(session, userId);
-            return;
-        }
-
         try
         {
             await AnswerAsync(session, speaker, request, heardIn, timer);
         }
         finally
         {
-            session.DoneAnswering();
+            session.DoneAnswering(claim);
         }
     }
 
@@ -1039,6 +1039,8 @@ public sealed partial class VoiceListener
     {
         _logger.LogInformation("Told to stop talking in guild {GuildId}.", session.Guild.Id);
         await session.HushAsync();
+        // After the hush, so the answer being worked on is already marked as not wanted when the next request starts.
+        session.StopAnswering();
     }
 
     /// <summary>Has the chat model loaded, without waiting (a local Ollama unloads it when idle, and loading it again
@@ -1400,17 +1402,27 @@ public sealed partial class VoiceListener
         /// <summary>The bot is talking (or just was): what it hears now may be its own voice, through someone's mic.</summary>
         public bool IsTalking => DateTime.UtcNow.Ticks < Interlocked.Read(ref _talkingUntil);
 
-        private int _answering;
+        private int _answering, _claims;
 
         /// <summary>A spoken request is being worked on or answered (until its answer's been said, or its "done"
-        /// chime played): another isn't taken meanwhile.</summary>
-        public bool IsAnswering => Volatile.Read(ref _answering) == 1;
+        /// chime played, or someone said stop): another isn't taken meanwhile.</summary>
+        public bool IsAnswering => Volatile.Read(ref _answering) != 0;
 
-        /// <summary>True if no request was being answered, and now this caller's is (end it with
-        /// <see cref="DoneAnswering"/>).</summary>
-        public bool TryStartAnswering() => Interlocked.CompareExchange(ref _answering, 1, 0) == 0;
+        /// <summary>True if no request was being answered, and now this caller's is: end it with
+        /// <see cref="DoneAnswering"/>, passing <paramref name="claim"/>.</summary>
+        public bool TryStartAnswering(out int claim)
+        {
+            claim = Interlocked.Increment(ref _claims);
+            return Interlocked.CompareExchange(ref _answering, claim, 0) == 0;
+        }
 
-        public void DoneAnswering() => Volatile.Write(ref _answering, 0);
+        /// <summary>The request is done. Only frees the slot if it's still that request's: after a stop, another
+        /// request may have it now.</summary>
+        public void DoneAnswering(int claim) => Interlocked.CompareExchange(ref _answering, 0, claim);
+
+        /// <summary>Someone said stop: the request being answered is dropped (its answer isn't said, see
+        /// <see cref="Hushes"/>), so the next one can be taken now rather than once the model's done.</summary>
+        public void StopAnswering() => Volatile.Write(ref _answering, 0);
 
         /// <summary>
         /// Plays <paramref name="pcm"/> (Discord's format) in the channel, one sound at a time. Speech waits its turn,
