@@ -142,7 +142,7 @@ public sealed partial class VoiceListener
 
     /// <summary>The chimes, at Voice:ChimeVolumePercent. Made on first use, so a problem making one can only ever
     /// break the chime, never the listener.</summary>
-    private readonly Lazy<byte[]> _chimeSound, _exitChimeSound, _doneChimeSound, _busyChimeSound;
+    private readonly Lazy<byte[]> _chimeSound, _exitChimeSound, _doneChimeSound, _busyChimeSound, _heardTooSound;
 
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, TextToSpeech voiceOut, IAudioService audio,
         Lazy<ChatHandler> chat, IChatService model, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
@@ -168,6 +168,7 @@ public sealed partial class VoiceListener
         _exitChimeSound = new Lazy<byte[]>(() => VoiceAudio.ExitChime(chimeVolume));
         _doneChimeSound = new Lazy<byte[]>(() => VoiceAudio.DoneChime(chimeVolume));
         _busyChimeSound = new Lazy<byte[]>(() => VoiceAudio.BusyChime(chimeVolume));
+        _heardTooSound = new Lazy<byte[]>(() => VoiceAudio.HeardTooChime(chimeVolume));
         _client.UserVoiceStateUpdated += OnVoiceStateUpdatedAsync;
         // On connecting (and reconnecting), join anyone already sitting in voice.
         _client.GuildAvailable += guild =>
@@ -937,8 +938,8 @@ public sealed partial class VoiceListener
             // Heard its name (not again for the request that follows a lone "hey ModBot", or mid-conversation, when
             // it's already listening). Only for someone whose requests can be answered: a request is only run where
             // its speaker could have typed it (ChatHandler).
-            // Two people calling it a moment apart are both heard (and answered in turn, by name), but only the first
-            // gets the chime: two chimes on top of each other just sound like a glitch.
+            // Two people calling it a moment apart are both heard (and answered in turn, by name). The first gets the
+            // chime; the second gets the softer "heard you too" once it's done, so the two never sound at once.
             if (!inConversation && session.Guild.GetUser(userId) is { IsBot: false } caller &&
                 ChannelAccess.CanPost(caller, session.ReplyChannel))
             {
@@ -946,6 +947,11 @@ public sealed partial class VoiceListener
                 {
                     Chime(session);
                 }
+                else
+                {
+                    ChimeAfter(session, _heardTooSound, "the heard-you-too chime");
+                }
+
                 if (request.Length == 0)
                 {
                     WarmUpModel(session); // the request follows in the next sentence: load the model meanwhile
@@ -1275,6 +1281,8 @@ public sealed partial class VoiceListener
     {
         if (_busyChimes.TryClaim(session.Guild.Id, userId, out _))
         {
+            _logger.LogInformation("Played the not-right-now chime for {UserId} in guild {GuildId}: asked again too " +
+                                   "soon.", userId, session.Guild.Id);
             ChimeAfter(session, _busyChimeSound, "the not-right-now chime");
         }
     }

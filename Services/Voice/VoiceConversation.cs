@@ -7,7 +7,8 @@ namespace ModBot.Services.Voice;
 /// <summary>
 /// A back-and-forth with the bot in voice: after it answers someone who said its name, they (or, if the server chose
 /// it, anyone in the channel) can say the next thing without the name, until nobody's said anything to it for a while
-/// (or someone says "thanks"). Whoever said the name last is the one it's talking with. Holds
+/// (or someone says "thanks"). Everyone who's asked something in it is someone it's talking with, so in a group each
+/// can follow up, not just whoever asked last. Holds
 /// what was said and answered meanwhile, in memory only, so a follow-up ("and what about tomorrow?") makes sense;
 /// it's forgotten when the conversation ends. Safe to use from several threads.
 /// </summary>
@@ -22,7 +23,8 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     private volatile bool _open;
     private int _busy;
     private int _epoch;
-    private ulong _with;
+    /// <summary>Everyone who's asked something in this conversation: each can follow up without the name.</summary>
+    private readonly HashSet<ulong> _with = [];
     private bool _anyone;
     private DateTimeOffset _lastActivity;
     private string _lastSaid = "";
@@ -61,7 +63,7 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
         {
             _busy++;
             _lastActivity = now;
-            _with = asker;
+            _with.Add(asker);
             _anyone = anyone;
             return _epoch;
         }
@@ -73,7 +75,7 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
     {
         lock (_lock)
         {
-            return (_open || _busy > 0) && (_anyone || _with == userId);
+            return (_open || _busy > 0) && (_anyone || _with.Contains(userId));
         }
     }
 
@@ -123,7 +125,7 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
 
         lock (_lock)
         {
-            if (_open && (_anyone || _with == userId) && now > _lastActivity)
+            if (_open && (_anyone || _with.Contains(userId)) && now > _lastActivity)
             {
                 _lastActivity = now;
             }
@@ -169,6 +171,7 @@ public sealed partial class VoiceConversation(TimeSpan quiet)
         _open = false;
         _turns.Clear();
         _lastSaid = "";
+        _with.Clear();
         return was;
     }
 
