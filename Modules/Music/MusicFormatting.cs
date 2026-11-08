@@ -111,8 +111,10 @@ public static partial class MusicFormatting
         return name.Trim();
     }
 
-    /// <summary>A bracketed bit of a title that's about the upload, not the song.</summary>
-    [GeneratedRegex(@"\s*[\(\[](?:[^\)\]]*\b(?:official|lyrics?|audio|video|visuali[sz]er|hd|hq|4k|mv)\b[^\)\]]*)[\)\]]",
+    /// <summary>A bracketed bit of a title that's about the upload, not the song: made only of upload words ("(Official
+    /// Music Video)", "[Lyrics]", "(HD Audio)"). A bracket with anything else in it stays: "(Official Remix)",
+    /// "(Acoustic Version)", "(Video Game Soundtrack)" are about the song.</summary>
+    [GeneratedRegex(@"\s*[\(\[]\s*(?:(?:official|music|lyrics?|lyric|audio|video|visuali[sz]er|hd|hq|4k|mv|clip)[\s/&,-]*)+[\)\]]",
         RegexOptions.IgnoreCase)]
     private static partial Regex Clutter();
 

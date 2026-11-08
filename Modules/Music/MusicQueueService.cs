@@ -1049,7 +1049,15 @@ public class MusicQueueService : IHostedService
         }
         catch (TimeoutException)
         {
-            _ = accent.ContinueWith(_ => RefreshMenu(guildId), TaskScheduler.Default);
+            // Redrawn in its color once the cover's in, but only if it's still this song's cover: by then the song
+            // may have changed, or the bot left voice, and the redraw would be wasted.
+            _ = accent.ContinueWith(_ =>
+            {
+                if (AlbumArt.DisplayUrl(_music.GetPlayer(guildId)?.CurrentItem?.Track?.ArtworkUri) == cover)
+                {
+                    RefreshMenu(guildId);
+                }
+            }, TaskScheduler.Default);
             return null;
         }
     }

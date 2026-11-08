@@ -12,6 +12,10 @@ namespace ModBot.Modules.Music;
 public partial class AlbumArt
 {
     private const int MaxBytes = 2 * 1024 * 1024;
+
+    /// <summary>The biggest picture it decodes (16 megapixels, far more than any cover art): decoding needs width x
+    /// height x 3 bytes, which a file under <see cref="MaxBytes"/> can still ask for by the gigabyte.</summary>
+    private const long MaxPixels = 16_000_000;
     
     private const int MaxRemembered = 256;
     
@@ -62,6 +66,13 @@ public partial class AlbumArt
         try
         {
             using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            // A server error or "too many requests" is likely gone next time: not remembered (see the catch below).
+            if ((int)response.StatusCode is >= 500 or 429 or 408)
+            {
+                _accents.TryRemove(url, out _);
+                return null;
+            }
+
             if (!response.IsSuccessStatusCode ||
                 response.Content.Headers.ContentType?.MediaType?.StartsWith("image/") != true ||
                 response.Content.Headers.ContentLength > MaxBytes)
@@ -84,7 +95,17 @@ public partial class AlbumArt
                     return null;
                 }
 
-                var image = ImageResult.FromMemory(buffer.AsSpan(0, read).ToArray(), ColorComponents.RedGreenBlue);
+                // A small file can still say it's a huge picture (decoding takes width x height x 3 bytes), so its size
+                // is read first, and anything past MaxPixels isn't decoded.
+                using var bytes = new MemoryStream(buffer, 0, read, writable: false);
+                if (ImageInfo.FromStream(bytes) is not { } info || info.Width <= 0 || info.Height <= 0 ||
+                    (long)info.Width * info.Height > MaxPixels)
+                {
+                    return null;
+                }
+
+                bytes.Position = 0;
+                var image = ImageResult.FromStream(bytes, ColorComponents.RedGreenBlue);
                 return PickAccent(Sample(image.Data, image.Width, image.Height));
             }
             finally
@@ -92,10 +113,18 @@ public partial class AlbumArt
                 ArrayPool<byte>.Shared.Return(buffer);
             }
         }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            // A timeout or network hiccup: the menu keeps its usual color for now, but it isn't remembered, so the
+            // next redraw tries the cover again.
+            _logger.LogDebug(ex, "Couldn't fetch the album art at {Url}; will try again.", url);
+            _accents.TryRemove(url, out _);
+            return null;
+        }
         catch (Exception ex)
         {
-            // Not a picture it can read, a timeout, a network error: the menu just keeps its usual color.
-            // Remembered as "no color", so a cover that can't be read isn't fetched on every redraw.
+            // Not a picture it can read (a format stb doesn't know, a broken file): the menu just keeps its usual
+            // color. Remembered as "no color", so a cover that can't be read isn't fetched on every redraw.
             _logger.LogDebug(ex, "Couldn't read the album art at {Url}.", url);
             return null;
         }
@@ -108,7 +137,8 @@ public partial class AlbumArt
         {
             for (var x = 0; x < SampleSize; x++)
             {
-                var at = ((y * height / SampleSize) * width + x * width / SampleSize) * 3;
+                // In long: at 16 megapixels, the row offset times 3 is past what an int holds.
+                var at = ((long)y * height / SampleSize * width + (long)x * width / SampleSize) * 3;
                 pixels[y * SampleSize + x] = new Rgb(data[at], data[at + 1], data[at + 2]);
             }
         }
