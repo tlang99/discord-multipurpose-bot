@@ -44,6 +44,9 @@ public sealed partial class VoiceListener
     /// <summary>Said just the wake word, then paused: their next sentence counts as the request, within this long.</summary>
     private static readonly TimeSpan WakeWordWait = TimeSpan.FromSeconds(8);
 
+    /// <summary>After someone says its name, nobody else can call it for this long: it's theirs for the moment.</summary>
+    private static readonly TimeSpan WakeClaim = TimeSpan.FromSeconds(5);
+
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>How long a dropped voice connection has to come back before listening ends.</summary>
@@ -933,6 +936,15 @@ public sealed partial class VoiceListener
             // Heard its name (not again for the request that follows a lone "hey ModBot", or mid-conversation, when
             // it's already listening). Only for someone whose requests can be answered: a request is only run where
             // its speaker could have typed it (ChatHandler).
+            // One at a time: someone who called it a moment ago has it, so a second "hey ModBot" on top of theirs
+            // isn't chimed for or taken (two chimes, then two answers at once, just muddle both).
+            if (!inConversation && !session.TryClaimWake(userId, DateTimeOffset.UtcNow, WakeClaim))
+            {
+                _logger.LogInformation("Ignored my name from {UserId} in guild {GuildId}: someone else had just " +
+                                       "called me.", userId, session.Guild.Id);
+                return;
+            }
+
             if (!inConversation && session.Guild.GetUser(userId) is { IsBot: false } caller &&
                 ChannelAccess.CanPost(caller, session.ReplyChannel))
             {
@@ -1693,6 +1705,25 @@ public sealed partial class VoiceListener
         /// <summary>True (once) if <paramref name="userId"/> said just the wake word within <paramref name="within"/>.</summary>
         public bool TakeWakeWord(ulong userId, TimeSpan within)
             => _wakeWords.TryRemove(userId, out var at) && DateTimeOffset.UtcNow - at <= within;
+
+        private readonly Lock _wakeLock = new();
+        private (ulong UserId, DateTimeOffset At)? _wakeClaim;
+
+        /// <summary>Whether <paramref name="userId"/> may call the bot by name now: true (and it's theirs from now)
+        /// unless someone else called it within <paramref name="within"/>.</summary>
+        public bool TryClaimWake(ulong userId, DateTimeOffset now, TimeSpan within)
+        {
+            lock (_wakeLock)
+            {
+                if (_wakeClaim is { } claim && claim.UserId != userId && now - claim.At < within)
+                {
+                    return false;
+                }
+
+                _wakeClaim = (userId, now);
+                return true;
+            }
+        }
 
         /// <summary>When each person last asked the bot something.</summary>
         private readonly ConcurrentDictionary<ulong, DateTimeOffset> _askedAt = new();
