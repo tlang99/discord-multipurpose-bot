@@ -158,6 +158,12 @@ builder.Services.AddSingleton<ModBot.Modules.Lfg.LfgPoster>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicPlayerEvents>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicService>();
 builder.Services.AddSingleton<IMusicQueueStore, JsonMusicQueueStore>();
+builder.Services.AddHttpClient<ModBot.Modules.Music.AlbumArt>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ModBot/1.0 (Discord bot album art)");
+})
+.ConfigurePrimaryHttpMessageHandler(PublicNetworkHttpHandler.Create);
 builder.Services.AddSingleton<ModBot.Modules.Music.DjPicker>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicQueueService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ModBot.Modules.Music.MusicQueueService>());

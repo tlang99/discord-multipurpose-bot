@@ -116,12 +116,13 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   going back doesn't use up anyone's turn. With nothing playing, going back adds the last song played again (and
   starts it if you're in voice). Like pause, these are for anyone in the bot's voice channel, or a moderator.
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
-  pins it (if it has Pin Messages). It always shows what's playing and whose songs are up next, with buttons:
+  pins it (if it has Pin Messages). It always shows what's playing, as a card with the song's cover art in the
+  cover's main colour and a tidied title (no "(Official Music Video)" and the like), and whose songs are up next,
+  with buttons: **Play** (or ⏮️ back, **Pause**/**Resume**, **Skip**, which is a vote, and ⏹️ stop while playing),
   **Add song** (a pop-up that works like `/play`: it also starts the music if nothing's playing and you're in voice),
-  **Play** (or **Back**, **Vote skip**, **Pause**/**Resume** and **Stop** while playing), then **Loop** (off, this
-  song, or the whole queue: each press moves to the next, and the menu says what's looping), 🔉 🔊 (volume),
-  **History** and **Remove mine** (a private list of your waiting songs: take out one, or all of them). The buttons
-  keep working across restarts. Running `/music-menu` again replaces it.
+  then **Loop** (off, this song, or the whole queue: each press moves to the next, and the menu says what's
+  looping), 🔉 🔊 (volume), **History** and **Mine** (a private list of your waiting songs: take out one, or all of
+  them). The buttons keep working across restarts. Running `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
   minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"

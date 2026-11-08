@@ -56,6 +56,7 @@ public class MusicQueueService : IHostedService
     private readonly DiscordSocketClient _client;
     private readonly MusicOptions _options;
     private readonly ILogger<MusicQueueService> _logger;
+    private readonly AlbumArt _albumArt;
     private readonly DjPicker _dj;
 
     /// <summary>Who DJ mode's songs show as picked by.</summary>
@@ -87,6 +88,7 @@ public class MusicQueueService : IHostedService
     /// menu while nothing's playing, so a bot that left on its own doesn't look like it crashed.</summary>
     private readonly ConcurrentDictionary<ulong, DateTimeOffset> _leftVoiceAt = new();
 
+    /// <summary>The title of menus posted before the card layout, which are still recognised as menus.</summary>
     private const string MenuTitle = "🎶 Music queue";
 
     /// <summary>Keeping the menu at the bottom: wait for this long a quiet spell before reposting it...</summary>
@@ -108,9 +110,10 @@ public class MusicQueueService : IHostedService
 
     public MusicQueueService(IMusicQueueStore store, IGuildSettingsStore settings, MusicService music,
         ServerSettingsService serverSettings,
-        MusicPlayerEvents events, DjPicker dj,
+        MusicPlayerEvents events, AlbumArt albumArt, DjPicker dj,
         DiscordSocketClient client, IOptions<MusicOptions> options, ILogger<MusicQueueService> logger)
     {
+        _albumArt = albumArt;
         _dj = dj;
         _store = store;
         _settings = settings;
@@ -681,15 +684,15 @@ public class MusicQueueService : IHostedService
     public async Task<(bool Pinned, string? Error)> PostMenuAsync(ITextChannel channel)
     {
         var guildId = channel.GuildId;
+        var accent = await AccentAsync(guildId);
         return await _menuLocks.RunAsync<(bool, string?)>(guildId, async () =>
         {
             var state = await _store.GetAsync(guildId);
             IUserMessage menu;
             try
             {
-                var player = _music.GetPlayer(guildId);
-                menu = await channel.SendMessageAsync(embed: BuildMenu(state, player),
-                    components: BuildButtons(state, player), allowedMentions: AllowedMentions.None);
+                menu = await channel.SendMessageAsync(components: BuildMenu(state, _music.GetPlayer(guildId), accent),
+                    allowedMentions: AllowedMentions.None);
             }
             catch (HttpException ex)
             {
@@ -987,8 +990,11 @@ public class MusicQueueService : IHostedService
         return Task.CompletedTask;
     }
 
-    private Task RefreshMenuAsync(ulong guildId)
-        => _menuLocks.RunAsync(guildId, async () =>
+    private async Task RefreshMenuAsync(ulong guildId)
+    {
+        // Before taking the lock: the first time a song's cover is seen, it's fetched.
+        var accent = await AccentAsync(guildId);
+        await _menuLocks.RunAsync(guildId, async () =>
         {
             var state = await _store.GetAsync(guildId);
             if (state.MenuChannelId is not { } channelId || state.MenuMessageId is not { } messageId)
@@ -1015,10 +1021,47 @@ public class MusicQueueService : IHostedService
             var player = _music.GetPlayer(guildId);
             await menu.ModifyAsync(m =>
             {
-                m.Embed = BuildMenu(state, player);
-                m.Components = BuildButtons(state, player);
+                // A menu posted before the card layout is an embed: an edit can turn it into a card (and a card can't
+                // carry an embed), but never back.
+                if (!menu.Flags.GetValueOrDefault().HasFlag(MessageFlags.ComponentsV2))
+                {
+                    m.Embeds = Array.Empty<Embed>();
+                }
+
+                m.Flags = MessageFlags.ComponentsV2;
+                m.Components = BuildMenu(state, player, accent);
             });
         });
+    }
+
+    /// <summary>How long a redraw waits for a new song's cover to be fetched before going ahead in the usual green
+    /// (it's redrawn again in its own color once the cover's in).</summary>
+    private static readonly TimeSpan AlbumArtWait = TimeSpan.FromSeconds(3);
+
+    /// <summary>The accent color from the cover of the song playing in the server, if there is one.</summary>
+    private async Task<Color?> AccentAsync(ulong guildId)
+    {
+        var cover = AlbumArt.DisplayUrl(_music.GetPlayer(guildId)?.CurrentItem?.Track?.ArtworkUri);
+        var accent = _albumArt.AccentAsync(cover);
+        try
+        {
+            return await accent.WaitAsync(AlbumArtWait);
+        }
+        catch (TimeoutException)
+        {
+            // Redrawn in its color once the cover's in, but only if it's still this song's cover: by then the song
+            // may have changed, or the bot left voice, and the redraw would be wasted.
+            _ = accent.ContinueWith(done =>
+            {
+                if (done is { IsCompletedSuccessfully: true, Result: not null } &&
+                    AlbumArt.DisplayUrl(_music.GetPlayer(guildId)?.CurrentItem?.Track?.ArtworkUri) == cover)
+                {
+                    RefreshMenu(guildId);
+                }
+            }, TaskScheduler.Default);
+            return null;
+        }
+    }
 
     private async Task<IUserMessage?> FetchMenuAsync(ulong channelId, ulong messageId)
     {
@@ -1038,70 +1081,175 @@ public class MusicQueueService : IHostedService
         }
     }
 
-    private Embed BuildMenu(MusicQueueState state, MusicPlayer? player)
+    /// <summary>How many songs the menu lists under "Up next" (the rest are a count; /queue has them all).</summary>
+    private const int MenuUpNext = 5;
+
+    /// <summary>
+    /// The menu, as a card in the style of a music player: tinted to the cover of the song playing (see
+    /// <see cref="AlbumArt"/>), the song with its cover beside it, a short list of what's next, then the settings and
+    /// the latest news in small print, with the buttons at the bottom.
+    /// </summary>
+    private MessageComponent BuildMenu(MusicQueueState state, MusicPlayer? player, Color? accent)
     {
-        // Short: the rules are read once, and the menu is what everyone keeps looking at.
-        var embed = new EmbedBuilder()
-            .WithColor(Colors.Music)
-            .WithTitle(MenuTitle)
-            .WithFooter($"One song each in turn · up to {SongsPerPerson} waiting each · skipping and stopping take " +
-                        "votes from the listeners");
+        var card = new ContainerBuilder().WithAccentColor(accent ?? Colors.Music);
 
-        // Looping and the volume show plainly (both are saved, so they can still be set from last time); the Loop and
-        // 🔉 🔊 buttons change them.
-        var volume = state.VolumePercent;
-        var status = LoopOf(state, player) switch
+        if (player?.CurrentItem is { Track: { } track } current)
         {
-            LoopMode.Song => "\n🔂 Looping this song.",
-            LoopMode.Queue => "\n🔁 Looping the queue: finished songs go back in.",
-            _ => "",
-        } + (volume == 100 ? "" : $"\n{(volume < 100 ? "🔉" : "🔊")} Volume {volume}%.");
-
-        if (player?.CurrentItem is { } current)
-        {
-            embed.WithDescription((player.State == PlayerState.Paused ? "⏸️ Paused" : "▶️ Playing") +
-                                  $" in <#{player.VoiceChannelId}>.{status}");
             var song = (current as QueueTrackItem)?.Song;
-            embed.AddField("Now playing", MusicFormatting.TrackLink(current.Track) +
-                                          $" ({MusicFormatting.Length(current.Track!)})" +
-                                          (song is null ? "" : $" - <@{song.PickerId}>'s pick") +
-                                          VotesLine(_votes, state.GuildId, song?.Id, "⏭️", "skip") +
-                                          VotesLine(_stopVotes, state.GuildId, song?.Id, "⏹️", "stop"));
+            var paused = player.State == PlayerState.Paused;
+            // Shortened like titles are: from outside YouTube, either can be any length, and Discord turns the whole
+            // menu down when one part of it is too long.
+            var artist = TextTools.Truncate(MusicFormatting.Artist(track.Author), 100);
+            var text = new StringBuilder()
+                .AppendLine($"-# {(paused ? "⏸️ PAUSED" : "▶️ NOW PLAYING")} · <#{player.VoiceChannelId}>")
+                .AppendLine($"### {MusicFormatting.MenuTrackLink(track)}");
+            if (artist.Length > 0)
+            {
+                text.AppendLine(TextTools.Escape(artist));
+            }
+
+            text.Append("-# ").Append(PlaybackLine(track, player.Position?.Position, paused));
+            if (song is not null)
+            {
+                text.Append($" · picked by <@{song.PickerId}>");
+            }
+
+            text.Append(VotesLine(_votes, state.GuildId, song?.Id, "⏭️", "skip"))
+                .Append(VotesLine(_stopVotes, state.GuildId, song?.Id, "⏹️", "stop"));
+
+            var cover = AlbumArt.DisplayUrl(track.ArtworkUri);
+            if (cover is null)
+            {
+                card.WithTextDisplay(text.ToString());
+            }
+            else
+            {
+                card.WithSection(new SectionBuilder()
+                    .WithTextDisplay(text.ToString())
+                    .WithAccessory(new ThumbnailBuilder(cover, description: TextTools.Truncate(track.Title ?? "", 200))));
+            }
         }
         else
         {
             var left = _leftVoiceAt.TryGetValue(state.GuildId, out var at)
-                ? $" (left voice <t:{at.ToUnixTimeSeconds()}:R>)"
+                ? $" · left voice <t:{at.ToUnixTimeSeconds()}:R>"
                 : "";
-            embed.WithDescription($"Not playing right now{left}. Add songs any time - they wait here. When you're " +
-                                  $"ready, join a voice channel and press **Play**.{status}");
+            card.WithTextDisplay($"-# ⏹️ NOT PLAYING{left}\n" +
+                                 "### 🎶 Music queue\n" +
+                                 "Add songs any time - they wait here. When you're ready, join a voice channel and " +
+                                 "press **Play**.");
+        }
+
+        card.WithSeparator();
+        card.WithTextDisplay(UpNext(state));
+
+        var small = new List<string>();
+        var settings = new List<string>();
+        switch (LoopOf(state, player))
+        {
+            case LoopMode.Song:
+                settings.Add("🔂 Looping this song");
+                break;
+            case LoopMode.Queue:
+                settings.Add("🔁 Looping the queue");
+                break;
+        }
+
+        if (state.VolumePercent != 100)
+        {
+            settings.Add($"{(state.VolumePercent < 100 ? "🔉" : "🔊")} Volume {state.VolumePercent}%");
+        }
+
+        if (settings.Count > 0)
+        {
+            small.Add(string.Join(" · ", settings));
         }
 
         if (_menuNotes.TryGetValue(state.GuildId, out var note))
         {
-            // Dated with Discord's relative time ("2 hours ago"), kept even when a long note is cut to a field's limit.
-            var when = $" <t:{note.At.ToUnixTimeSeconds()}:R>";
-            var room = 1024 - when.Length;
-            embed.AddField("Latest", (note.Text.Length <= room ? note.Text : note.Text[..(room - 1)] + "…") + when);
+            // Dated with Discord's relative time ("2 minutes ago"), kept even when a long note is cut short.
+            const int room = 300;
+            small.Add((note.Text.Length <= room ? note.Text : note.Text[..(room - 1)] + "…") +
+                      $" · <t:{note.At.ToUnixTimeSeconds()}:R>");
         }
 
+        small.Add($"One song each, in turn · up to {SongsPerPerson} waiting each · skips and stops are voted on");
+        card.WithSeparator(isDivider: false, spacing: SeparatorSpacingSize.Small);
+        card.WithTextDisplay(string.Join('\n', small.Select(line => "-# " + line)));
+
+        foreach (var row in BuildButtons(state, player))
+        {
+            card.WithActionRow(row);
+        }
+
+        return new ComponentBuilderV2().WithContainer(card).Build();
+    }
+
+    /// <summary>
+    /// How far along the song is, for the line under it. Discord keeps "ends in 2 minutes" up to date on its own, so
+    /// the menu needn't be redrawn as the song plays; paused, it says where it stopped instead.
+    /// </summary>
+    private static string PlaybackLine(LavalinkTrack track, TimeSpan? position, bool paused)
+    {
+        if (track.IsLiveStream)
+        {
+            return "🔴 Live";
+        }
+
+        var length = MusicFormatting.Duration(track.Duration);
+        if (position is not { } at)
+        {
+            return length;
+        }
+
+        if (paused)
+        {
+            return $"{MusicFormatting.Duration(at)} of {length}";
+        }
+
+        var ends = DateTimeOffset.UtcNow + (track.Duration - at);
+        return $"{length} · ends <t:{ends.ToUnixTimeSeconds()}:R>";
+    }
+
+    /// <summary>The menu's short list of the next few turns, with how long they all last.</summary>
+    private string UpNext(MusicQueueState state)
+    {
         var order = MusicQueueRules.Order(state);
-        // How long it all lasts (live streams can't be timed, so then it isn't shown).
+        if (order.Count == 0)
+        {
+            return "**Up next**\n-# Nothing yet - press **Add song**, use `/play`, or ask me.";
+        }
+
+        // Live streams can't be timed, so then there's no total.
         var total = order.Any(s => s.IsLiveStream)
             ? ""
-            : $" (~{MusicFormatting.RoughWait(order.Aggregate(TimeSpan.Zero, (sum, s) => sum + s.Duration))})";
-        embed.AddField(order.Count == 0 ? "Up next" : $"Up next{total}", order.Count == 0
-            ? "*Nothing yet - press **Add song**, use `/play`, or ask me.*"
-            : FitField(order.Take(10).Select((s, i) => $"`{i + 1}.` {MusicFormatting.SongLink(s)} - <@{s.PickerId}>"),
-                order.Count, "\n"));
-
-        var turns = state.Participants.Where(p => state.Songs.Any(s => s.PickerId == p)).ToList();
-        if (turns.Count > 0)
+            : $" · {MusicFormatting.RoughWait(order.Aggregate(TimeSpan.Zero, (sum, s) => sum + s.Duration))}";
+        var text = new StringBuilder($"**Up next**{total}");
+        foreach (var (song, i) in order.Take(MenuUpNext).Select((s, i) => (s, i)))
         {
-            embed.AddField("Taking turns", FitField(turns.Select(p => $"<@{p}>"), turns.Count, " → "));
+            text.Append($"\n`{i + 1}` {MusicFormatting.MenuSongLink(song)} · <@{song.PickerId}> · " +
+                        MusicFormatting.SongLength(song));
         }
 
-        return embed.Build();
+        var more = new List<string>();
+        if (order.Count > MenuUpNext)
+        {
+            more.Add($"+{order.Count - MenuUpNext} more in `/queue`");
+        }
+
+        var turns = state.Participants.Where(p => state.Songs.Any(s => s.PickerId == p)).ToList();
+        if (turns.Count > 1)
+        {
+            more.Add("turns: " + string.Join(" → ", turns.Take(8).Select(p => $"<@{p}>")) +
+                     (turns.Count > 8 ? $" +{turns.Count - 8}" : ""));
+        }
+
+        if (more.Count > 0)
+        {
+            text.Append("\n-# ").Append(string.Join(" · ", more));
+        }
+
+        return text.ToString();
     }
 
     /// <summary>"\n⏭️ 2 votes to skip" for the menu, when the song playing has any; otherwise "".</summary>
@@ -1119,62 +1267,36 @@ public class MusicQueueService : IHostedService
             : state.LoopQueue ? LoopMode.Queue
             : LoopMode.Off;
 
-    private static MessageComponent BuildButtons(MusicQueueState state, MusicPlayer? player)
+    /// <summary>The menu's buttons: playback on the first row, the rest on the second.</summary>
+    private static IEnumerable<ActionRowBuilder> BuildButtons(MusicQueueState state, MusicPlayer? player)
     {
-        var builder = new ComponentBuilder()
-            .WithButton("Add song", AddButton, ButtonStyle.Success, new Emoji("➕"));
-
+        var playback = new ActionRowBuilder();
         if (player?.CurrentItem is null)
         {
-            builder.WithButton("Play", PlayButton, ButtonStyle.Primary, new Emoji("▶️"));
+            playback.WithButton("Play", PlayButton, ButtonStyle.Primary, new Emoji("▶️"));
         }
         else
         {
-            builder.WithButton("Back", BackButton, ButtonStyle.Secondary, new Emoji("⏮️"));
-            builder.WithButton("Vote skip", SkipButton, ButtonStyle.Primary, new Emoji("⏭️"));
-            builder = player.State == PlayerState.Paused
-                ? builder.WithButton("Resume", ResumeButton, ButtonStyle.Secondary, new Emoji("▶️"))
-                : builder.WithButton("Pause", PauseButton, ButtonStyle.Secondary, new Emoji("⏸️"));
-            builder.WithButton("Stop", StopButton, ButtonStyle.Danger, new Emoji("⏹️"));
+            playback.WithButton(null, BackButton, ButtonStyle.Secondary, new Emoji("⏮️"));
+            playback = player.State == PlayerState.Paused
+                ? playback.WithButton("Resume", ResumeButton, ButtonStyle.Primary, new Emoji("▶️"))
+                : playback.WithButton("Pause", PauseButton, ButtonStyle.Primary, new Emoji("⏸️"));
+            playback.WithButton("Skip", SkipButton, ButtonStyle.Secondary, new Emoji("⏭️"));
+            playback.WithButton(null, StopButton, ButtonStyle.Danger, new Emoji("⏹️"));
         }
 
-        // A second row: five buttons (a row's most) fill the first while the music plays.
+        playback.WithButton("Add song", AddButton, ButtonStyle.Success, new Emoji("➕"));
+        yield return playback;
+
         var loop = LoopOf(state, player);
-        return builder
-            .WithButton($"Loop: {loop switch { LoopMode.Song => "song", LoopMode.Queue => "queue", _ => "off" }}",
-                LoopButton, loop == LoopMode.Off ? ButtonStyle.Secondary : ButtonStyle.Primary,
-                new Emoji(loop == LoopMode.Song ? "🔂" : "🔁"), row: 1)
-            .WithButton(null, VolumeDownButton, ButtonStyle.Secondary, new Emoji("🔉"), row: 1)
-            .WithButton(null, VolumeUpButton, ButtonStyle.Secondary, new Emoji("🔊"), row: 1)
-            .WithButton("History", HistoryButton, ButtonStyle.Secondary, new Emoji("🕘"), row: 1)
-            .WithButton("Remove mine", MineButton, ButtonStyle.Secondary, new Emoji("🗑️"), row: 1)
-            .Build();
-    }
-
-    /// <summary>As many of <paramref name="items"/> as fit in an embed field (1024 characters; song links with long
-    /// titles get there fast), then "...and N more".</summary>
-    private static string FitField(IEnumerable<string> items, int total, string separator)
-    {
-        const int limit = EmbedFieldBuilder.MaxFieldValueLength - 30; // room for the "...and N more" line
-        var text = new StringBuilder();
-        var shown = 0;
-        foreach (var item in items)
-        {
-            if (text.Length + separator.Length + item.Length > limit)
-            {
-                break;
-            }
-
-            text.Append(shown == 0 ? "" : separator).Append(item);
-            shown++;
-        }
-
-        if (shown < total)
-        {
-            text.Append(shown == 0 ? "" : "\n").Append($"*...and {total - shown} more*");
-        }
-
-        return text.ToString();
+        yield return new ActionRowBuilder()
+            .WithButton(loop switch { LoopMode.Song => "Song", LoopMode.Queue => "Queue", _ => null }, LoopButton,
+                loop == LoopMode.Off ? ButtonStyle.Secondary : ButtonStyle.Primary,
+                new Emoji(loop == LoopMode.Song ? "🔂" : "🔁"))
+            .WithButton(null, VolumeDownButton, ButtonStyle.Secondary, new Emoji("🔉"))
+            .WithButton(null, VolumeUpButton, ButtonStyle.Secondary, new Emoji("🔊"))
+            .WithButton("History", HistoryButton, ButtonStyle.Secondary, new Emoji("🕘"))
+            .WithButton("Mine", MineButton, ButtonStyle.Secondary, new Emoji("🗑️"));
     }
 
     private async Task TryUnpinAsync(IUserMessage menu)
@@ -1244,7 +1366,7 @@ public class MusicQueueService : IHostedService
         }
 
         // A new copy of the menu itself (reposting) isn't something to repost over.
-        if (!_options.KeepMenuAtBottom || fromBot && message.Embeds.Any(e => e.Title == MenuTitle))
+        if (!_options.KeepMenuAtBottom || fromBot && IsMenu(message))
         {
             return Task.CompletedTask;
         }
@@ -1252,6 +1374,21 @@ public class MusicQueueService : IHostedService
         ScheduleRepost(channel);
         return Task.CompletedTask;
     }
+
+    /// <summary>Whether <paramref name="message"/> is a music menu: a card with its Add song button, or an embed menu
+    /// from before the card layout.</summary>
+    private static bool IsMenu(IMessage message)
+        => message.Embeds.Any(e => e.Title == MenuTitle) || HasButton(message.Components, AddButton);
+
+    private static bool HasButton(IEnumerable<IMessageComponent> components, string customId)
+        => components.Any(c => c switch
+        {
+            ButtonComponent button => button.CustomId == customId,
+            ActionRowComponent row => HasButton(row.Components, customId),
+            ContainerComponent container => HasButton(container.Components, customId),
+            SectionComponent section => HasButton(section.Components.Append(section.Accessory), customId),
+            _ => false,
+        });
 
     private void ScheduleRepost(ITextChannel channel)
     {
