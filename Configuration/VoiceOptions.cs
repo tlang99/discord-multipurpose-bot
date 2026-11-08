@@ -59,20 +59,6 @@ public class VoiceOptions
     public int MaxSpokenCharacters { get; set; } = 300;
 
     /// <summary>
-    /// After an answer read aloud, anyone in the voice channel can say the next thing without the bot's name, until
-    /// nobody's said anything to it for this many seconds (0-60; 0 turns conversations off), or someone says
-    /// "thanks" or "that's all". A closing chime says it's over.
-    /// </summary>
-    public int ConversationSeconds { get; set; } = 10;
-
-    /// <summary>
-    /// In a conversation, the least time between one person's requests, counted from their last one (0-60). Replies
-    /// there skip the chatbot's own cooldown (Chat:CooldownSeconds), which would cut a back-and-forth short; this
-    /// shorter one still keeps anyone from firing off requests back to back. One said too soon is dropped.
-    /// </summary>
-    public int FollowUpCooldownSeconds { get; set; } = 5;
-
-    /// <summary>
     /// With music on its own bot account (Bot:MusicToken), how loud the music plays while the bot reads an answer
     /// over it, as a percentage of how loud it was (0-100; 100 leaves it as it is). It goes back up after.
     /// </summary>
@@ -80,7 +66,7 @@ public class VoiceOptions
 
     /// <summary>
     /// Write each voice request (as speech-to-text heard it) to the log, for working out why one wasn't understood:
-    /// what was said after the bot's name, and in a conversation, the replies. Off by default: the log
+    /// what was said after the bot's name. Off by default: the log
     /// otherwise never holds what anyone said. While it's on, the line posted on joining voice says so.
     /// </summary>
     public bool LogRequests { get; set; }

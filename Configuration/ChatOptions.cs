@@ -39,6 +39,12 @@ public class ChatOptions
     /// holds on to that memory (about 3 GB of graphics memory for llama3.2).</summary>
     public int KeepAliveMinutes { get; set; } = 5;
 
+    /// <summary>Lets a local Ollama run the model on the graphics card, as it does by default. Turn it off to keep the
+    /// model on the processor instead: a small model like llama3.2 still answers in a second or two there, and doesn't
+    /// fight a game for the graphics card (while one has it busy, the same answer can take a minute). Ignored for
+    /// ollama.com.</summary>
+    public bool UseGpu { get; set; } = true;
+
     /// <summary>The chatbot's default personality: tone, character, interests. Servers can replace it with
     /// <c>/chat personality set</c>. The bot's ground rules (short replies, no pings, reply only as itself) always
     /// apply on top, so this can't break them.</summary>

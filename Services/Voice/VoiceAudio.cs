@@ -51,23 +51,14 @@ public static class VoiceAudio
     /// </summary>
     public static byte[] Chime(double volume = ChimeVolume) => Notes(volume, 784.0, 1046.5);
 
-    /// <summary>The "I'm done listening" chime, for when a conversation ends: <see cref="Chime"/> the other way round,
-    /// falling (C6, then G5).</summary>
-    public static byte[] ExitChime(double volume = ChimeVolume) => Notes(volume, 1046.5, 784.0);
-
     /// <summary>The "done" chime, for a request whose result you can hear (the music started, stopped or skipped):
     /// three notes, low, high, low (C6, E6, C6; the last left to ring, as in every chime), a step above
-    /// <see cref="Chime"/> so it's told apart from "I heard my name" and the closing chime.</summary>
+    /// <see cref="Chime"/> so it's told apart from "I heard my name".</summary>
     public static byte[] DoneChime(double volume = ChimeVolume) => Notes(volume, 1046.5, 1318.5, 1046.5);
 
     /// <summary>The "heard you, but not right now" chime, for a request dropped because the person asked again too
-    /// soon: two notes falling, lower than the others (E5, then C5), so it's told apart from the closing chime.</summary>
+    /// soon: two notes falling, lower than the others (E5, then C5).</summary>
     public static byte[] BusyChime(double volume = ChimeVolume) => Notes(volume, 659.3, 523.3);
-
-    /// <summary>The "heard you too" chime, for someone who said the bot's name just after someone else did: one note
-    /// (the wake chime's first, G5), softer, played once the first person's chime has finished, so the two never
-    /// sound at once.</summary>
-    public static byte[] HeardTooChime(double volume = ChimeVolume) => Notes(volume * 0.6, 784.0);
 
     /// <summary>Quick marimba-like notes in a row, the last one left to ring out, peaking at <paramref name="volume"/>
     /// (a share of full volume).</summary>

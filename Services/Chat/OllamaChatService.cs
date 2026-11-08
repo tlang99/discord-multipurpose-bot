@@ -22,8 +22,13 @@ public class OllamaChatService : IChatService
     private readonly ChatRequestLimiter _limiter;
     private readonly ChatOptions _options;
 
-    /// <summary>When the model last answered (ticks, UTC): within the keep-alive since, it's still loaded.</summary>
-    private long _lastUsed;
+    /// <summary>When Ollama will unload the model (ticks, UTC), going by the keep-alive of the last request it
+    /// answered.</summary>
+    private long _loadedUntil;
+
+    /// <summary>A warm-up asked for the model to stay loaded until then (ticks, UTC), so every request until then
+    /// asks Ollama for at least that long.</summary>
+    private long _holdUntil;
 
     public OllamaChatService(HttpClient httpClient, ChatRequestLimiter limiter, IOptions<ChatOptions> options)
     {
@@ -55,30 +60,48 @@ public class OllamaChatService : IChatService
         return await SendAsync(request, cancellationToken);
     }
 
-    public async Task WarmUpAsync(CancellationToken cancellationToken = default)
+    public async Task WarmUpAsync(CancellationToken cancellationToken = default, TimeSpan? keepLoadedFor = null)
     {
-        // Only a local Ollama unloads models (on ollama.com it'd be a call for nothing), and only after it's been idle:
-        // used within the keep-alive, it's still loaded.
-        if (SearchOptions.IsOllamaCom(_options.OllamaUrl) || IsLikelyLoaded())
+        // Only a local Ollama unloads models (on ollama.com it'd be a call for nothing).
+        if (SearchOptions.IsOllamaCom(_options.OllamaUrl))
         {
             return;
         }
 
-        // Ollama loads the model for a chat request with no messages, and answers nothing.
+        if (keepLoadedFor is { } hold)
+        {
+            // Replaces the last hold, so one that's no longer wanted (the song was skipped) can be cut short. Nothing
+            // is sent to shorten it: Ollama goes on by the last keep-alive it was sent until the next request (a
+            // question, or another warm-up) sends the shorter one, so the memory is freed at most that much later.
+            Interlocked.Exchange(ref _holdUntil, hold > TimeSpan.Zero ? DateTime.UtcNow.Add(hold).Ticks : 0);
+            if (hold <= TimeSpan.Zero)
+            {
+                return; // just ending it: the next request sends the usual keep-alive, and Ollama goes by that
+            }
+        }
+
+        // Already loaded for long enough: nothing to do.
+        if (IsLoadedLongEnough())
+        {
+            return;
+        }
+
+        // Ollama loads the model (or resets how long it stays) for a chat request with no messages, and answers nothing.
         try
         {
             using var slot = await _limiter.AcquireAsync(cancellationToken);
-            if (IsLikelyLoaded())
+            if (IsLoadedLongEnough())
             {
                 return; // a question (or another warm-up) loaded it while this one waited
             }
 
+            var (keepAlive, keptFor) = KeepAlive();
             using var response = await _httpClient.PostAsJsonAsync("api/chat",
-                new OllamaChatRequest(_options.Model, [], Stream: false, KeepAlive: KeepAlive), JsonOptions,
+                Prepare(new OllamaChatRequest(_options.Model, [], Stream: false), keepAlive), JsonOptions,
                 cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                Interlocked.Exchange(ref _lastUsed, DateTime.UtcNow.Ticks);
+                MarkLoaded(keptFor);
             }
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -90,24 +113,64 @@ public class OllamaChatService : IChatService
     /// <summary>Ollama's own keep-alive, used when Chat:KeepAliveMinutes leaves it to Ollama.</summary>
     private const int OllamaDefaultKeepAliveMinutes = 5;
 
-    /// <summary>Chat:KeepAliveMinutes as Ollama wants it ("30m"), or null to leave Ollama's own default.</summary>
-    private string? KeepAlive => _options.KeepAliveMinutes > 0 ? $"{_options.KeepAliveMinutes}m" : null;
+    /// <summary>The keep-alive to send now, with how long that keeps the model loaded.</summary>
+    private (string? Param, TimeSpan For) KeepAlive()
+        => KeepAliveFor(_options.KeepAliveMinutes, new DateTime(Interlocked.Read(ref _holdUntil), DateTimeKind.Utc),
+            DateTime.UtcNow);
 
-    /// <summary>The model answered recently enough that it's still loaded (with half a minute to spare).</summary>
-    private bool IsLikelyLoaded()
+    /// <summary>
+    /// The keep-alive for a request sent at <paramref name="now"/>: Chat:KeepAliveMinutes (<paramref
+    /// name="configuredMinutes"/>; 0 or less leaves Ollama's own default), or longer if a warm-up asked for the model
+    /// to stay loaded until <paramref name="holdUntil"/>. Each request resets how long Ollama keeps the model, so a
+    /// question asked during a hold carries the rest of the hold too. The param is as Ollama wants it ("300s"), or
+    /// null for its default.
+    /// </summary>
+    public static (string? Param, TimeSpan For) KeepAliveFor(int configuredMinutes, DateTime holdUntil, DateTime now)
     {
-        var keptFor = TimeSpan.FromMinutes(_options.KeepAliveMinutes > 0
-            ? _options.KeepAliveMinutes
-            : OllamaDefaultKeepAliveMinutes);
-        return DateTime.UtcNow.Ticks - Interlocked.Read(ref _lastUsed) < (keptFor - TimeSpan.FromSeconds(30)).Ticks;
+        var configured = TimeSpan.FromMinutes(configuredMinutes > 0 ? configuredMinutes : OllamaDefaultKeepAliveMinutes);
+        var held = holdUntil - now;
+        if (held > configured)
+        {
+            var seconds = (int)Math.Ceiling(held.TotalSeconds);
+            return ($"{seconds}s", TimeSpan.FromSeconds(seconds));
+        }
+
+        return (configuredMinutes > 0 ? $"{configuredMinutes}m" : null, configured);
+    }
+
+    /// <summary><paramref name="request"/> with what every request carries: the keep-alive and, with Chat:UseGpu off,
+    /// keeping the model off the graphics card. Every request must say so, warm-ups too: one that didn't would have
+    /// Ollama load the model onto the graphics card again.</summary>
+    private OllamaChatRequest Prepare(OllamaChatRequest request, string? keepAlive)
+        => request with
+        {
+            KeepAlive = keepAlive,
+            Options = _options.UseGpu || SearchOptions.IsOllamaCom(_options.OllamaUrl)
+                ? request.Options
+                : (request.Options ?? new OllamaRequestOptions()) with { NumGpu = 0 },
+        };
+
+    private void MarkLoaded(TimeSpan keptFor)
+        => Interlocked.Exchange(ref _loadedUntil, DateTime.UtcNow.Add(keptFor).Ticks);
+
+    /// <summary>The model's loaded (for at least another half a minute), and until the end of any hold.</summary>
+    private bool IsLoadedLongEnough()
+    {
+        var spare = TimeSpan.FromSeconds(30).Ticks;
+        var wanted = Math.Max(DateTime.UtcNow.Ticks + spare, Interlocked.Read(ref _holdUntil) - spare);
+        return Interlocked.Read(ref _loadedUntil) >= wanted;
     }
 
     private async Task<string> SendAsync(OllamaChatRequest request, CancellationToken cancellationToken,
         TimeSpan? timeout = null)
     {
-        request = request with { KeepAlive = KeepAlive };
         // One slot per request, shared by chat and news, so a local Ollama isn't asked to do too much at once.
         using var slot = await _limiter.AcquireAsync(cancellationToken);
+
+        // Worked out once the slot is ours: a hold set while this waited is sent too, and each request resets how
+        // long Ollama keeps the model, so the newest request's keep-alive is the one that counts.
+        var (keepAlive, keptFor) = KeepAlive();
+        request = Prepare(request, keepAlive);
 
         // The timeout starts once the slot is ours, so waiting behind other requests doesn't count against the model.
         // Running out cancels the request; the filters below check the caller's own token, so it surfaces as a
@@ -155,7 +218,7 @@ public class OllamaChatService : IChatService
 
             // Reasoning models put their thinking in message.thinking, separately, so content is just the answer.
             var reply = payload?.Message?.Content?.Trim();
-            Interlocked.Exchange(ref _lastUsed, DateTime.UtcNow.Ticks); // the model's loaded now
+            MarkLoaded(keptFor); // the model's loaded now
             if (string.IsNullOrEmpty(reply))
             {
                 throw new ChatServiceException("Ollama returned an empty reply.");
@@ -201,7 +264,9 @@ public class OllamaChatService : IChatService
     private record OllamaChatRequest(string Model, IReadOnlyList<OllamaMessage> Messages, bool Stream,
         JsonElement? Format = null, OllamaRequestOptions? Options = null, string? KeepAlive = null);
 
-    private record OllamaRequestOptions(double? Temperature = null);
+    /// <param name="NumGpu">How many of the model's layers go on the graphics card; 0 keeps it all on the processor.
+    /// Null leaves it to Ollama.</param>
+    private record OllamaRequestOptions(double? Temperature = null, int? NumGpu = null);
 
     private record OllamaChatResponse(OllamaMessage? Message);
 

@@ -563,133 +563,10 @@ public class ListeningLineTests
     }
 }
 
-/// <summary>The back-and-forth after an answer: who can follow up, when it ends, what it remembers.</summary>
-public class VoiceConversationTests
+/// <summary>"ModBot, stop" / "thanks ModBot": what counts as telling the bot to stop.</summary>
+public class VoiceGoodbyeTests
 {
     private static readonly string[] Names = ["ModBot"];
-    private static readonly DateTimeOffset Start = new(2026, 11, 6, 20, 0, 0, TimeSpan.Zero);
-    private static readonly TimeSpan Quiet = TimeSpan.FromSeconds(10);
-    private const ulong Bloo = 1, Other = 2;
-
-    private static VoiceConversation Answered(DateTimeOffset at)
-    {
-        var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(at, Bloo);
-        conversation.Answered(mark, at, "b1gbloo", "what's the weather?", "Sunny and 72.", "Sunny and 72.");
-        return conversation;
-    }
-
-    [Fact]
-    public void Opens_after_an_answer_and_remembers_it()
-    {
-        var conversation = Answered(Start);
-
-        Assert.True(conversation.IsOpen);
-        Assert.Collection(conversation.Earlier(),
-            turn => Assert.Equal("b1gbloo said: what's the weather?", turn.Content),
-            turn => Assert.Equal("Sunny and 72.", turn.Content));
-    }
-
-    [Fact]
-    public void A_request_with_no_answer_doesnt_open_one()
-    {
-        var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(Start, Bloo);
-        conversation.Answered(mark, Start, null, null, null, null);
-
-        Assert.False(conversation.IsOpen);
-        Assert.Empty(conversation.Earlier());
-    }
-
-    [Fact]
-    public void Ends_once_quiet_after_the_bot_stops_talking()
-    {
-        var conversation = Answered(Start);
-        var talkingUntil = Start.AddSeconds(4); // the answer takes 4 s to say
-
-        Assert.False(conversation.TryEndQuiet(Start.AddSeconds(12), talkingUntil)); // only 8 s since it stopped
-        Assert.True(conversation.TryEndQuiet(Start.AddSeconds(14), talkingUntil));
-        Assert.False(conversation.IsOpen);
-        Assert.Empty(conversation.Earlier()); // forgotten
-        Assert.False(conversation.TryEndQuiet(Start.AddSeconds(30), talkingUntil)); // ends once
-    }
-
-    [Fact]
-    public void Doesnt_end_while_someone_talks_or_a_request_is_answered()
-    {
-        var conversation = Answered(Start);
-        conversation.Heard(Start.AddSeconds(9), Bloo);
-        Assert.False(conversation.TryEndQuiet(Start.AddSeconds(15), Start));
-
-        conversation.Asking(Start.AddSeconds(16), Bloo);
-        Assert.False(conversation.TryEndQuiet(Start.AddSeconds(60), Start)); // still answering
-    }
-
-    [Fact]
-    public void Only_whoever_asked_can_follow_up()
-    {
-        var conversation = Answered(Start);
-
-        Assert.True(conversation.Hears(Bloo));
-        Assert.False(conversation.Hears(Other));
-        conversation.Heard(Start.AddSeconds(9), Other); // others chatting don't keep it open
-        Assert.True(conversation.TryEndQuiet(Start.AddSeconds(10), Start));
-        Assert.False(conversation.Hears(Bloo)); // ended
-    }
-
-    [Fact]
-    public void Someone_else_saying_the_name_joins_and_both_can_follow_up()
-    {
-        var conversation = Answered(Start);
-        var mark = conversation.Asking(Start.AddSeconds(2), Other);
-        conversation.Answered(mark, Start.AddSeconds(3), "jynx", "and tomorrow?", "Rain.", "Rain.");
-
-        Assert.True(conversation.Hears(Other));
-        Assert.True(conversation.Hears(Bloo)); // the first asker isn't cut out by the second
-
-        conversation.End();
-        Assert.False(conversation.Hears(Bloo)); // a new conversation starts with nobody in it
-        Assert.False(conversation.Hears(Other));
-    }
-
-    [Fact]
-    public void The_server_can_let_anyone_follow_up()
-    {
-        var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(Start, Bloo, anyone: true);
-        conversation.Answered(mark, Start, "b1gbloo", "weather?", "Sunny.", "Sunny.");
-
-        Assert.True(conversation.Hears(Other));
-        Assert.False(new VoiceConversation(Quiet).Hears(Bloo)); // nothing open, nobody follows up
-    }
-
-    [Fact]
-    public void Keeps_only_the_latest_turns()
-    {
-        var conversation = Answered(Start);
-        for (var i = 0; i < 10; i++)
-        {
-            var mark = conversation.Asking(Start, Bloo);
-            conversation.Answered(mark, Start, "b1gbloo", $"question {i}", $"answer {i}", $"answer {i}");
-        }
-
-        var earlier = conversation.Earlier();
-        Assert.Equal(VoiceConversation.MaxTurns, earlier.Count);
-        Assert.Equal("answer 9", earlier[^1].Content);
-    }
-
-    [Theory]
-    [InlineData("Sunny and 72 degrees today", "Sunny and 72 degrees today.", true)] // its own voice coming back
-    [InlineData("and what about tomorrow?", "Sunny and 72 degrees today.", false)]
-    [InlineData("sunny", "Sunny and 72.", false)] // too short to tell
-    public void Tells_its_own_voice_from_a_reply(string heard, string said, bool echo)
-    {
-        var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(Start, Bloo);
-        conversation.Answered(mark, Start, "b1gbloo", "weather?", said, said);
-
-        Assert.Equal(echo, conversation.IsEcho(heard));
-    }
 
     [Theory]
     [InlineData("Thanks")]
@@ -702,7 +579,7 @@ public class VoiceConversationTests
     [InlineData("we're done")]
     [InlineData("cool, I'm good")]
     [InlineData("bye")]
-    public void Knows_a_goodbye(string said) => Assert.True(VoiceConversation.IsGoodbye(said, Names));
+    public void Knows_a_goodbye(string said) => Assert.True(VoiceGoodbye.IsGoodbye(said, Names));
 
     [Theory]
     [InlineData("Goodbye, ModBot.")]
@@ -712,26 +589,13 @@ public class VoiceConversationTests
     [InlineData("stop talking")]
     [InlineData("okay, shut up")]
     public void Knows_a_goodbye_with_the_name_anywhere(string said)
-        => Assert.True(VoiceConversation.IsGoodbye(said, Names));
-
-    [Fact]
-    public void A_goodbye_said_while_answering_drops_the_answer_and_opens_nothing()
-    {
-        var conversation = new VoiceConversation(Quiet);
-        var mark = conversation.Asking(Start, Bloo);
-        Assert.True(conversation.IsActive); // a goodbye counts while the first answer's on its way
-
-        Assert.True(conversation.End());
-        Assert.False(conversation.Still(mark));
-        conversation.Answered(mark, Start, "b1gbloo", "weather?", "Sunny.", "Sunny.");
-        Assert.False(conversation.IsOpen);
-    }
+        => Assert.True(VoiceGoodbye.IsGoodbye(said, Names));
 
     [Theory]
     [InlineData("Have a good one, bye!", "bye", true)] // its own "bye" coming back
     [InlineData("It's sunny and 72 today.", "thanks ModBot", false)]
     public void Tells_its_own_goodbye_from_someone_elses(string saying, string heard, bool repeats)
-        => Assert.Equal(repeats, VoiceConversation.Repeats(saying, heard));
+        => Assert.Equal(repeats, VoiceGoodbye.Repeats(saying, heard));
 
     [Theory]
     [InlineData("thanks, and what about tomorrow?")]
@@ -739,18 +603,23 @@ public class VoiceConversationTests
     [InlineData("what's thanksgiving this year?")]
     [InlineData("search for thank you cards")]
     public void A_goodbye_with_more_after_it_is_a_request(string said)
-        => Assert.False(VoiceConversation.IsGoodbye(said, Names));
+        => Assert.False(VoiceGoodbye.IsGoodbye(said, Names));
 
-    [Fact]
-    public void The_closing_chime_is_the_chime_backwards_in_pitch()
+    /// <summary>Only a goodbye said by name counts: speech-to-text makes "Thank you." up out of noise and echo.</summary>
+    [Theory]
+    [InlineData("Thanks, ModBot.", true)]
+    [InlineData("Goodbye Mod Bot", true)]
+    [InlineData("Thank you.", false)]
+    public void Says_whether_the_bot_was_named(string said, bool named)
     {
-        var exit = VoiceAudio.ExitChime();
-
-        Assert.Equal(VoiceAudio.Chime().Length, exit.Length);
-        Assert.NotEqual(VoiceAudio.Chime(), exit);
-        Assert.Equal(0, exit.Length % VoiceAudio.FrameBytes);
+        Assert.True(VoiceGoodbye.IsGoodbye(said, Names, out var wasNamed));
+        Assert.Equal(named, wasNamed);
     }
+}
 
+/// <summary>The three chimes: heard my name, done, and not right now.</summary>
+public class VoiceChimeTests
+{
     [Fact]
     public void The_done_chime_matches_the_others_but_sounds_different()
     {
@@ -758,43 +627,16 @@ public class VoiceConversationTests
 
         Assert.True(done.Length > VoiceAudio.Chime().Length); // three notes to the others' two
         Assert.True(done.Length < VoiceAudio.Chime().Length * 2); // but still a quick chime
-        Assert.NotEqual(VoiceAudio.ExitChime(), done);
         Assert.Equal(0, done.Length % VoiceAudio.FrameBytes);
     }
 
     [Fact]
-    public void The_heard_you_too_chime_is_one_soft_note()
-    {
-        var tooChime = VoiceAudio.HeardTooChime();
-
-        Assert.True(tooChime.Length < VoiceAudio.Chime().Length); // one note to the wake chime's two
-        Assert.Equal(0, tooChime.Length % VoiceAudio.FrameBytes);
-    }
-
-    [Fact]
-    public void The_not_right_now_chime_is_two_notes_unlike_the_others()
+    public void The_not_right_now_chime_is_two_notes_unlike_the_wake_chime()
     {
         var busy = VoiceAudio.BusyChime();
 
-        Assert.Equal(VoiceAudio.Chime().Length, busy.Length); // two notes, like the wake and closing chimes
+        Assert.Equal(VoiceAudio.Chime().Length, busy.Length); // two notes, like the wake chime
         Assert.NotEqual(VoiceAudio.Chime(), busy);
-        Assert.NotEqual(VoiceAudio.ExitChime(), busy);
         Assert.Equal(0, busy.Length % VoiceAudio.FrameBytes);
-    }
-}
-
-/// <summary>A goodbye said over the bot only counts by name: speech-to-text makes "Thank you." up out of its echo.</summary>
-public class GoodbyeByNameTests
-{
-    private static readonly string[] Names = ["ModBot"];
-
-    [Theory]
-    [InlineData("Thanks, ModBot.", true)]
-    [InlineData("Goodbye Mod Bot", true)]
-    [InlineData("Thank you.", false)]
-    public void Says_whether_the_bot_was_named(string said, bool named)
-    {
-        Assert.True(VoiceConversation.IsGoodbye(said, Names, out var wasNamed));
-        Assert.Equal(named, wasNamed);
     }
 }

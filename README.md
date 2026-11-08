@@ -109,7 +109,9 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   chatbot picks a song like the ones played lately, and it plays instead of the music stopping. It keeps going one
   song at a time, never repeats one of the last 20 played, follows the word filter, and shows each pick on the menu.
   DJ songs aren't queued or anyone's turn, so a song someone adds plays as soon as the current one ends. Skip one
-  and it picks another. Needs the chatbot (Ollama) set up.
+  and it picks another. Needs the chatbot (Ollama) set up. When the last song in the queue starts, the bot loads the
+  model and keeps it loaded until just after that song ends (at most 20 minutes), so the pick isn't kept waiting
+  for the model to load, which can take a minute or more while a game is using the graphics card.
 - **Seek and go back:** `/seek 1:30` (or "skip to 1:30") jumps within the song, `/restart` (or "restart this
   song") starts it over, and `/previous` (the menu's **Back**, "go back", or "replay the last song") plays the song
   before this one. The song that was playing goes back at the front of its picker's songs, so nothing's lost, and
@@ -300,8 +302,6 @@ saved in `data/server-settings.json`:
   still finish: LFG posts can be cancelled, polls ended, and reminders are delivered.
 - `/settings voice-channel` — voice auto-join only joins this voice channel; leave it out for whichever one is
   busiest.
-- `/settings voice-follow-ups` — after the bot answers in voice, who can reply without its name: only whoever said it
-  (the default), or anyone in the voice channel.
 - `/settings channel` — pick the channel music or LFG works in, set `anywhere`, or leave both out for the default.
   Channels are saved by ID, so renaming one doesn't break it.
 - `/settings lfg-pings` — pick the LFG ping role (it must be a plain role, since members give it to themselves), turn
@@ -567,7 +567,11 @@ If Ollama isn't running, the bot replies that it couldn't come up with an answer
 working. The first question after Ollama has been idle for a while is slower, since it loads the model into memory
 first (`Chat:TimeoutSeconds`, default 120, allows for that). Ollama keeps the model loaded for
 `Chat:KeepAliveMinutes` (default 5) after each question; longer keeps answers quick but holds on to graphics memory.
-In voice, the bot starts loading it as soon as it hears its name.
+In voice, the bot starts loading it as soon as it hears its name; with DJ mode on, as the last queued song starts.
+Ollama runs the model on the graphics card if it can. If you game on the same PC, set `Chat:UseGpu` to `false` to keep
+it on the processor: a small model like llama3.2 still answers in a second or two, and it doesn't fight the game for
+the graphics card (while a game has it busy, an answer can take a minute or more). After changing it, the first answer
+is slower while Ollama loads the model again.
 
 **Using Ollama's cloud instead:** set `Chat:OllamaUrl` to `https://ollama.com`, set `Chat:Model` to a name from
 [ollama.com/api/tags](https://ollama.com/api/tags), and create an API key at

@@ -78,13 +78,6 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("LFG")] Lfg,
     }
 
-    /// <summary>Who can reply to the bot in voice without its name (<see cref="ServerSettings.VoiceFollowUpsFromAnyone"/>).</summary>
-    public enum FollowUps
-    {
-        [ChoiceDisplay("Only whoever said my name (default)")] Asker,
-        [ChoiceDisplay("Anyone in the voice channel")] Anyone,
-    }
-
     [SlashCommand("show", "Shows this server's settings for every feature.")]
     public async Task ShowAsync()
     {
@@ -128,8 +121,6 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
                 ? "🔁 Whole queue: finished songs go back in, so a lone song repeats. Turn it off with `/loop` " +
                   "(Off)" + await MusicCommandsWhereAsync()
                 : "Off (`/loop` repeats a song or the whole queue)")
-            .AddField("Voice follow-ups", DescribeFollowUps(server.VoiceFollowUpsFromAnyone) +
-                " (change with `/settings voice-follow-ups`)")
             .AddField("LFG pings", $"{pingText}{(server.LfgPingRoleId is null && !server.LfgPingsOff ? " (default)" : "")}")
             .AddField("LFG game", server.LfgGame is { IsEmpty: false } game
                 ? (game.Name.Length > 0 ? $"**{TextTools.Escape(game.Name)}** - " : "no name - ") +
@@ -278,28 +269,11 @@ public class SettingsModule : InteractionModuleBase<SocketInteractionContext>
             allowedMentions: AllowedMentions.None);
     }
 
-    [SlashCommand("voice-follow-ups", "Voice: after I answer, who can keep talking to me without saying my name.")]
-    public async Task VoiceFollowUpsAsync([Summary("who", "Who can reply without my name")] FollowUps who)
-    {
-        var anyone = who == FollowUps.Anyone;
-        await _settings.UpdateAsync(Context.Guild.Id, s => s.VoiceFollowUpsFromAnyone = anyone);
-        _logger.LogInformation("Voice follow-ups set to {Who} by {User} ({UserId}).", who, Context.User.Username,
-            Context.User.Id);
-        await RespondAsync($"Voice follow-ups: {DescribeFollowUps(anyone)}. Anyone can still say my name to ask " +
-                           $"something, or \"thanks, {Context.Guild.CurrentUser.DisplayName}\" to end it.",
-            ephemeral: true, allowedMentions: AllowedMentions.None);
-    }
-
     /// <summary>Where `/loop` has to be run: the music channel, once the server picked one.</summary>
     private async Task<string> MusicCommandsWhereAsync()
         => (await _settings.MusicChannelAsync(Context.Guild)).Channel is { } channel
             ? $" in {channel.Mention}, or say \"@{Context.Guild.CurrentUser.DisplayName} loop off\" anywhere."
             : $", or say \"@{Context.Guild.CurrentUser.DisplayName} loop off\".";
-
-    private static string DescribeFollowUps(bool anyone)
-        => anyone
-            ? "after I answer, anyone in the voice channel can reply without my name"
-            : "after I answer, only whoever said my name can reply without it";
 
     private string DescribeAutoJoinChannel(ServerSettings server)
         => server.AutoJoinChannel.ChannelId is not { } id

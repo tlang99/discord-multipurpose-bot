@@ -39,5 +39,9 @@ public interface IChatService
     /// <summary>Gets the model ready to answer (a local Ollama loads it into memory, which takes seconds after it's been
     /// idle), so the next question isn't kept waiting for that. Only a head start: it never fails, except that cancelling
     /// it throws. A question asked meanwhile waits for the load, as it would have anyway.</summary>
-    Task WarmUpAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    /// <param name="keepLoadedFor">Keep it loaded for at least this long from now, if that's longer than the usual
+    /// keep-alive (questions asked meanwhile don't cut it short). Replaces any earlier hold; zero (or less) ends the
+    /// hold without loading anything, so the usual keep-alive applies again. Null leaves the hold as it is.</param>
+    Task WarmUpAsync(CancellationToken cancellationToken = default, TimeSpan? keepLoadedFor = null)
+        => Task.CompletedTask;
 }
