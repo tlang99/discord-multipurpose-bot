@@ -13,9 +13,9 @@ public partial class AlbumArt
 {
     private const int MaxBytes = 2 * 1024 * 1024;
 
-    /// <summary>The biggest picture it decodes (16 megapixels, far more than any cover art): decoding needs width x
+    /// <summary>The biggest picture it decodes (4 megapixels; cover art is rarely over 2): decoding needs width x
     /// height x 3 bytes, which a file under <see cref="MaxBytes"/> can still ask for by the gigabyte.</summary>
-    private const long MaxPixels = 16_000_000;
+    private const long MaxPixels = 4_000_000;
     
     private const int MaxRemembered = 256;
     
@@ -137,7 +137,7 @@ public partial class AlbumArt
         {
             for (var x = 0; x < SampleSize; x++)
             {
-                // In long: at 16 megapixels, the row offset times 3 is past what an int holds.
+                // In long, so the row offset times 3 can never pass what an int holds.
                 var at = ((long)y * height / SampleSize * width + (long)x * width / SampleSize) * 3;
                 pixels[y * SampleSize + x] = new Rgb(data[at], data[at + 1], data[at + 2]);
             }

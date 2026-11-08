@@ -1051,9 +1051,10 @@ public class MusicQueueService : IHostedService
         {
             // Redrawn in its color once the cover's in, but only if it's still this song's cover: by then the song
             // may have changed, or the bot left voice, and the redraw would be wasted.
-            _ = accent.ContinueWith(_ =>
+            _ = accent.ContinueWith(done =>
             {
-                if (AlbumArt.DisplayUrl(_music.GetPlayer(guildId)?.CurrentItem?.Track?.ArtworkUri) == cover)
+                if (done is { IsCompletedSuccessfully: true, Result: not null } &&
+                    AlbumArt.DisplayUrl(_music.GetPlayer(guildId)?.CurrentItem?.Track?.ArtworkUri) == cover)
                 {
                     RefreshMenu(guildId);
                 }
@@ -1096,7 +1097,9 @@ public class MusicQueueService : IHostedService
         {
             var song = (current as QueueTrackItem)?.Song;
             var paused = player.State == PlayerState.Paused;
-            var artist = MusicFormatting.Artist(track.Author);
+            // Shortened like titles are: from outside YouTube, either can be any length, and Discord turns the whole
+            // menu down when one part of it is too long.
+            var artist = TextTools.Truncate(MusicFormatting.Artist(track.Author), 100);
             var text = new StringBuilder()
                 .AppendLine($"-# {(paused ? "⏸️ PAUSED" : "▶️ NOW PLAYING")} · <#{player.VoiceChannelId}>")
                 .AppendLine($"### {MusicFormatting.MenuTrackLink(track)}");
@@ -1123,7 +1126,7 @@ public class MusicQueueService : IHostedService
             {
                 card.WithSection(new SectionBuilder()
                     .WithTextDisplay(text.ToString())
-                    .WithAccessory(new ThumbnailBuilder(cover, description: track.Title)));
+                    .WithAccessory(new ThumbnailBuilder(cover, description: TextTools.Truncate(track.Title ?? "", 200))));
             }
         }
         else
