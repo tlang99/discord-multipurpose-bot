@@ -202,9 +202,16 @@ public class MusicControls
             suppressEmbeds: false);
     }
 
-    /// <summary>Goes back to the song before this one (see <see cref="MusicQueueService.BackAsync"/>).</summary>
-    public async Task<MusicReply> BackAsync(SocketGuildUser user)
+    /// <summary>Goes back to the song before this one (see <see cref="MusicQueueService.BackAsync"/>). With nothing
+    /// playing, "replay the last song" means the last one played: it's added again (and starts, if they're in
+    /// voice), as "play that again" does.</summary>
+    public async Task<MusicReply> BackAsync(SocketGuildUser user, ITextChannel channel)
     {
+        if (_music.GetPlayer(user.Guild.Id)?.CurrentItem is null)
+        {
+            return await AgainAsync(user, channel);
+        }
+
         var (player, error) = GetControllable(user);
         return player is null ? MusicReply.Fail(error) : await _queue.BackAsync(user, player);
     }

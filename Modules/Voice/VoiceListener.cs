@@ -44,6 +44,10 @@ public sealed partial class VoiceListener
     /// <summary>Said just the wake word, then paused: their next sentence counts as the request, within this long.</summary>
     private static readonly TimeSpan WakeWordWait = TimeSpan.FromSeconds(8);
 
+    /// <summary>After someone says its name and gets the chime, someone else saying it within this long isn't chimed
+    /// for again (they're still heard).</summary>
+    private static readonly TimeSpan WakeClaim = TimeSpan.FromSeconds(5);
+
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>How long a dropped voice connection has to come back before listening ends.</summary>
@@ -138,7 +142,7 @@ public sealed partial class VoiceListener
 
     /// <summary>The chimes, at Voice:ChimeVolumePercent. Made on first use, so a problem making one can only ever
     /// break the chime, never the listener.</summary>
-    private readonly Lazy<byte[]> _chimeSound, _exitChimeSound, _doneChimeSound, _busyChimeSound;
+    private readonly Lazy<byte[]> _chimeSound, _exitChimeSound, _doneChimeSound, _busyChimeSound, _heardTooSound;
 
     public VoiceListener(DiscordSocketClient client, SpeechToText speech, TextToSpeech voiceOut, IAudioService audio,
         Lazy<ChatHandler> chat, IChatService model, ServerSettingsService settings, IOptions<ChatOptions> chatOptions,
@@ -164,6 +168,7 @@ public sealed partial class VoiceListener
         _exitChimeSound = new Lazy<byte[]>(() => VoiceAudio.ExitChime(chimeVolume));
         _doneChimeSound = new Lazy<byte[]>(() => VoiceAudio.DoneChime(chimeVolume));
         _busyChimeSound = new Lazy<byte[]>(() => VoiceAudio.BusyChime(chimeVolume));
+        _heardTooSound = new Lazy<byte[]>(() => VoiceAudio.HeardTooChime(chimeVolume));
         _client.UserVoiceStateUpdated += OnVoiceStateUpdatedAsync;
         // On connecting (and reconnecting), join anyone already sitting in voice.
         _client.GuildAvailable += guild =>
@@ -933,10 +938,20 @@ public sealed partial class VoiceListener
             // Heard its name (not again for the request that follows a lone "hey ModBot", or mid-conversation, when
             // it's already listening). Only for someone whose requests can be answered: a request is only run where
             // its speaker could have typed it (ChatHandler).
+            // Two people calling it a moment apart are both heard (and answered in turn, by name). The first gets the
+            // chime; the second gets the softer "heard you too" once it's done, so the two never sound at once.
             if (!inConversation && session.Guild.GetUser(userId) is { IsBot: false } caller &&
                 ChannelAccess.CanPost(caller, session.ReplyChannel))
             {
-                Chime(session);
+                if (session.TryClaimWake(userId, DateTimeOffset.UtcNow, WakeClaim))
+                {
+                    Chime(session);
+                }
+                else
+                {
+                    ChimeAfter(session, _heardTooSound, "the heard-you-too chime");
+                }
+
                 if (request.Length == 0)
                 {
                     WarmUpModel(session); // the request follows in the next sentence: load the model meanwhile
@@ -1266,6 +1281,8 @@ public sealed partial class VoiceListener
     {
         if (_busyChimes.TryClaim(session.Guild.Id, userId, out _))
         {
+            _logger.LogInformation("Played the not-right-now chime for {UserId} in guild {GuildId}: asked again too " +
+                                   "soon.", userId, session.Guild.Id);
             ChimeAfter(session, _busyChimeSound, "the not-right-now chime");
         }
     }
@@ -1693,6 +1710,25 @@ public sealed partial class VoiceListener
         /// <summary>True (once) if <paramref name="userId"/> said just the wake word within <paramref name="within"/>.</summary>
         public bool TakeWakeWord(ulong userId, TimeSpan within)
             => _wakeWords.TryRemove(userId, out var at) && DateTimeOffset.UtcNow - at <= within;
+
+        private readonly Lock _wakeLock = new();
+        private (ulong UserId, DateTimeOffset At)? _wakeClaim;
+
+        /// <summary>Whether <paramref name="userId"/> saying the bot's name gets the chime: true (and the chime's
+        /// theirs from now) unless someone else got it within <paramref name="within"/>.</summary>
+        public bool TryClaimWake(ulong userId, DateTimeOffset now, TimeSpan within)
+        {
+            lock (_wakeLock)
+            {
+                if (_wakeClaim is { } claim && claim.UserId != userId && now - claim.At < within)
+                {
+                    return false;
+                }
+
+                _wakeClaim = (userId, now);
+                return true;
+            }
+        }
 
         /// <summary>When each person last asked the bot something.</summary>
         private readonly ConcurrentDictionary<ulong, DateTimeOffset> _askedAt = new();

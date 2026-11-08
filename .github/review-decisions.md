@@ -17,6 +17,9 @@ Add to this list when the owner turns down a suggestion so it stops coming back.
 - **The join line's privacy wording stays in full**, on every join, not shortened on later auto-joins.
 - **The closing chime plays at the end of every conversation**, even after a single question. That's by design:
   don't suggest skipping it, or a setting to turn it off.
+- **Two people saying "hey ModBot" within 5 seconds:** both are heard and answered (each by name). The first gets
+  the chime, the second a softer one-note "heard you too" after it, never both at once.
+- **In a conversation, everyone who's asked something can follow up without the name**, not just the last asker.
 - **Auto-join is opt-in** (its own feature) and needs Set Voice Channel Status.
 - **Anyone may start voice listening**, not just moderators.
 

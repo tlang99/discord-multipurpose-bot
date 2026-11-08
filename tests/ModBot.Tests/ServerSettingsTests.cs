@@ -37,6 +37,15 @@ public sealed class ServerSettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Dj_mode_is_off_until_a_server_turns_it_on()
+    {
+        var server = await _settings.GetAsync(GuildId);
+
+        Assert.True(ServerSettings.IsOptIn(ServerFeature.MusicDj)); // it plays songs nobody asked for
+        Assert.False(server.IsEnabled(ServerFeature.MusicDj));
+    }
+
+    [Fact]
     public async Task Turning_a_feature_off_only_affects_that_server()
     {
         await _settings.UpdateAsync(GuildId, s => s.DisabledFeatures.Add(nameof(ServerFeature.Polls)));

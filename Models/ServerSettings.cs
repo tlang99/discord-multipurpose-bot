@@ -26,6 +26,11 @@ public enum ServerFeature
     /// all it takes. Off until a server turns it on as well (<see cref="ServerSettings.IsOptIn"/>): enabling voice
     /// commands shouldn't also start the bot sitting in every call.</summary>
     VoiceAutoJoin,
+
+    /// <summary>DJ mode: when the music queue runs out, the chatbot picks songs like the recent ones so the music keeps
+    /// going (<see cref="Modules.Music.DjPicker"/>). Off until a server turns it on
+    /// (<see cref="ServerSettings.IsOptIn"/>).</summary>
+    MusicDj,
 }
 
 /// <summary>
@@ -75,9 +80,9 @@ public class ServerSettings
             : DisabledFeatures?.Contains(feature.ToString()) != true;
 
     /// <summary>Features that start off and have to be turned on: voice commands and voice auto-join, since they mean
-    /// the bot listening.</summary>
+    /// the bot listening, and DJ mode, since it plays songs nobody asked for.</summary>
     public static bool IsOptIn(ServerFeature feature)
-        => feature is ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin;
+        => feature is ServerFeature.VoiceCommands or ServerFeature.VoiceAutoJoin or ServerFeature.MusicDj;
 
     /// <summary>The bot joins voice by itself here: voice auto-join is on, and so is everything it needs (voice
     /// commands, and the chatbot that every voice request goes through).</summary>

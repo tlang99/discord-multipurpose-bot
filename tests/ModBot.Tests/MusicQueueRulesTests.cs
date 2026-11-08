@@ -336,6 +336,20 @@ public sealed class MusicQueueRulesTests
     }
 
     [Fact]
+    public void Going_back_from_a_dj_song_doesnt_queue_it()
+    {
+        var state = new MusicQueueState();
+        QueuedSong mine = Song(Alice, "mine"), dj = Song(Bob, "dj pick");
+        MusicQueueRules.RecordPlayed(state, mine);
+        MusicQueueRules.RecordPlayed(state, dj);
+
+        MusicQueueRules.GoBack(state, dj, putBack: false);
+
+        Assert.Empty(state.Songs); // it was never anyone's turn, so it doesn't become one
+        Assert.DoesNotContain(state.History, s => s.Title == "dj pick"); // and going back again goes further back
+    }
+
+    [Fact]
     public void There_is_nothing_to_go_back_to_before_the_first_song()
     {
         var state = new MusicQueueState();

@@ -89,7 +89,7 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     public Task RestartAsync() => RunAsync((user, _) => _controls.SeekAsync(user, TimeSpan.Zero));
 
     [SlashCommand("previous", "Goes back to the song before this one (this one goes back in the queue).")]
-    public Task PreviousAsync() => RunAsync((user, _) => _controls.BackAsync(user), slow: true);
+    public Task PreviousAsync() => RunAsync((user, channel) => _controls.BackAsync(user, channel), slow: true);
 
     [SlashCommand("history", "Shows the songs played lately.")]
     public Task HistoryAsync() => RunAsync((user, _) => _controls.HistoryAsync(user));
@@ -176,7 +176,7 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
         => ButtonAsync((user, _) => _controls.VolumeAsync(user, by: MusicControls.VolumeStep));
 
     [ComponentInteraction(MusicQueueService.BackButton)]
-    public Task BackButtonAsync() => ButtonAsync((user, _) => _controls.BackAsync(user));
+    public Task BackButtonAsync() => ButtonAsync((user, channel) => _controls.BackAsync(user, channel));
 
     /// <summary>"History": a private list of the songs played lately, to add one again.</summary>
     [ComponentInteraction(MusicQueueService.HistoryButton)]
