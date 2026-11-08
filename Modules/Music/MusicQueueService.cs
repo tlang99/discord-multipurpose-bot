@@ -61,6 +61,9 @@ public class MusicQueueService : IHostedService
     /// <summary>Who DJ mode's songs show as picked by.</summary>
     private const string DjName = "DJ mode";
 
+    /// <summary>Whether <paramref name="song"/> is one DJ mode put on (picked "by" the bot), not anyone's.</summary>
+    private static bool IsDjPick(QueuedSong song, SocketGuild guild) => song.PickerId == guild.CurrentUser.Id;
+
     /// <summary>Servers where DJ mode is picking a song right now.</summary>
     private readonly ConcurrentDictionary<ulong, byte> _djPicking = new();
 
@@ -856,12 +859,14 @@ public class MusicQueueService : IHostedService
             }
 
             // Only once the song gone back to is playing: otherwise the one cut off would be queued while it plays on.
-            await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.GoBack(state, current));
+            // A DJ mode song isn't put back: it was never queued or anyone's turn.
+            var putBack = current is not null && !IsDjPick(current, user.Guild);
+            await _store.MutateAsync(user.Guild.Id, state => MusicQueueRules.GoBack(state, current, putBack));
             return MusicReply.Ok($"⏮️ {user.Mention} went back to {MusicFormatting.SongLink(previous)}." +
-                                 (current is null
+                                 (!putBack
                                      ? ""
-                                     : $" {MusicFormatting.SongLink(current)} is back in the queue, next of " +
-                                       $"<@{current.PickerId}>'s songs.") +
+                                     : $" {MusicFormatting.SongLink(current!)} is back in the queue, next of " +
+                                       $"<@{current!.PickerId}>'s songs.") +
                                  (wasLooping ? " (Looping the song is off now.)" : ""));
         });
 
@@ -892,7 +897,11 @@ public class MusicQueueService : IHostedService
                            await PlayNextLockedAsync(player) is null;
                 });
 
-                if (queueRanOut)
+                // A DJ pick that failed to load isn't followed by another: a song that won't load ends at once, so
+                // that could pick (and fail) over and over. The music just stops, as it would without DJ mode.
+                var djPickFailed = reason == TrackEndReason.LoadFailed && item is QueueTrackItem { Song: var ended } &&
+                                   _client.GetGuild(player.GuildId) is { } guild && IsDjPick(ended, guild);
+                if (queueRanOut && !djPickFailed)
                 {
                     await PlayDjPickAsync(player);
                 }

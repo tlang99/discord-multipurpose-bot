@@ -96,12 +96,17 @@ public static class MusicQueueRules
     /// <summary>Going back from <paramref name="current"/>: it leaves the history (it'll be noted again when it plays)
     /// and goes back at the front of its picker's songs. So each "go back" goes one song further back, rather than
     /// bouncing between the last two.</summary>
-    public static void GoBack(MusicQueueState state, QueuedSong? current)
+    /// <param name="putBack">False for a song DJ mode put on: it was never in the queue or anyone's turn, so it isn't
+    /// queued now either (it would play again later as if someone had picked it).</param>
+    public static void GoBack(MusicQueueState state, QueuedSong? current, bool putBack = true)
     {
         if (current is not null)
         {
             state.History.RemoveAll(s => s.Track == current.Track);
-            PutBackFirst(state, current);
+            if (putBack)
+            {
+                PutBackFirst(state, current);
+            }
         }
     }
 
