@@ -14,6 +14,16 @@ public sealed class MusicCardTests
         => Assert.Equal(cleaned, MusicFormatting.CleanTitle(title));
 
     [Theory]
+    // A re-upload names the artist in its title; its channel isn't the artist, so it's left out.
+    [InlineData("Drake - Fucking Fans (Audio)", "SomeLyricsChannel", "Drake - Fucking Fans")]
+    // A title without the artist gets them from the channel, without YouTube Music's "- Topic" or "VEVO".
+    [InlineData("Juicy (Official Video)", "The Notorious B.I.G. - Topic", "The Notorious B.I.G. Juicy")]
+    [InlineData("Mr. Brightside", "TheKillersVEVO", "TheKillers Mr. Brightside")]
+    [InlineData("Stay Fly", "", "Stay Fly")]
+    public void Another_copy_is_searched_for_by_artist_and_song(string title, string author, string search)
+        => Assert.Equal(search, MusicFormatting.SongSearch(title, author));
+
+    [Theory]
     [InlineData("Song (Official Remix)")]
     [InlineData("Song (Official Acoustic Version)")]
     [InlineData("Theme (Video Game Soundtrack)")]

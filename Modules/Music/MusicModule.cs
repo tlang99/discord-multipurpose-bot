@@ -37,14 +37,19 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
         [ChoiceDisplay("Whole queue")] Queue,
     }
 
-    [SlashCommand("play", "Adds a song or playlist to the queue, and starts the music if it isn't playing.")]
-    public Task PlayAsync(
-        [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] [MaxLength(200)] string query)
+    /// <summary>Room for a full list of songs, comma-separated (each search still has its own limit).</summary>
+    private const int MaxQueryLength = 1000;
+
+    private const string PlayDescription = "Adds songs or a playlist to the queue, and starts the music if it isn't playing.";
+
+    private const string QueryDescription = "Song to search YouTube for, or a YouTube link. Several? Put commas between";
+
+    [SlashCommand("play", PlayDescription)]
+    public Task PlayAsync([Summary(description: QueryDescription)] [MaxLength(MaxQueryLength)] string query)
         => RunAsync((user, channel) => _controls.PlayAsync(user, channel, query), slow: true);
 
-    [SlashCommand("add", "Adds a song or playlist to the queue, and starts the music if it isn't playing.")]
-    public Task AddAsync(
-        [Summary(description: "Song to search YouTube for, or a YouTube song/playlist link")] [MaxLength(200)] string query)
+    [SlashCommand("add", PlayDescription)]
+    public Task AddAsync([Summary(description: QueryDescription)] [MaxLength(MaxQueryLength)] string query)
         => RunAsync((user, channel) => _controls.PlayAsync(user, channel, query), slow: true);
 
     [SlashCommand("start", "Starts playing the queue in your voice channel.")]
@@ -166,6 +171,10 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 
     [ComponentInteraction(MusicQueueService.LoopButton)]
     public Task LoopButtonAsync() => ButtonAsync((user, _) => _controls.LoopNextAsync(user));
+
+    /// <summary>Like /shuffle-mine. Private: the menu shows the new order and its "Latest" line says who shuffled.</summary>
+    [ComponentInteraction(MusicQueueService.ShuffleButton)]
+    public Task ShuffleButtonAsync() => ButtonAsync((user, _) => _controls.ShuffleMineAsync(user), alwaysPrivate: true);
 
     [ComponentInteraction(MusicQueueService.VolumeDownButton)]
     public Task VolumeDownButtonAsync()
@@ -299,10 +308,12 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
 
     public class AddSongModal : IModal
     {
-        public string Title => "Add a song to the queue";
+        public string Title => "Add songs to the queue";
 
-        [InputLabel("Song name or YouTube link")]
-        [ModalTextInput("query", TextInputStyle.Short, placeholder: "e.g. mr brightside the killers", maxLength: 200)]
+        [InputLabel("Song names or YouTube links")]
+        [ModalTextInput("query", TextInputStyle.Paragraph,
+            placeholder: "e.g. mr brightside, juicy (one per line, or commas between)",
+            maxLength: MaxQueryLength)]
         public string? Query { get; set; }
     }
 }

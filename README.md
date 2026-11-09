@@ -120,11 +120,12 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
 - **The menu:** a server admin posts it once with `/music-menu` (Manage Server) in the music channel, and the bot
   pins it (if it has Pin Messages). It always shows what's playing, as a card with the song's cover art in the
   cover's main colour and a tidied title (no "(Official Music Video)" and the like), and whose songs are up next,
-  with buttons: **Play** (or ⏮️ back, **Pause**/**Resume**, **Skip**, which is a vote, and ⏹️ stop while playing),
-  **Add song** (a pop-up that works like `/play`: it also starts the music if nothing's playing and you're in voice),
-  then **Loop** (off, this song, or the whole queue: each press moves to the next, and the menu says what's
-  looping), 🔉 🔊 (volume), **History** and **Mine** (a private list of your waiting songs: take out one, or all of
-  them). The buttons keep working across restarts. Running `/music-menu` again replaces it.
+  with buttons spread evenly over the rows: ⏮️ back, **Pause**/**Resume**, **Skip** (a vote) and ⏹️ stop while
+  playing; **Loop** (off, this song, or the whole queue: each press moves to the next, and the menu says what's
+  looping), 🔀 (shuffles your own songs, like `/shuffle-mine`) and 🔉 🔊 (volume); and **Add song** (a pop-up that
+  works like `/play`: one song or several, one per line or with commas between, and it also starts the music if
+  nothing's playing and you're in voice), **History** and **Mine** (a private list of your waiting songs: take out
+  one, or all of them). With nothing playing, **Play** joins the Add song row, and there are two rows. The buttons keep working across restarts. Running `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
   minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
@@ -134,8 +135,13 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   `Music:KeepMenuAtBottom: false` turns the reposting off.
 
 Commands:
-- `/add query` or `/play query` (the same thing) — a song name (searches YouTube), or a YouTube song or playlist
-  link. It joins the queue, and if nothing's playing and you're in a voice channel, the music starts there.
+- `/add query` or `/play query` (the same thing) — a song name (searches YouTube Music, then YouTube if that finds
+  nothing), or a YouTube song or playlist link. It joins the queue, and if nothing's playing and you're in a voice
+  channel, the music starts there. For several at once, put commas between them (`/play mr brightside, juicy, stay
+  fly`): each is looked up on its own, up to the per-person limit (`Music:SongsPerPerson`), and the reply says if any
+  couldn't be found. YouTube Music comes first because it has the official audio: re-uploads and music videos of
+  explicit songs are often age-restricted, which the bot can't play. If YouTube still won't play a song, the bot
+  tries the same song from YouTube Music once before moving on.
 - `/start` — plays the queue in your voice channel.
 - `/skip` (a vote), `/pause`, `/resume`, `/stop` (leaves voice; the queue's kept; a vote with 3+ in voice),
   `/nowplaying`, `/queue [page]`.
@@ -370,7 +376,7 @@ by [Ollama](https://ollama.com): on the same machine by default, or Ollama's clo
     add their own. With no answers it's a Yes/No poll. "@bot end my poll" ends their newest open poll in the
     channel, or the one they replied to.
   - **Music:** "@bot play mr brightside" (or "add…", "queue up…", "put … in the queue") adds a song and starts the
-    music if it isn't playing, like `/play`. "Skip this", "pause", "what's playing?", "show the queue", "loop
+    music if it isn't playing, like `/play`; "play mr brightside and juicy" adds both. "Skip this", "pause", "what's playing?", "show the queue", "loop
     this song", "remove song 3", "remove mr brightside from the queue", "remove my songs", "play song 3 next",
     "shuffle my songs", "turn it down", "skip to 1:30", "go back", "play that again", "what was that song?",
     "start the music", "where's the music menu?" and the rest of the music commands work by asking too, through

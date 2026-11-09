@@ -92,9 +92,29 @@ public sealed class ChatActionParserTests : IDisposable
     [InlineData("put mr brightside in the queue")]
     public async Task Play_and_add_are_the_same_song_request(string message)
     {
-        var chat = new FakeChat("""{"action":"play_music","query":"mr brightside"}""");
+        var chat = new FakeChat("""{"action":"play_music","songs":["mr brightside"]}""");
 
-        Assert.Equal(new PlayMusicAction("mr brightside"), await Parser(chat).ParseAsync(message));
+        Assert.Equal(["mr brightside"], Assert.IsType<PlayMusicAction>(await Parser(chat).ParseAsync(message)).Queries);
+    }
+
+    [Fact]
+    public async Task Several_songs_in_one_message_are_each_their_own_search()
+    {
+        var chat = new FakeChat("""{"action":"play_music","songs":["stay fly three 6 mafia"," ","hello, goodbye beatles"]}""");
+
+        // Blanks are dropped, and a comma inside one song's search doesn't split it.
+        Assert.Equal(["stay fly three 6 mafia", "hello, goodbye beatles"],
+            Assert.IsType<PlayMusicAction>(await Parser(chat).ParseAsync("play stay fly and hello goodbye")).Queries);
+    }
+
+    [Fact]
+    public async Task Every_youtube_link_in_a_message_is_queued()
+    {
+        var chat = new FakeChat("""{"action":"play_music","songs":["ignored"]}""");
+
+        Assert.Equal(["https://youtu.be/aaa", "https://www.youtube.com/watch?v=bbb"],
+            Assert.IsType<PlayMusicAction>(await Parser(chat)
+                .ParseAsync("play https://youtu.be/aaa and https://www.youtube.com/watch?v=bbb")).Queries);
     }
 
     [Fact]

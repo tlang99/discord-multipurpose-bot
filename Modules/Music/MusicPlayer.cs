@@ -21,7 +21,10 @@ public record MusicPlayerOptions : QueuedLavalinkPlayerOptions
 }
 
 /// <summary>A song from the standing queue, as the player plays it: keeps the saved song (and so who picked it).</summary>
-public sealed record QueueTrackItem(LavalinkTrack LavalinkTrack, QueuedSong Song) : ITrackQueueItem
+/// <param name="IsOtherCopy">Another copy of the song, found on YouTube Music after YouTube wouldn't play the one
+/// that was picked. Only one is tried, so a song that won't play anywhere still moves on.</param>
+public sealed record QueueTrackItem(LavalinkTrack LavalinkTrack, QueuedSong Song, bool IsOtherCopy = false)
+    : ITrackQueueItem
 {
     public TrackReference Reference => new(LavalinkTrack);
 
@@ -116,12 +119,23 @@ public sealed class MusicPlayer : QueuedLavalinkPlayer
         _logger.LogWarning("Couldn't play '{Title}' ({Uri}) in guild {GuildId}: {Message} ({Cause})",
             track.Track?.Title, track.Track?.Uri, GuildId, exception.Message, exception.Cause);
 
+        // A queued song gets one more try, from another copy (MusicQueueService.OnTrackEndedAsync), which says so
+        // only if that doesn't work either.
+        if (track is not QueueTrackItem { IsOtherCopy: false })
+        {
+            await ReportUnplayableAsync(track.Track);
+        }
+    }
+
+    /// <summary>Says in the channel that YouTube wouldn't play <paramref name="track"/>, and the music's moving on.</summary>
+    public async Task ReportUnplayableAsync(LavalinkTrack? track)
+    {
         if (_textChannel is not null)
         {
             // The real reason is in the log (one line per YouTube client tried); for the channel, the likely causes.
             await SendAsync(new EmbedBuilder()
                 .WithColor(Color.Red)
-                .WithDescription($"⚠️ YouTube wouldn't let me play {MusicFormatting.TrackLink(track.Track)}. It may be " +
+                .WithDescription($"⚠️ YouTube wouldn't let me play {MusicFormatting.TrackLink(track)}. It may be " +
                                  "age-restricted or blocked in this region, or YouTube is blocking the bot right now. " +
                                  "Moving on to the next turn.")
                 .Build());

@@ -97,7 +97,8 @@ public class MusicService
         return null;
     }
 
-    /// <summary>Looks up a search (top YouTube result) or a YouTube song or playlist link (all of it).</summary>
+    /// <summary>Looks up a search (the top result, from YouTube Music first) or a YouTube song or playlist link (all
+    /// of it).</summary>
     public async Task<TrackLookup> FindTracksAsync(string query, ulong guildId)
     {
         query = query.Trim();
@@ -111,7 +112,13 @@ public class MusicService
         TrackLoadResult result;
         try
         {
-            result = await _audioService.Tracks.LoadTracksAsync(query, isLink ? TrackSearchMode.None : TrackSearchMode.YouTube);
+            // YouTube Music has the official audio, which plays where a re-upload or music video is often
+            // age-restricted (explicit songs especially), and has no video intros. Plain YouTube has the rest.
+            result = isLink
+                ? await _audioService.Tracks.LoadTracksAsync(query, TrackSearchMode.None)
+                : await _audioService.Tracks.LoadTracksAsync(query, TrackSearchMode.YouTubeMusic) is { HasMatches: true } song
+                    ? song
+                    : await _audioService.Tracks.LoadTracksAsync(query, TrackSearchMode.YouTube);
         }
         catch (Exception ex)
         {
@@ -131,6 +138,29 @@ public class MusicService
         return result.IsPlaylist
             ? new(result.Tracks.ToList(), result.Playlist?.Name ?? "playlist", null)
             : new([result.Track ?? result.Tracks[0]], null, null);
+    }
+
+    /// <summary>The same song on YouTube Music, for one YouTube wouldn't play (age-restricted, most often), or null if
+    /// there's no other copy to try.</summary>
+    public async Task<LavalinkTrack?> FindOtherCopyAsync(LavalinkTrack failed, ulong guildId)
+    {
+        var search = MusicFormatting.SongSearch(failed.Title, failed.Author);
+        if (search.Length == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var found = await _audioService.Tracks.LoadTrackAsync(search, TrackSearchMode.YouTubeMusic);
+            return found is not null && found.Identifier != failed.Identifier ? found : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Couldn't look for another copy of '{Title}' in guild {GuildId}.", failed.Title,
+                guildId);
+            return null;
+        }
     }
 
     /// <summary>Why the bot can't join the user's voice channel to play, or null if it can.</summary>
