@@ -279,7 +279,7 @@ jobs:
           title: "Full review: ${{ matrix.name }}"
           label: review
           label-description: Findings from the full repo review
-          label-color: 5319e7
+          label-color: "5319e7"
           token: ${{ github.token }}
 
       - name: Note a missing review
