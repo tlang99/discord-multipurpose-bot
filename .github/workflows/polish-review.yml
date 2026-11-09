@@ -235,7 +235,7 @@ jobs:
           title: "Polish review: ${{ matrix.name }}"
           label: polish
           label-description: Suggestions from the polish review (experience, small additions, feature ideas)
-          label-color: 0e8a16
+          label-color: "0e8a16"
           token: ${{ github.token }}
 
       - name: Note a missing review
