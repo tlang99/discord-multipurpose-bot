@@ -44,9 +44,11 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <!-- Voice commands: libdave, libsodium and opus, which Discord.Net loads from next to the exe. Downloaded by
-         voice/setup.ps1, not committed; without them only voice commands are unavailable. -->
-    <None Include="voice/natives/*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+    <!-- Voice commands: libdave, libsodium and opus, which Discord.Net loads from next to the exe (.dll on Windows,
+         .so on Linux). Downloaded by voice/setup.ps1, not committed; without them only voice commands are
+         unavailable. -->
+    <None Include="voice/natives/*.dll;voice/natives/*.so" CopyToOutputDirectory="PreserveNewest"
+          Link="%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>
