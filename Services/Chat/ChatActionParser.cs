@@ -12,7 +12,8 @@ namespace ModBot.Services.Chat;
 public abstract record ChatAction;
 
 /// <summary>Play or add a song: either way it joins the queue, and the music starts if it isn't playing.</summary>
-public record PlayMusicAction(string Query) : ChatAction;
+/// <param name="Queries">One search or YouTube link per song asked for ("play X and Y" is two).</param>
+public record PlayMusicAction(IReadOnlyList<string> Queries) : ChatAction;
 
 /// <param name="Players">Total squad size including the person asking, 2-6.</param>
 public record CreateLfgAction(int Players, LfgDetails Details) : ChatAction;
@@ -104,12 +105,12 @@ public partial class ChatActionParser
         "played recently, or what an earlier song was called). If none fit, answer unclear.";
 
     private const string PlaySchema =
-        """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}""";
+        """{"type":"object","properties":{"songs":{"type":"array","items":{"type":"string"}}},"required":["songs"]}""";
 
     private const string PlayPrompt =
-        "The message asks a Discord bot to play music. Give the YouTube search for what they want in \"query\": the " +
-        "song and artist if they named them, or their own words for a genre or mood. Don't pick a specific song they " +
-        "didn't ask for.";
+        "The message asks a Discord bot to play music. In \"songs\", give one YouTube search for each song they asked " +
+        "for, in their order: the song and artist if they named them, or their own words for a genre or mood (one " +
+        "search). Don't pick a specific song they didn't ask for.";
 
     private const string PollSchema =
         """{"type":"object","properties":{"question":{"type":"string"},"answers":{"type":"array","items":{"type":"string"}}},"required":["question","answers"]}""";
@@ -306,19 +307,26 @@ public partial class ChatActionParser
 
     private async Task<ChatAction> ReadSongAsync(string message, CancellationToken cancellationToken)
     {
-        if (YouTubeLinkRegex().Match(message) is { Success: true } link)
+        // Links are taken as they are, each one a song (or playlist).
+        var links = YouTubeLinkRegex().Matches(message).Select(m => m.Value).ToList();
+        if (links.Count > 0)
         {
-            return new PlayMusicAction(link.Value);
+            return new PlayMusicAction(links);
         }
 
         try
         {
             using var json = JsonDocument.Parse(
                 await _chat.CompleteJsonAsync(PlayPrompt, $"Message: {message}", PlaySchema, cancellationToken));
-            var query = json.RootElement.GetProperty("query").GetString()?.Trim();
-            if (!string.IsNullOrEmpty(query))
+            var songs = json.RootElement.GetProperty("songs").EnumerateArray()
+                .Select(s => s.GetString()?.Trim())
+                .OfType<string>()
+                .Where(s => s.Length > 0)
+                .Select(s => s.Length > 200 ? s[..200] : s)
+                .ToList();
+            if (songs.Count > 0)
             {
-                return new PlayMusicAction(query.Length > 200 ? query[..200] : query);
+                return new PlayMusicAction(songs);
             }
         }
         catch (Exception ex) when (ex is ChatServiceException or JsonException or KeyNotFoundException or InvalidOperationException)

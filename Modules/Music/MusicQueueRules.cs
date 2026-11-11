@@ -29,6 +29,12 @@ public enum QueueRemoveResult
 /// </summary>
 public static class MusicQueueRules
 {
+    /// <summary>Several songs asked for at once ("mr brightside, juicy" or one per line in the menu's Add song): each
+    /// part on its own, blanks dropped.</summary>
+    public static List<string> SplitQueries(string text)
+        => text.Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
     /// <summary>The waiting songs in the order they'll play.</summary>
     public static List<QueuedSong> Order(MusicQueueState state)
         => FairOrder.Arrange(state.Songs, s => s.PickerId, state.Participants, state.LastPickerId);

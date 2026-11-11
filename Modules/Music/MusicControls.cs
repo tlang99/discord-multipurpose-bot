@@ -34,9 +34,13 @@ public class MusicControls
     }
 
     /// <summary>Adds a song (or playlist) to the queue, and starts the music if nothing's playing and the person is
-    /// in a voice channel.</summary>
+    /// in a voice channel. Several songs at once are split by commas or new lines.</summary>
     public Task<MusicReply> PlayAsync(SocketGuildUser user, ITextChannel channel, string query)
-        => _queue.AddAsync(user, query, channel);
+        => PlayAsync(user, channel, MusicQueueRules.SplitQueries(query));
+
+    /// <summary>Adds several songs (or playlists) at once, each its own search or link.</summary>
+    public Task<MusicReply> PlayAsync(SocketGuildUser user, ITextChannel channel, IReadOnlyList<string> queries)
+        => _queue.AddAsync(user, queries, channel);
 
     public Task<MusicReply> StartAsync(SocketGuildUser user, ITextChannel channel) => _queue.StartAsync(user, channel);
 

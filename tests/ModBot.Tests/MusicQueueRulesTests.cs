@@ -20,6 +20,14 @@ public sealed class MusicQueueRulesTests
 
     private static List<string> Titles(IEnumerable<QueuedSong> songs) => songs.Select(s => s.Title).ToList();
 
+    [Theory]
+    [InlineData("mr brightside", new[] { "mr brightside" })]
+    [InlineData("mr brightside, juicy ,stay fly", new[] { "mr brightside", "juicy", "stay fly" })]
+    [InlineData("mr brightside\njuicy\r\n\r\nstay fly, ", new[] { "mr brightside", "juicy", "stay fly" })]
+    [InlineData(" , \n ", new string[0])]
+    public void Several_songs_split_on_commas_and_new_lines(string text, string[] expected)
+        => Assert.Equal(expected, MusicQueueRules.SplitQueries(text));
+
     [Fact]
     public void Songs_play_in_turns_as_they_come_off_the_queue()
     {

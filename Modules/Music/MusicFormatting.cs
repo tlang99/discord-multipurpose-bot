@@ -94,6 +94,17 @@ public static partial class MusicFormatting
         return 0;
     }
 
+    /// <summary>A search for the same song somewhere else: its title without the clutter, with the artist in front
+    /// when the title doesn't already name one ("Artist - Song"). A re-upload's channel isn't the artist, so a title
+    /// that names one is searched as it is.</summary>
+    public static string SongSearch(string? title, string? author)
+    {
+        var cleaned = Clutter().Replace(title ?? "", "").Trim();
+        var named = NamesArtist().IsMatch(cleaned);
+        var artist = Artist(author);
+        return (named || artist.Length == 0 ? cleaned : $"{artist} {cleaned}").Trim();
+    }
+
     /// <summary>The uploader as an artist's name: YouTube Music's "Name - Topic" channels and "NameVEVO" without the
     /// tag. Not escaped.</summary>
     public static string Artist(string? author)
@@ -121,6 +132,10 @@ public static partial class MusicFormatting
     /// <summary>The " - " (or similar) between an artist's name and the song in "Artist - Song".</summary>
     [GeneratedRegex(@"\G\s*[-–—|:]\s+")]
     private static partial Regex Separator();
+
+    /// <summary>A title in the "Artist - Song" form: a dash (or bar) with spaces either side, anywhere in it.</summary>
+    [GeneratedRegex(@"\s[-–—|]\s")]
+    private static partial Regex NamesArtist();
 
     /// <summary>Song titles come from uploaders, so escape markdown and keep them short.</summary>
     private static string SafeTitle(string? title)

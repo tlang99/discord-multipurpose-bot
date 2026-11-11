@@ -557,7 +557,7 @@ public partial class ChatHandler
                 }
 
                 // Into the standing queue, in the person's turns, starting the music if it isn't playing (play or add alike).
-                var result = await _musicControls.PlayAsync(asker, musicChannel, play.Query);
+                var result = await _musicControls.PlayAsync(asker, musicChannel, play.Queries);
                 var where = result.Success && musicChannel.Id != channel.Id ? $" (music's in {musicChannel.Mention})" : "";
                 return new((result.Text ?? "Done.") + where, result.SuppressEmbeds, Done: result.Success);
             }

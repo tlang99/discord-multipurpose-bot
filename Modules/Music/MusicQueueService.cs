@@ -34,6 +34,7 @@ public class MusicQueueService : IHostedService
     public const string ResumeButton = ButtonPrefix + ":resume";
     public const string StopButton = ButtonPrefix + ":stop";
     public const string LoopButton = ButtonPrefix + ":loop";
+    public const string ShuffleButton = ButtonPrefix + ":shuffle";
     public const string VolumeDownButton = ButtonPrefix + ":vol-down";
     public const string VolumeUpButton = ButtonPrefix + ":vol-up";
     public const string BackButton = ButtonPrefix + ":back";
@@ -140,42 +141,50 @@ public class MusicQueueService : IHostedService
 
     public Task<MusicQueueState> GetAsync(ulong guildId) => _store.GetAsync(guildId);
 
-    /// <summary>Adds songs for <paramref name="user"/>. The music also starts if nothing's playing and they're in a
-    /// voice channel; otherwise the songs just wait.</summary>
-    public async Task<MusicReply> AddAsync(SocketGuildUser user, string query, ITextChannel fallbackChannel)
+    /// <summary>Adds songs for <paramref name="user"/>: one search or link, or several at once (each looked up on its
+    /// own, and only as many as one person can have waiting). The music also starts if nothing's playing and they're
+    /// in a voice channel; otherwise the songs just wait.</summary>
+    public async Task<MusicReply> AddAsync(SocketGuildUser user, IReadOnlyList<string> queries,
+        ITextChannel fallbackChannel)
     {
-        if (MusicService.CheckQuery(query) is { } badQuery)
+        if (queries.Count == 0)
         {
-            return MusicReply.Fail(badQuery);
+            return MusicReply.Fail("Tell me what to play.");
         }
 
-        var lookup = await _music.FindTracksAsync(query, user.Guild.Id);
-        if (lookup.Error is not null)
+        var asked = queries.Take(SongsPerPerson).ToList();
+        var lookups = await Task.WhenAll(asked.Select(q => _music.FindTracksAsync(q, user.Guild.Id)));
+        if (asked.Count == 1 && lookups[0].Error is { } error)
         {
-            return MusicReply.Fail(lookup.Error);
+            return MusicReply.Fail(error);
         }
 
         // Titles end up on the pinned menu for everyone to see, so they follow the server's word filter, with the same
         // moderator exemption as auto-mod. Checked now, while the person can pick something else.
-        var tracks = lookup.Tracks;
-        var playlistName = lookup.PlaylistName;
-        var filtered = 0;
         var settings = await _settings.GetAsync(user.Guild.Id);
-        if (TextFilter.AppliesToBotPost(user))
+        var filterApplies = TextFilter.AppliesToBotPost(user);
+        var found = lookups.Where(l => l.Error is null).ToList();
+        var tracks = found.SelectMany(l => l.Tracks)
+            .Where(t => !filterApplies || TextFilter.FindViolation(t.Title, settings) is null)
+            .ToList();
+        var filtered = found.Sum(l => l.Tracks.Count) - tracks.Count;
+        if (tracks.Count == 0)
         {
-            tracks = tracks.Where(t => TextFilter.FindViolation(t.Title, settings) is null).ToList();
-            filtered = lookup.Tracks.Count - tracks.Count;
-            if (tracks.Count == 0)
-            {
-                return MusicReply.Fail(lookup.IsPlaylist
+            return MusicReply.Fail(asked.Count > 1
+                ? found.Count == 0
+                    ? $"I couldn't add any of those. {lookups[0].Error}"
+                    : "None of those could go in the queue: the songs I found have titles that break this server's " +
+                      "word filter."
+                : lookups[0].IsPlaylist
                     ? "Every song in that playlist has a title that breaks this server's word filter."
                     : "That song's title breaks this server's word filter, so it can't go in the queue.");
-            }
+        }
 
-            if (playlistName is not null && TextFilter.FindViolation(playlistName, settings) is not null)
-            {
-                playlistName = "a playlist";
-            }
+        // A playlist on its own is named; a list of songs is counted.
+        var playlistName = asked.Count == 1 ? lookups[0].PlaylistName : null;
+        if (playlistName is not null && filterApplies && TextFilter.FindViolation(playlistName, settings) is not null)
+        {
+            playlistName = "a playlist";
         }
 
         var songs = tracks.Select(t => new QueuedSong
@@ -189,7 +198,16 @@ public class MusicQueueService : IHostedService
             PickerName = user.DisplayName,
         }).ToList();
 
-        return await QueueSongsAsync(user, songs, lookup.IsPlaylist ? playlistName : null, filtered, fallbackChannel);
+        var reply = await QueueSongsAsync(user, songs, playlistName, filtered, fallbackChannel);
+
+        // The searches aren't repeated back: they're the person's own words, and the reply may be public.
+        var missed = lookups.Count(l => l.Error is not null);
+        var notes = (missed > 0 ? $" ({missed} of the songs you asked for couldn't be found.)" : "") +
+                    (queries.Count > asked.Count
+                        ? $" (One request takes up to {SongsPerPerson} songs, so the last " +
+                          $"{queries.Count - asked.Count} weren't looked up.)"
+                        : "");
+        return reply.Success && notes.Length > 0 ? reply with { Text = reply.Text + notes } : reply;
     }
 
     /// <summary>Adds a song from the server's history for <paramref name="user"/>, as if they'd asked for it: "play
@@ -256,13 +274,13 @@ public class MusicQueueService : IHostedService
         var cap = limit == QueueAddResult.QueueFull
             ? $"the queue holds {MaxQueueLength}"
             : $"each person can have {SongsPerPerson} waiting";
-        var what = playlistName is not null
-            ? (added.Count < songs.Count
-                  ? $"the first **{added.Count}** of {songs.Count} songs from **{TextTools.Escape(playlistName)}** " +
-                    $"(the rest weren't added - {cap})"
-                  : $"**{added.Count}** songs from **{TextTools.Escape(playlistName)}**") +
-              (filtered > 0 ? $" (skipped {filtered} whose titles break the word filter)" : "")
-            : $"{MusicFormatting.SongLink(added[0])} ({MusicFormatting.SongLength(added[0])})";
+        var what = playlistName is null && added.Count == 1
+            ? $"{MusicFormatting.SongLink(added[0])} ({MusicFormatting.SongLength(added[0])})"
+            : (added.Count < songs.Count ? $"the first **{added.Count}** of {songs.Count} songs" : $"**{added.Count}** songs") +
+              // A playlist is named; a list of songs names a few of them, so it's clear what the searches found.
+              (playlistName is not null ? $" from **{TextTools.Escape(playlistName)}**" : $": {SongList(added)}");
+        what += (added.Count < songs.Count ? $" (the rest weren't added - {cap})" : "") +
+                (filtered > 0 ? $" (skipped {filtered} whose titles break the word filter)" : "");
         var text = new StringBuilder($"➕ {user.Mention} added {what}");
 
         var player = _music.GetPlayer(user.Guild.Id);
@@ -286,6 +304,16 @@ public class MusicQueueService : IHostedService
         NoteOnMenu(user.Guild.Id, $"➕ <@{user.Id}> added {what}.");
         RefreshMenu(user.Guild.Id);
         return MusicReply.Ok(text.ToString());
+    }
+
+    /// <summary>The first few of <paramref name="songs"/> as links, and how many more: "A, B, C and 4 more".</summary>
+    private static string SongList(IReadOnlyList<QueuedSong> songs)
+    {
+        const int named = 3;
+        var links = songs.Take(named).Select(MusicFormatting.SongLink).ToList();
+        return songs.Count > named
+            ? $"{string.Join(", ", links)} and {songs.Count - named} more"
+            : $"{string.Join(", ", links[..^1])} and {links[^1]}";
     }
 
     /// <summary>Roughly how long until a song plays, given how long the songs ahead of it last: what's left of the
@@ -648,6 +676,7 @@ public class MusicQueueService : IHostedService
                 : "You've only got one song waiting - nothing to shuffle.");
         }
 
+        NoteOnMenu(user.Guild.Id, $"🔀 <@{user.Id}> shuffled their {count} songs.");
         RefreshMenu(user.Guild.Id);
         return MusicReply.Ok($"🔀 {user.Mention} shuffled their {count} songs.");
     }
@@ -887,6 +916,12 @@ public class MusicQueueService : IHostedService
         {
             try
             {
+                if (reason == TrackEndReason.LoadFailed && item is QueueTrackItem { IsOtherCopy: false } failed &&
+                    await TryOtherCopyAsync(player, failed))
+                {
+                    return;
+                }
+
                 if (reason == TrackEndReason.Finished && item is QueueTrackItem { Song: var song } &&
                     (await _store.GetAsync(player.GuildId)).LoopQueue)
                 {
@@ -918,6 +953,39 @@ public class MusicQueueService : IHostedService
             }
         }, LogLevel.Warning, "Couldn't play the next song in guild {GuildId}.", player.GuildId);
         return Task.CompletedTask;
+    }
+
+    /// <summary>YouTube wouldn't play <paramref name="failed"/> (age-restricted, most often, which explicit songs'
+    /// uploads tend to be): plays another copy of the same song from YouTube Music in its place, still the same pick,
+    /// and says whether it did. If there's no other copy, it says so in the channel, and the music moves on.</summary>
+    private async Task<bool> TryOtherCopyAsync(MusicPlayer player, QueueTrackItem failed)
+    {
+        if (await _music.FindOtherCopyAsync(failed.LavalinkTrack, player.GuildId) is not { } other)
+        {
+            await player.ReportUnplayableAsync(failed.LavalinkTrack);
+            return false;
+        }
+
+        return await _music.WithPlaybackLockAsync(player.GuildId, async () =>
+        {
+            // A skip, /stop or another song may have come in while it looked.
+            if (player.State == PlayerState.Destroyed ||
+                (player.CurrentItem is not null && (player.CurrentItem as QueueTrackItem)?.Song.Id != failed.Song.Id))
+            {
+                return true;
+            }
+
+            _logger.LogInformation("Playing another copy of '{Title}' in guild {GuildId}: '{Other}' ({Uri}).",
+                failed.Song.Title, player.GuildId, other.Title, other.Uri);
+            var song = failed.Song;
+            song.Track = other.ToString();
+            song.Title = other.Title;
+            song.Uri = other.Uri?.ToString();
+            song.Duration = other.Duration;
+            song.IsLiveStream = other.IsLiveStream;
+            await player.PlayAsync(new QueueTrackItem(other, song, IsOtherCopy: true), enqueue: false);
+            return true;
+        });
     }
 
     /// <summary>With DJ mode on and nothing queued after the song that just started, DJ mode picks when it ends: the
@@ -1310,36 +1378,53 @@ public class MusicQueueService : IHostedService
             : state.LoopQueue ? LoopMode.Queue
             : LoopMode.Off;
 
-    /// <summary>The menu's buttons: playback on the first row, the rest on the second.</summary>
+    /// <summary>The menu's buttons, spread evenly over the rows. While playing (4, 4, 3): the playback controls, then
+    /// how it plays (loop, shuffle, volume), then the queue (add, history, your songs). With nothing playing (4, 4):
+    /// Play and the queue buttons, then how it plays.</summary>
     private static IEnumerable<ActionRowBuilder> BuildButtons(MusicQueueState state, MusicPlayer? player)
     {
-        var playback = new ActionRowBuilder();
+        var queue = new ActionRowBuilder();
         if (player?.CurrentItem is null)
         {
-            playback.WithButton("Play", PlayButton, ButtonStyle.Primary, new Emoji("▶️"));
+            queue.WithButton("Play", PlayButton, ButtonStyle.Primary, new Emoji("▶️"));
         }
         else
         {
-            playback.WithButton(null, BackButton, ButtonStyle.Secondary, new Emoji("⏮️"));
+            var playback = new ActionRowBuilder()
+                .WithButton(null, BackButton, ButtonStyle.Secondary, new Emoji("⏮️"));
             playback = player.State == PlayerState.Paused
                 ? playback.WithButton("Resume", ResumeButton, ButtonStyle.Primary, new Emoji("▶️"))
                 : playback.WithButton("Pause", PauseButton, ButtonStyle.Primary, new Emoji("⏸️"));
-            playback.WithButton("Skip", SkipButton, ButtonStyle.Secondary, new Emoji("⏭️"));
-            playback.WithButton(null, StopButton, ButtonStyle.Danger, new Emoji("⏹️"));
+            yield return playback
+                .WithButton("Skip", SkipButton, ButtonStyle.Secondary, new Emoji("⏭️"))
+                .WithButton(null, StopButton, ButtonStyle.Danger, new Emoji("⏹️"));
         }
 
-        playback.WithButton("Add song", AddButton, ButtonStyle.Success, new Emoji("➕"));
-        yield return playback;
+        queue.WithButton("Add song", AddButton, ButtonStyle.Success, new Emoji("➕"))
+            .WithButton("History", HistoryButton, ButtonStyle.Secondary, new Emoji("🕘"))
+            .WithButton("Mine", MineButton, ButtonStyle.Secondary, new Emoji("🗑️"));
 
         var loop = LoopOf(state, player);
-        yield return new ActionRowBuilder()
+        var sound = new ActionRowBuilder()
             .WithButton(loop switch { LoopMode.Song => "Song", LoopMode.Queue => "Queue", _ => null }, LoopButton,
                 loop == LoopMode.Off ? ButtonStyle.Secondary : ButtonStyle.Primary,
                 new Emoji(loop == LoopMode.Song ? "🔂" : "🔁"))
+            // Your own songs, like /shuffle-mine: everyone else's stay put.
+            .WithButton(null, ShuffleButton, ButtonStyle.Secondary, new Emoji("🔀"))
             .WithButton(null, VolumeDownButton, ButtonStyle.Secondary, new Emoji("🔉"))
-            .WithButton(null, VolumeUpButton, ButtonStyle.Secondary, new Emoji("🔊"))
-            .WithButton("History", HistoryButton, ButtonStyle.Secondary, new Emoji("🕘"))
-            .WithButton("Mine", MineButton, ButtonStyle.Secondary, new Emoji("🗑️"));
+            .WithButton(null, VolumeUpButton, ButtonStyle.Secondary, new Emoji("🔊"));
+
+        // While playing, the controls lead; with nothing playing, Play does.
+        if (player?.CurrentItem is null)
+        {
+            yield return queue;
+            yield return sound;
+        }
+        else
+        {
+            yield return sound;
+            yield return queue;
+        }
     }
 
     private async Task TryUnpinAsync(IUserMessage menu)
