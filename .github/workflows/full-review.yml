@@ -55,7 +55,7 @@ jobs:
             {"id": "lfg-polls-reminders", "name": "LFG, polls and reminders",
              "paths": "Modules/Lfg/ Services/Lfg/ Modules/Polls/ Services/Polls/ Modules/Reminders/ Services/Reminders/ Hosting/LfgExpiryService.cs Hosting/ReminderDeliveryService.cs Hosting/DiscordReminderSender.cs Models/LfgGame.cs Models/LfgPost.cs Models/Reminder.cs Configuration/LfgOptions.cs Configuration/PollOptions.cs Configuration/ReminderOptions.cs"},
             {"id": "settings-news-and-core", "name": "Settings, news and core",
-             "paths": "Program.cs Common/ Hosting/DiscordBotService.cs Hosting/FileLogger.cs Hosting/NewsPollingService.cs Modules/Settings/ Services/Settings/ Modules/Help/ Modules/News/ Services/News/ Services/Storage/ Models/ServerSettings.cs Models/NewsSubscription.cs Configuration/BotOptions.cs Configuration/NewsOptions.cs ModBot.csproj nuget.config appsettings.example.json .github/workflows/ .github/actions/ .github/review-decisions.md"}
+             "paths": "Program.cs Common/ Hosting/DiscordBotService.cs Hosting/FileLogger.cs Hosting/NewsPollingService.cs Modules/Settings/ Services/Settings/ Modules/Help/ Modules/News/ Services/News/ Services/Storage/ Models/ServerSettings.cs Models/NewsSubscription.cs Configuration/BotOptions.cs Configuration/NewsOptions.cs ModBot.csproj nuget.config appsettings.example.json Dockerfile .dockerignore docker-compose.yml docker-compose.cpu.yml .env.example .github/workflows/ .github/actions/ .github/review-decisions.md"}
           ]'
 
           # Every tracked file outside these (tests, docs, the upstream Discord.Net patch, git settings) must be in

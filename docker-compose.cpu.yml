@@ -1,0 +1,5 @@
+# For a server without an NVIDIA card (or a test on a PC): Ollama runs on the CPU instead. Slower replies (~5-10 s).
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+services:
+  ollama:
+    deploy: !reset {}

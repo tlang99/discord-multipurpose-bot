@@ -4,35 +4,70 @@
 # Every download is pinned to an exact release or commit and checked against its SHA-256, so what you get is exactly
 # what was tested. To move to a newer version, change its link and hash together.
 #
-#   powershell -ExecutionPolicy Bypass -File voice/setup.ps1
+#   powershell -ExecutionPolicy Bypass -File voice/setup.ps1     (Windows)
+#   pwsh voice/setup.ps1                                          (Linux x64; the Docker image runs this when it's built)
 
 $ErrorActionPreference = 'Stop'
+# $IsLinux only exists in PowerShell 7 (pwsh); Windows PowerShell 5 leaves it unset, which reads as false.
+$linux = [bool]$IsLinux
+if ($linux -and [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
+    throw 'Voice commands are set up for 64-bit Intel/AMD Linux (x64) only.'
+}
+if (-not $linux -and -not [Environment]::OSVersion.Platform.ToString().StartsWith('Win')) {
+    throw 'Voice commands are set up for Windows or Linux x64 only.'
+}
+
 $natives = Join-Path $PSScriptRoot 'natives'
 $models = Join-Path $PSScriptRoot 'models'
 $temp = Join-Path ([IO.Path]::GetTempPath()) "modbot-voice-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Force $natives, $models, $temp | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$downloads = @(
-    @{
-        # Discord's own build of its voice encryption (DAVE), which Discord requires for voice.
-        Name = 'libdave'; File = "$natives/libdave.dll"; ZipEntry = 'bin/libdave.dll'
-        Url = 'https://github.com/discord/libdave/releases/download/v1.2.2/cpp/libdave-Windows-X64-boringssl.zip'
-        Sha256 = '8ab9ef71bc8841d0211268aa8c3910f9a574a519a8f3cd1881be2c20c2c2b2fe'
-    },
-    @{
-        # The voice connection's encryption, from the official libsodium NuGet package.
-        Name = 'libsodium'; File = "$natives/libsodium.dll"; ZipEntry = 'runtimes/win-x64/native/libsodium.dll'
-        Url = 'https://api.nuget.org/v3-flatcontainer/libsodium/1.0.22/libsodium.1.0.22.nupkg'
-        Sha256 = '64a1f143868309069f0a0a3c8141c0853c4f17243ddf734e92b11c5411739771'
-    },
-    @{
-        # The Opus audio codec. Opus publishes no Windows builds; this is the one Discord.Net's own audio sample uses,
-        # pinned to a commit.
-        Name = 'opus'; File = "$natives/opus.dll"; ZipEntry = $null
-        Url = 'https://github.com/AvionBlock/OpusSharp/raw/0147dd6e11b5e9750b683727a8242cb364c672b2/OpusSharp.Natives/runtimes/win-x64/native/opus.dll'
-        Sha256 = '5ddd7cc5a100f486c97f8707a36473fb40975b81585cb0bed69f12b237593b7b'
-    },
+# Discord.Net loads these by name from next to the bot: libdave, libsodium and opus (.dll on Windows; on Linux .NET
+# looks for libdave.so, libsodium.so and opus.so first).
+$nativeLibraries = if ($linux) {
+    @(
+        @{
+            Name = 'libdave'; File = "$natives/libdave.so"; ZipEntry = 'lib/libdave.so'
+            Url = 'https://github.com/discord/libdave/releases/download/v1.2.2/cpp/libdave-Linux-X64-boringssl.zip'
+            Sha256 = 'ccdbf9659f0dd1afec25480a31d6db15cd1c0eeb62658e26c74ea98b1d115f71'
+        },
+        @{
+            Name = 'libsodium'; File = "$natives/libsodium.so"; ZipEntry = 'runtimes/linux-x64/native/libsodium.so'
+            Url = 'https://api.nuget.org/v3-flatcontainer/libsodium/1.0.22/libsodium.1.0.22.nupkg'
+            Sha256 = '963416833246938fd6983e4aa96248dbccb2f95b30095c4a94678d6fb903404b'
+        },
+        @{
+            Name = 'opus'; File = "$natives/opus.so"; ZipEntry = $null
+            Url = 'https://github.com/AvionBlock/OpusSharp/raw/0147dd6e11b5e9750b683727a8242cb364c672b2/OpusSharp.Natives/runtimes/linux-x64/native/opus.so'
+            Sha256 = 'b797168b3b9df21e5c0c01b3fde2c1391efc37da2a73249752721716f5c3b45d'
+        }
+    )
+} else {
+    @(
+        @{
+            # Discord's own build of its voice encryption (DAVE), which Discord requires for voice.
+            Name = 'libdave'; File = "$natives/libdave.dll"; ZipEntry = 'bin/libdave.dll'
+            Url = 'https://github.com/discord/libdave/releases/download/v1.2.2/cpp/libdave-Windows-X64-boringssl.zip'
+            Sha256 = '8ab9ef71bc8841d0211268aa8c3910f9a574a519a8f3cd1881be2c20c2c2b2fe'
+        },
+        @{
+            # The voice connection's encryption, from the official libsodium NuGet package.
+            Name = 'libsodium'; File = "$natives/libsodium.dll"; ZipEntry = 'runtimes/win-x64/native/libsodium.dll'
+            Url = 'https://api.nuget.org/v3-flatcontainer/libsodium/1.0.22/libsodium.1.0.22.nupkg'
+            Sha256 = '64a1f143868309069f0a0a3c8141c0853c4f17243ddf734e92b11c5411739771'
+        },
+        @{
+            # The Opus audio codec. Opus publishes no Windows builds; this is the one Discord.Net's own audio sample
+            # uses, pinned to a commit (its Linux build comes from the same commit).
+            Name = 'opus'; File = "$natives/opus.dll"; ZipEntry = $null
+            Url = 'https://github.com/AvionBlock/OpusSharp/raw/0147dd6e11b5e9750b683727a8242cb364c672b2/OpusSharp.Natives/runtimes/win-x64/native/opus.dll'
+            Sha256 = '5ddd7cc5a100f486c97f8707a36473fb40975b81585cb0bed69f12b237593b7b'
+        }
+    )
+}
+
+$downloads = $nativeLibraries + @(
     @{
         # Whisper's small English speech-to-text model (~140 MB), pinned to a revision.
         Name = 'the speech-to-text model (~140 MB)'; File = "$models/ggml-base.en.bin"; ZipEntry = $null
@@ -56,10 +91,18 @@ $downloads = @(
 # Piper, the text-to-speech program for spoken replies (~22 MB): a whole folder (the program, its libraries and its
 # pronunciation data), so it's unpacked into voice/piper rather than picked out a file at a time. A note of the
 # archive's hash marks it as installed.
-$piper = @{
-    Dir = Join-Path $PSScriptRoot 'piper'; Folder = 'piper/'
-    Url = 'https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip'
-    Sha256 = 'f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea'
+$piper = if ($linux) {
+    @{
+        Dir = Join-Path $PSScriptRoot 'piper'; Folder = 'piper/'; Program = 'piper'
+        Url = 'https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz'
+        Sha256 = 'a50cb45f355b7af1f6d758c1b360717877ba0a398cc8cbe6d2a7a3a26e225992'
+    }
+} else {
+    @{
+        Dir = Join-Path $PSScriptRoot 'piper'; Folder = 'piper/'; Program = 'piper.exe'
+        Url = 'https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip'
+        Sha256 = 'f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea'
+    }
 }
 
 function Test-Hash($path, $expected) {
@@ -94,15 +137,27 @@ try {
 
     $marker = Join-Path $piper.Dir '.installed-sha256'
     $installed = (Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $piper.Sha256) -and
-        (Test-Path (Join-Path $piper.Dir 'piper.exe'))
+        (Test-Path (Join-Path $piper.Dir $piper.Program))
     if (-not $installed) {
         Write-Host 'Downloading Piper (text-to-speech, ~22 MB)...'
-        $zip = Join-Path $temp 'piper.zip.download'
+        $zip = Join-Path $temp 'piper.archive.download'
         Invoke-WebRequest $piper.Url -OutFile $zip -UseBasicParsing
         if (-not (Test-Hash $zip $piper.Sha256)) {
             throw "Piper from $($piper.Url) doesn't match its expected SHA-256, so it wasn't installed."
         }
         if (Test-Path $piper.Dir) { Remove-Item -Recurse -Force $piper.Dir }
+    }
+    if (-not $installed -and $linux) {
+        # A .tar.gz with symlinks between its libraries, which tar keeps. The archive is the pinned one (checked
+        # above), so its piper/ folder is moved in as it is.
+        $unpacked = Join-Path $temp 'piper-unpacked'
+        New-Item -ItemType Directory -Force $unpacked | Out-Null
+        tar -xzf $zip -C $unpacked
+        if ($LASTEXITCODE -ne 0) { throw "Couldn't unpack Piper from $($piper.Url)." }
+        Move-Item (Join-Path $unpacked 'piper') $piper.Dir
+        Set-Content $marker $piper.Sha256
+    }
+    elseif (-not $installed) {
         $archive = [IO.Compression.ZipFile]::OpenRead($zip)
         try {
             foreach ($entry in $archive.Entries) {

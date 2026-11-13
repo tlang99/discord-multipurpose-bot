@@ -1,0 +1,22 @@
+# Keep the image build to the source: no local builds, data, secrets or downloads (the build fetches its own, pinned).
+**/bin/
+**/obj/
+.git/
+.github/
+.vs/
+.idea/
+data/
+logs/
+*.log
+appsettings.json
+appsettings.*.json
+!appsettings.example.json
+.env
+lavalink/
+voice/natives/
+voice/models/
+voice/piper/
+discord-net-patch/vendor/
+discord-net-patch/packages/
+tests/
+tools/

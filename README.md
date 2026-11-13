@@ -602,6 +602,43 @@ powershell -ExecutionPolicy Bypass -File discord-net-patch/build.ps1   # Windows
 dotnet run
 ```
 
+### Running on a Linux server (Docker)
+
+Instead of steps 5–7 by hand, `docker-compose.yml` runs the bot, Lavalink and Ollama together on a Linux x64
+server. Everything comes in the bot's image, voice included. GitHub builds it on every merge to `main`
+(`.github/workflows/docker.yml`) and publishes it as `ghcr.io/tlang99/discord-multipurpose-bot`. Nothing is opened
+on the server's ports.
+
+**Once, on the server:**
+1. Install [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin.
+2. **For the GPU (NVIDIA):** install the NVIDIA driver and the
+   [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
+   then check it with `docker run --rm --gpus all ubuntu nvidia-smi`. Without a card, add
+   `-f docker-compose.yml -f docker-compose.cpu.yml` to the `docker compose` commands below. Ollama then runs on
+   the CPU, with replies in about 5–10 s instead of 1–2 s.
+3. Make a folder for the bot and put these in it:
+   - `docker-compose.yml` and `docker-compose.cpu.yml` from this repo.
+   - `.env`, copied from `.env.example` and filled in. It holds the bot's tokens and keys.
+   - `appsettings.json`: your settings, or a copy of `appsettings.example.json` to run on the defaults and `.env`.
+     It has to exist, or Docker makes a folder there. Its `127.0.0.1` addresses are fine, since compose points the
+     bot at the other containers.
+   - `lavalink/application.yml` from this repo, and `lavalink/secrets.yml` with the YouTube sign-in
+     ([lavalink/README.md](lavalink/README.md)). Create `secrets.yml` even if it's empty, or Docker makes a folder
+     there.
+   - `data/`, copied from the machine the bot ran on before, to keep every server's settings, queues and reminders.
+4. Give the bot's user (UID 1654 in the image) its folders: `mkdir -p data logs && sudo chown -R 1654:1654 data logs`.
+5. **Stop the bot anywhere else first.** Two copies on one token answer everything twice.
+6. `docker compose up -d`. On the first start, `ollama-pull` downloads the chat model (`OLLAMA_MODEL`, default
+   `llama3.2`) and then exits.
+
+**Day to day:**
+- Logs: `docker compose logs -f bot`. They're also in `logs/`, as on Windows.
+- Update to the newest build: `docker compose pull && docker compose up -d`.
+- Restart: `docker compose restart bot`. Stop everything: `docker compose down` (the data stays).
+- Check the GPU is used: `docker compose exec ollama ollama ps` shows `GPU` under PROCESSOR.
+
+To build the image yourself instead, run `docker compose build` from a clone of the repo.
+
 ### 8. Servers' saved data
 
 Each server that adds the bot starts on the defaults: auto-mod **off** (`/automod enable` turns it on), every

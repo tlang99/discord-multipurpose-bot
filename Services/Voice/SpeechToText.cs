@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Discord.LibDave;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -110,11 +111,11 @@ public sealed class SpeechToText : IDisposable
             return "Voice commands are turned off in the bot's settings (Voice:Enabled).";
         }
 
-        // On Windows they sit next to the exe (voice/setup.ps1 puts them there). Elsewhere they're usually installed
-        // system-wide under other names, so only loading libdave below is checked.
-        var missing = OperatingSystem.IsWindows()
-            ? NativeLibraries.Where(name => !File.Exists(Path.Combine(AppContext.BaseDirectory, $"{name}.dll"))).ToList()
-            : [];
+        // Loaded the way Discord.Net will: from next to the bot (where voice/setup.ps1 puts them, .dll on Windows and
+        // .so on Linux), or from the system's libraries.
+        var missing = NativeLibraries
+            .Where(name => !NativeLibrary.TryLoad(name, typeof(SpeechToText).Assembly, null, out _))
+            .ToList();
         if (missing.Count > 0)
         {
             return $"The voice libraries aren't installed ({string.Join(", ", missing)}): run voice/setup.ps1 " +

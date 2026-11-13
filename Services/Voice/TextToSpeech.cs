@@ -32,12 +32,18 @@ public sealed class TextToSpeech : IDisposable
     public TextToSpeech(IOptions<VoiceOptions> options, IHostEnvironment environment, ILogger<TextToSpeech> logger)
     {
         _options = options.Value;
-        _piperPath = Path.GetFullPath(_options.PiperPath, environment.ContentRootPath);
+        _piperPath = Path.GetFullPath(PiperProgram(_options.PiperPath, OperatingSystem.IsWindows()),
+            environment.ContentRootPath);
         _voicePath = Path.GetFullPath(_options.SpeakingVoicePath, environment.ContentRootPath);
         _logger = logger;
         _problem = new Lazy<string?>(FindProblem);
         _sampleRate = new Lazy<int>(ReadSampleRate);
     }
+
+    /// <summary>Piper's program as configured, for this system: Linux's Piper is plain "piper", so a Windows path
+    /// ("voice/piper/piper.exe", the default and what a copied appsettings.json says) means that there.</summary>
+    public static string PiperProgram(string configured, bool windows)
+        => !windows && configured.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? configured[..^4] : configured;
 
     /// <summary>Why answers can't be spoken on this bot (for the admin running it), or null if they can.</summary>
     public string? Problem => _problem.Value;

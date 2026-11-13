@@ -95,11 +95,18 @@ To set up the second account:
 
 Remove the token to go back to one bot.
 
-## Setup (Windows)
+## Setup
+
+The Docker image already has all of this (see "Running on a Linux server (Docker)" in the main README). To run the
+bot by hand instead:
 
 ```
-powershell -ExecutionPolicy Bypass -File voice/setup.ps1
+powershell -ExecutionPolicy Bypass -File voice/setup.ps1     # Windows
+pwsh voice/setup.ps1                                          # Linux x64 (PowerShell 7)
 ```
+
+On Linux it fetches the Linux builds of the same versions instead: `libdave.so`, `libsodium.so`, `opus.so` and
+Piper's Linux folder (its program is `piper`; a `Voice:PiperPath` ending in `piper.exe` finds it too).
 
 This downloads, into `voice/natives/`, `voice/models/` and `voice/piper/` (none of them committed), each pinned to
 an exact version and checked against its SHA-256:

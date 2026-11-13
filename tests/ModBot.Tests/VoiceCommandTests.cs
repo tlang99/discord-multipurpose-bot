@@ -640,3 +640,15 @@ public class VoiceChimeTests
         Assert.Equal(0, busy.Length % VoiceAudio.FrameBytes);
     }
 }
+
+/// <summary>Finding Piper's program on each system.</summary>
+public class PiperProgramTests
+{
+    [Theory]
+    // A Windows path (the default, or a copied appsettings.json) still finds Linux's Piper, which has no .exe.
+    [InlineData("voice/piper/piper.exe", false, "voice/piper/piper")]
+    [InlineData("voice/piper/piper", false, "voice/piper/piper")]
+    [InlineData("voice/piper/piper.exe", true, "voice/piper/piper.exe")]
+    public void Piper_is_found_on_windows_and_linux(string configured, bool windows, string expected)
+        => Assert.Equal(expected, TextToSpeech.PiperProgram(configured, windows));
+}
