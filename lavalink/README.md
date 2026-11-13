@@ -46,7 +46,8 @@ If the bot starts first, it keeps retrying the connection in the background.
 **In Docker** (`docker-compose.yml`), Lavalink runs in the official `ghcr.io/lavalink-devs/lavalink` image of the
 same version, with this folder's `application.yml` and `secrets.yml` mounted in, so the YouTube sign-in carries over
 as it is. No Java or jar is needed on the server. Compose makes it listen on the container network instead of
-`127.0.0.1`, sets its password from `LAVALINK_PASSWORD` in `.env`, and keeps the downloaded plugin in a volume.
+`127.0.0.1` and sets its password from `LAVALINK_PASSWORD` in `.env`. The plugin downloads into the container on
+its first start, and again only when the container is recreated (after an update, for example).
 
 ## Changing the password
 

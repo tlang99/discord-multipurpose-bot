@@ -619,8 +619,9 @@ on the server's ports.
 3. Make a folder for the bot and put these in it:
    - `docker-compose.yml` and `docker-compose.cpu.yml` from this repo.
    - `.env`, copied from `.env.example` and filled in. It holds the bot's tokens and keys.
-   - `appsettings.json`: your settings (optional; without it the defaults and `.env` are used). Its `127.0.0.1`
-     addresses are fine, since compose points the bot at the other containers.
+   - `appsettings.json`: your settings, or a copy of `appsettings.example.json` to run on the defaults and `.env`.
+     It has to exist, or Docker makes a folder there. Its `127.0.0.1` addresses are fine, since compose points the
+     bot at the other containers.
    - `lavalink/application.yml` from this repo, and `lavalink/secrets.yml` with the YouTube sign-in
      ([lavalink/README.md](lavalink/README.md)). Create `secrets.yml` even if it's empty, or Docker makes a folder
      there.

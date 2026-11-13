@@ -1,0 +1,68 @@
+# The bot with everything it needs, for a Linux server: `docker compose up -d`. See "Running on a Linux server
+# (Docker)" in README.md. Without an NVIDIA card, add the CPU override:
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+#
+# The services talk on their own network; nothing is opened on the server's ports.
+
+services:
+  bot:
+    image: ghcr.io/tlang99/discord-multipurpose-bot:latest
+    build: .   # `docker compose build` makes the image from this folder instead of downloading it
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Where the other services are, from inside this network (appsettings.json says 127.0.0.1, for Windows).
+      Music__LavalinkUrl: http://lavalink:2333
+      Chat__OllamaUrl: http://ollama:11434
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # Your settings (from the Windows PC, or a copy of appsettings.example.json). It has to exist: if it's
+      # missing, Docker makes a folder by that name and the bot can't read its settings.
+      - ./appsettings.json:/app/appsettings.json:ro
+    depends_on:
+      - lavalink
+      - ollama
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2
+    restart: unless-stopped
+    environment:
+      SERVER_ADDRESS: 0.0.0.0   # application.yml listens on 127.0.0.1 for Windows; here the bot is another container
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:-youshallnotpass}
+      _JAVA_OPTIONS: -Xmx512m
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      # The YouTube sign-in (lavalink/README.md). Create it before the first start, even empty.
+      - ./lavalink/secrets.yml:/opt/Lavalink/secrets.yml:ro
+
+  ollama:
+    image: ollama/ollama:0.40.15
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m
+    volumes:
+      - ollama-models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Downloads the chat model on first start (and after an update to it), then stops. Chat:Model in appsettings.json
+  # has to match.
+  ollama-pull:
+    image: ollama/ollama:0.40.15
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-llama3.2}"]
+    restart: on-failure
+    depends_on:
+      - ollama
+
+volumes:
+  ollama-models:
