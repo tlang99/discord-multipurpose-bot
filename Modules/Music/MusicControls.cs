@@ -27,11 +27,15 @@ public class MusicControls
     private readonly MusicService _music;
     private readonly MusicQueueService _queue;
 
-    public MusicControls(MusicService music, MusicQueueService queue)
+    public MusicControls(MusicService music, MusicQueueService queue, DjTastes tastes)
     {
         _music = music;
         _queue = queue;
+        Tastes = tastes;
     }
+
+    /// <summary>What people tell DJ mode they like: liking songs, and their taste.</summary>
+    public DjTastes Tastes { get; }
 
     /// <summary>Adds a song (or playlist) to the queue, and starts the music if nothing's playing and the person is
     /// in a voice channel. Several songs at once are split by commas or new lines.</summary>

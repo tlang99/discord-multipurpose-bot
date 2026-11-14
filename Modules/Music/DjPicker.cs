@@ -10,22 +10,27 @@ using ModBot.Services.Storage;
 
 namespace ModBot.Modules.Music;
 
+/// <summary>A song DJ mode picked, ready to play.</summary>
+/// <param name="LikedBy">Whose liked song it is, when it's one played again rather than a new pick.</param>
+public record DjPick(QueuedSong Song, ulong? LikedBy = null);
+
 /// <summary>
-/// DJ mode: when the queue runs out, the chat model picks a song like the ones played lately, and it's looked up on
-/// YouTube, so the music keeps going instead of the bot leaving. A server turns it on (ServerFeature.MusicDj).
+/// DJ mode: when the queue runs out, the chat model picks a song for the people listening, and it's looked up on
+/// YouTube, so the music keeps going instead of the bot leaving. It goes by the songs people played lately, what the
+/// listeners say they like and the songs they've liked, and steers away from its picks that got skipped (see
+/// <see cref="DjRules"/>). Now and then it plays one of the listeners' liked songs again instead. A server turns it
+/// on (ServerFeature.MusicDj).
 /// </summary>
 public class DjPicker
 {
-    /// <summary>How many recent songs the model is shown to go on.</summary>
-    private const int RecentShown = 8;
-
     /// <summary>Tries at a song before giving up (one may be a repeat, or not found).</summary>
     private const int Tries = 3;
 
     private const string Prompt =
         "You pick the next song for a group of friends' music bot, when their queue has run out. You're shown the " +
-        "songs they played most recently, newest first. Suggest ONE real, well-known song in the same style or " +
-        "mood that isn't one of them, as \"Artist - Title\" for a YouTube search. Don't explain.";
+        "songs they played lately, and may be shown what the people listening like, songs they've liked, and your " +
+        "earlier picks they skipped. Suggest ONE real, well-known song that suits the people listening and isn't " +
+        "one already shown, as \"Artist - Title\" for a YouTube search. Don't explain.";
 
     private const string Schema =
         """{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}""";
@@ -55,28 +60,42 @@ public class DjPicker
         _logger = logger;
     }
 
-    /// <summary>A song like the recent ones in <paramref name="history"/>, ready to play, picked by
-    /// <paramref name="dj"/> (the bot), or null if none could be found (the model's off or down, or nothing new
-    /// turned up).</summary>
-    public async Task<QueuedSong?> PickAsync(ulong guildId, IReadOnlyList<QueuedSong> history, (ulong Id, string Name) dj,
-        CancellationToken cancellationToken = default)
+    /// <summary>A song for the people in <paramref name="listeners"/>, ready to play, picked by <paramref name="dj"/>
+    /// (the bot), or null if none could be found (the model's off, or it's down or nothing new turned up and none of
+    /// the listeners have liked songs to fall back on).</summary>
+    /// <param name="state">The server's saved music: the history, tastes, likes and skipped picks.</param>
+    public async Task<DjPick?> PickAsync(ulong guildId, MusicQueueState state, IReadOnlySet<ulong> listeners,
+        (ulong Id, string Name) dj, Random? random = null, CancellationToken cancellationToken = default)
     {
-        if (!_chatOptions.IsEnabled || history.Count == 0)
+        if (!_chatOptions.IsEnabled || state.History.Count == 0)
         {
             return null;
         }
 
-        var recent = history.Take(RecentShown).Select(s => s.Title).ToList();
+        random ??= Random.Shared;
         var settings = await _settings.GetAsync(guildId);
+        // Liked songs are shown on the menu when they play, so they follow the word filter as it is now.
+        var liked = DjRules.LikedToPlay(state, listeners, random)
+            .Where(l => TextFilter.FindViolation(l.Song.Title, settings) is null)
+            .ToList();
+        DjPick? FromLikes() => liked.Count == 0
+            ? null
+            : new DjPick(MusicQueueRules.Copy(liked[0].Song, dj.Id, dj.Name), liked[0].LikedBy);
+
+        if (random.NextDouble() < DjRules.LikedShare && FromLikes() is { } again)
+        {
+            return again;
+        }
+
+        var seeds = DjRules.Seeds(state.History, dj.Id);
+        var tastes = DjRules.TastesOf(state, listeners);
+        var examples = liked.Take(DjRules.LikesShown).Select(l => l.Song.Title).ToList();
         var suggested = new List<string>();
         for (var attempt = 0; attempt < Tries; attempt++)
         {
             try
             {
-                // Told what it already suggested this time round too, so a retry isn't the same song.
-                var asked = "Played lately:\n" + string.Join('\n', recent) +
-                            (suggested.Count == 0 ? "" : "\n\nAlready suggested (pick another):\n" +
-                                                         string.Join('\n', suggested));
+                var asked = DjRules.Ask(seeds, tastes, examples, state.DjSkipped, suggested);
                 // An answer that isn't the JSON asked for gives no query: ask again.
                 var query = ReadQuery(await _chat.CompleteJsonAsync(Prompt, asked, Schema, cancellationToken));
                 if (string.IsNullOrEmpty(query) || MusicService.CheckQuery(query) is not null)
@@ -87,33 +106,37 @@ public class DjPicker
                 suggested.Add(query);
                 var found = await _music.FindTracksAsync(query.Length > 200 ? query[..200] : query, guildId);
                 var track = found.Tracks.FirstOrDefault(t => !t.IsLiveStream);
+                var song = track is null
+                    ? null
+                    : new QueuedSong
+                    {
+                        Track = track.ToString(),
+                        Title = track.Title,
+                        Uri = track.Uri?.ToString(),
+                        Duration = track.Duration,
+                        PickerId = dj.Id,
+                        PickerName = dj.Name,
+                    };
                 // Not a repeat of something played lately, and not a title the server's word filter blocks: it ends
                 // up on the menu for everyone.
-                if (track is null || history.Any(s => s.Track == track.ToString()) ||
-                    TextFilter.FindViolation(track.Title, settings) is not null)
+                if (song is null || state.History.Any(s => DjRules.SameSong(s, song)) ||
+                    TextFilter.FindViolation(song.Title, settings) is not null)
                 {
                     continue;
                 }
 
-                return new QueuedSong
-                {
-                    Track = track.ToString(),
-                    Title = track.Title,
-                    Uri = track.Uri?.ToString(),
-                    Duration = track.Duration,
-                    PickerId = dj.Id,
-                    PickerName = dj.Name,
-                };
+                return new DjPick(song);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // The model or the song lookup is down: trying again now won't help, and the music just stops.
+                // The model or the song lookup is down: trying again now won't help. A liked song keeps the music
+                // going if there is one; otherwise it just stops.
                 _logger.LogInformation(ex, "DJ mode couldn't pick a song in guild {GuildId}.", guildId);
-                return null;
+                return FromLikes();
             }
         }
 
-        return null;
+        return FromLikes();
     }
 
     /// <summary>

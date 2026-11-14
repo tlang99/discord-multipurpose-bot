@@ -87,11 +87,12 @@ public partial class ChatActionParser
         "they explicitly ask the bot to make, post or create an LFG or looking-for-group post, or to find them players " +
         "or a squad. Answer music_control only if they explicitly ask the bot to skip, pause, resume or stop the music, " +
         "go back to or replay a song that already played, restart the song, turn the music up or down, shuffle their " +
-        "songs, show what played recently, show or change the song queue, or start, end, join or leave a music " +
-        "session. Questions about music or LFG, opinions, and general chat are none. When unsure, answer none.";
+        "songs, show what played recently, show or change the song queue, start, end, join or leave a music " +
+        "session, like the song that's playing, or remember what music they like for DJ mode. Questions about music " +
+        "or LFG, opinions, and general chat are none. When unsure, answer none.";
 
     private const string MusicControlSchema =
-        """{"type":"object","properties":{"command":{"type":"string","enum":["skip","pause","resume","stop","now_playing","show_queue","loop_song","loop_queue","loop_off","clear_queue","start_playing","remove_mine","show_menu","previous","play_again","restart","volume_down","volume_up","shuffle_mine","show_history","unclear"]}},"required":["command"]}""";
+        """{"type":"object","properties":{"command":{"type":"string","enum":["skip","pause","resume","stop","now_playing","show_queue","loop_song","loop_queue","loop_off","clear_queue","start_playing","remove_mine","show_menu","previous","play_again","restart","volume_down","volume_up","shuffle_mine","show_history","like_song","unlike_song","show_likes","set_taste","clear_taste","unclear"]},"taste":{"type":"string"}},"required":["command"]}""";
 
     private const string MusicControlPrompt =
         "The message asks a Discord music bot to control its music. Pick the command that matches: skip (skip or vote " +
@@ -102,7 +103,10 @@ public partial class ChatActionParser
         "music session), show_menu (show the music menu), previous (go back to, or replay, the song that played " +
         "before), play_again (queue a song that already played once more), restart (start the current song over), " +
         "volume_down (quieter), volume_up (louder), shuffle_mine (shuffle the person's own songs), show_history (what " +
-        "played recently, or what an earlier song was called). If none fit, answer unclear.";
+        "played recently, or what an earlier song was called), like_song (like or favourite the song that's on), " +
+        "unlike_song, show_likes (the person's liked songs or music taste), set_taste (remember what music they like " +
+        "or don't, for DJ mode: put it in \"taste\", in their own words), clear_taste (forget their music taste). If " +
+        "none fit, answer unclear.";
 
     private const string PlaySchema =
         """{"type":"object","properties":{"songs":{"type":"array","items":{"type":"string"}}},"required":["songs"]}""";
@@ -242,12 +246,22 @@ public partial class ChatActionParser
                 "volume_up" => MusicCommand.VolumeUp,
                 "shuffle_mine" => MusicCommand.ShuffleMine,
                 "show_history" => MusicCommand.ShowHistory,
+                "like_song" => MusicCommand.LikeSong,
+                "unlike_song" => MusicCommand.UnlikeSong,
+                "show_likes" => MusicCommand.ShowLikes,
+                "set_taste" => MusicCommand.SetTaste,
+                "clear_taste" => MusicCommand.ClearTaste,
                 _ => null,
             };
 
-            if (command is { } picked)
+            // A taste with nothing in it isn't one: that's for the person to say again.
+            var taste = json.RootElement.TryGetProperty("taste", out var said) && said.ValueKind == JsonValueKind.String
+                ? said.GetString()!.Trim()
+                : "";
+            if (command is { } picked && (picked != MusicCommand.SetTaste || taste.Length > 0))
             {
-                return new MusicControlAction(new MusicCommandRequest(picked), FromModel: true);
+                return new MusicControlAction(new MusicCommandRequest(picked,
+                    Taste: picked == MusicCommand.SetTaste ? taste : null), FromModel: true);
             }
         }
         catch (Exception ex) when (ex is ChatServiceException or JsonException or KeyNotFoundException or InvalidOperationException)

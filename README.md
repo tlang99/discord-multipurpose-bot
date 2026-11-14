@@ -106,10 +106,21 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   again for yourself; "play that again" (or `/playagain`) adds the newest, and "what was that song?" (or
   `/history`) lists them.
 - **DJ mode** (off until a server admin turns it on: `/settings feature` → DJ mode): when the queue runs out, the
-  chatbot picks a song like the ones played lately, and it plays instead of the music stopping. It keeps going one
+  chatbot picks a song for the people listening, and it plays instead of the music stopping. It keeps going one
   song at a time, never repeats one of the last 20 played, follows the word filter, and shows each pick on the menu.
   DJ songs aren't queued or anyone's turn, so a song someone adds plays as soon as the current one ends. Skip one
-  and it picks another. Needs the chatbot (Ollama) set up. When the last song in the queue starts, the bot loads the
+  and it picks another. Needs the chatbot (Ollama) set up. What it goes by:
+  - the songs people picked lately (not its own picks, so a long DJ run doesn't drift away from them);
+  - **your taste**, in your own words: `/taste` (a pop-up; empty it to forget it), or "my music taste is 90s hip hop,
+    no country" / "forget my music taste";
+  - **your liked songs:** the menu's **Like** (❤️) or `/like` likes the song that's on (press again to unlike), or
+    "like this song" / "unlike this song". `/likes` (or "show my liked songs") lists them, with a menu to unlike
+    one. Up to 25 are kept; liking another drops the oldest. About one pick in four is one of these played again
+    (and if the chatbot is down or finds nothing new, it falls back to one);
+  - **its skipped picks:** the last 10 DJ picks someone skipped, to steer away from songs like them.
+
+  Tastes and likes only count while you're in the voice channel and not deafened, and they're kept per server in
+  `data/music-queue.json`. When the last song in the queue starts, the bot loads the
   model and keeps it loaded until just after that song ends (at most 20 minutes), so the pick isn't kept waiting
   for the model to load, which can take a minute or more while a game is using the graphics card.
 - **Seek and go back:** `/seek 1:30` (or "skip to 1:30") jumps within the song, `/restart` (or "restart this
@@ -125,7 +136,7 @@ alongside the bot (and needs a one-time sign-in with a throwaway Google account,
   looping), 🔀 (shuffles your own songs, like `/shuffle-mine`) and 🔉 🔊 (volume); and **Add song** (a pop-up that
   works like `/play`: one song or several, one per line or with commas between, and it also starts the music if
   nothing's playing and you're in voice), **History** and **Mine** (a private list of your waiting songs: take out
-  one, or all of them). With nothing playing, **Play** joins the Add song row, and there are two rows. The buttons keep working across restarts. Running `/music-menu` again replaces it.
+  one, or all of them), and, while a song plays, **Like** (for DJ mode). With nothing playing, **Play** joins the Add song row, and there are two rows. The buttons keep working across restarts. Running `/music-menu` again replaces it.
 - **It stays in view:** when messages build up under the menu, the bot moves it back to the bottom of the channel
   (reposts and re-pins it, deleting the old one) once the channel's been quiet for a few seconds, at most once a
   minute and within two minutes in a busy chat. With Manage Messages it also deletes Discord's "pinned a message"
@@ -147,7 +158,7 @@ Commands:
   `/nowplaying`, `/queue [page]`.
 - `/remove position` (your own songs; moderators: anyone's), `/remove-mine`, `/clearqueue` (moderators),
   `/playnext position` and `/shuffle-mine` (your own songs), `/volume percent`, `/seek time`, `/restart`,
-  `/previous`, `/history`, `/playagain`,
+  `/previous`, `/history`, `/playagain`, `/like`, `/likes`, `/taste` (DJ mode, above),
   `/loop off|song|queue` (looping the queue puts finished songs back in for their picker; a skip still moves on;
   it's saved, so it stays on until it's turned off, and `/stop` says so).
 

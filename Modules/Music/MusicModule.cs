@@ -124,6 +124,61 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             _ => LoopMode.Off,
         }));
 
+    [SlashCommand("like", "Likes the song that's playing, for DJ mode (or unlikes it, if you already had).")]
+    public Task LikeAsync() => RunAsync((user, _) => _controls.Tastes.LikeAsync(user), privately: true);
+
+    /// <summary>The person's taste and liked songs, privately, with a list to unlike one.</summary>
+    [SlashCommand("likes", "Shows your liked songs and music taste, which DJ mode goes by while you listen.")]
+    public async Task LikesAsync()
+    {
+        if (Context.User is not SocketGuildUser user)
+        {
+            return;
+        }
+
+        var shown = await _controls.Tastes.ShowAsync(user);
+        var liked = await _controls.Tastes.LikedAsync(user.Guild.Id, user.Id);
+        MessageComponent? components = null;
+        if (liked.Count > 0)
+        {
+            // A list holds 25 choices, as many as the likes keep (DjRules.MostLikes).
+            var pick = new SelectMenuBuilder()
+                .WithCustomId(MusicQueueService.LikesPick)
+                .WithPlaceholder("Pick a song to unlike");
+            foreach (var song in liked)
+            {
+                pick.AddOption(TextTools.Truncate(string.IsNullOrWhiteSpace(song.Title) ? "Unknown track" : song.Title, 100),
+                    song.Id.ToString(), MusicFormatting.SongLength(song));
+            }
+
+            components = new ComponentBuilder().WithSelectMenu(pick).Build();
+        }
+
+        await RespondAsync(shown.Text, embed: shown.Embed, components: components, ephemeral: true,
+            allowedMentions: AllowedMentions.None);
+    }
+
+    [ComponentInteraction(MusicQueueService.LikesPick)]
+    public Task LikesPickedAsync(string[] picked)
+        => ButtonAsync((user, _) => Guid.TryParse(picked.FirstOrDefault(), out var id)
+            ? _controls.Tastes.UnlikeAsync(user, id)
+            : Task.FromResult(MusicReply.Fail("I couldn't tell which song that was - try `/likes` again.")),
+            alwaysPrivate: true);
+
+    /// <summary>A pop-up with the person's taste filled in, to change it (or empty it to forget it).</summary>
+    [SlashCommand("taste", "Tells DJ mode what music you like, in your own words, for while you're listening.")]
+    public async Task TasteAsync()
+    {
+        var taste = await _controls.Tastes.TasteAsync(Context.Guild.Id, Context.User.Id);
+        await RespondWithModalAsync<TasteModal>(TasteModalId,
+            modifyModal: modal => modal.UpdateTextInput(TasteModal.InputId,
+                input => input.Value = taste.Length == 0 ? null : taste));
+    }
+
+    [ModalInteraction(TasteModalId)]
+    public Task TasteSubmittedAsync(TasteModal modal)
+        => ButtonAsync((user, _) => _controls.Tastes.SetTasteAsync(user, modal.Taste), alwaysPrivate: true);
+
     [SlashCommand("music-menu", "Posts the music menu here and pins it (replacing any older one).")]
     [RequireUserPermission(GuildPermission.ManageGuild)]
     public async Task MusicMenuAsync()
@@ -183,6 +238,10 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     [ComponentInteraction(MusicQueueService.VolumeUpButton)]
     public Task VolumeUpButtonAsync()
         => ButtonAsync((user, _) => _controls.VolumeAsync(user, by: MusicControls.VolumeStep));
+
+    /// <summary>Like /like. Private: it's the person's own.</summary>
+    [ComponentInteraction(MusicQueueService.LikeButton)]
+    public Task LikeButtonAsync() => ButtonAsync((user, _) => _controls.Tastes.LikeAsync(user), alwaysPrivate: true);
 
     [ComponentInteraction(MusicQueueService.BackButton)]
     public Task BackButtonAsync() => ButtonAsync((user, channel) => _controls.BackAsync(user, channel));
@@ -263,7 +322,9 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
     /// it didn't.</summary>
     /// <param name="slow">Looking up songs or joining voice can take longer than Discord's 3 seconds, so those
     /// acknowledge first.</param>
-    private async Task RunAsync(Func<SocketGuildUser, ITextChannel, Task<MusicReply>> control, bool slow = false)
+    /// <param name="privately">Only for the person, even when it worked (their likes and taste).</param>
+    private async Task RunAsync(Func<SocketGuildUser, ITextChannel, Task<MusicReply>> control, bool slow = false,
+        bool privately = false)
     {
         if (Context.User is not SocketGuildUser user || Context.Channel is not ITextChannel channel)
         {
@@ -274,7 +335,7 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
         if (!slow)
         {
             var quick = await control(user, channel);
-            await RespondAsync(text: quick.Text, embed: quick.Embed, ephemeral: !quick.Success,
+            await RespondAsync(text: quick.Text, embed: quick.Embed, ephemeral: privately || !quick.Success,
                 allowedMentions: AllowedMentions.None,
                 flags: quick.SuppressEmbeds ? MessageFlags.SuppressEmbeds : MessageFlags.None);
             return;
@@ -315,5 +376,21 @@ public class MusicModule : InteractionModuleBase<SocketInteractionContext>
             placeholder: "e.g. mr brightside, juicy (one per line, or commas between)",
             maxLength: MaxQueryLength)]
         public string? Query { get; set; }
+    }
+
+    private const string TasteModalId = "mq-taste";
+
+    public class TasteModal : IModal
+    {
+        public const string InputId = "taste";
+
+        public string Title => "Your music taste, for DJ mode";
+
+        [InputLabel("What you like (empty it to forget it)")]
+        [ModalTextInput(InputId, TextInputStyle.Paragraph,
+            placeholder: "e.g. 90s hip hop, synthwave, anything by Daft Punk. No country.",
+            maxLength: DjRules.LongestTaste)]
+        [RequiredInput(false)]
+        public string? Taste { get; set; }
     }
 }
