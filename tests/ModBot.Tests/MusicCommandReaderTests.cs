@@ -54,6 +54,34 @@ public sealed class MusicCommandReaderTests
     public void Reads_plain_music_controls(string message, MusicCommand expected)
         => Assert.Equal(expected, MusicCommandReader.Read(message)?.Command);
 
+    [Theory]
+    [InlineData("like this song", MusicCommand.LikeSong)]
+    [InlineData("i love this song", MusicCommand.LikeSong)]
+    [InlineData("i like this music", MusicCommand.LikeSong)]
+    [InlineData("add this to my favorites", MusicCommand.LikeSong)]
+    [InlineData("unlike this song", MusicCommand.UnlikeSong)]
+    [InlineData("take this out of my liked songs", MusicCommand.UnlikeSong)]
+    [InlineData("show my liked songs", MusicCommand.ShowLikes)]
+    [InlineData("what's my music taste?", MusicCommand.ShowLikes)]
+    [InlineData("forget my music taste", MusicCommand.ClearTaste)]
+    public void Reads_dj_likes(string message, MusicCommand expected)
+        => Assert.Equal(expected, MusicCommandReader.Read(message)?.Command);
+
+    [Theory]
+    [InlineData("my music taste is 90s hip hop, synthwave and no country", "90s hip hop, synthwave and no country")]
+    [InlineData("hey set my taste to lofi, jazz", "lofi, jazz")]
+    [InlineData("DJ, I like punk rock and ska", "punk rock and ska")]
+    [InlineData("I'm into old school rap music", "old school rap music")]
+    public void Reads_a_taste_whole(string message, string taste)
+        => Assert.Equal(new MusicCommandRequest(MusicCommand.SetTaste, Taste: taste), MusicCommandReader.Read(message));
+
+    [Theory]
+    [InlineData("i like music")] // no kind of music
+    [InlineData("i like this kind of music")] // that's the song on
+    [InlineData("i like pizza")] // not about music at all
+    public void Doesnt_read_a_taste_that_isnt_one(string message)
+        => Assert.NotEqual(MusicCommand.SetTaste, MusicCommandReader.Read(message)?.Command);
+
     [Fact]
     public void Reads_which_song_to_remove()
     {

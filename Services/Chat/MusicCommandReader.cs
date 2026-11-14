@@ -50,14 +50,26 @@ public enum MusicCommand
 
     /// <summary>Show the songs played lately ("what was that song?").</summary>
     ShowHistory,
+
+    /// <summary>Like, or unlike, the song playing, for DJ mode.</summary>
+    LikeSong,
+    UnlikeSong,
+
+    /// <summary>Show the person's liked songs and music taste.</summary>
+    ShowLikes,
+
+    /// <summary>Save the person's music taste (Taste), in their own words, for DJ mode; or forget it.</summary>
+    SetTaste,
+    ClearTaste,
 }
 
 /// <param name="Position">For remove and play next: the song's place in the queue.</param>
 /// <param name="Title">For remove: words from the song's title, instead of its place.</param>
 /// <param name="Volume">For set volume: the percentage.</param>
 /// <param name="At">For seek: where in the song.</param>
+/// <param name="Taste">For set taste: what they like, in their own words.</param>
 public record MusicCommandRequest(MusicCommand Command, int? Position = null, string? Title = null, int? Volume = null,
-    TimeSpan? At = null);
+    TimeSpan? At = null, string? Taste = null);
 
 /// <summary>
 /// Spots plainly worded music controls in a chat message ("skip this", "pause", "show the queue", "start the music")
@@ -107,6 +119,16 @@ public static partial class MusicCommandReader
             _ => new(MusicCommand.PlayAgain)),
         (Rx(@"(what|which) (was|were) (that|the last|the previous|the) (song|track|one|songs)( called| before| just now)?|(show|list|see|view)( me| us)?( the)? (history|song history|recent songs|recently played( songs)?|last (few )?songs)|whats? (been|was) (played|playing)( (lately|before|earlier))?|what did (we|you) (just )?(play|listen to)|recently played"),
             _ => new(MusicCommand.ShowHistory)),
+
+        // DJ mode: liking the song that's on, and what you like. Unlike first, since it ends in "like this".
+        (Rx(@"unlike( this| that| it| the)?( song| track| one| tune)?|(remove|take|delete) (this|that|it)( song| track| one)?( out)? (of|from|off) my (likes|liked songs|favou?rites)"),
+            _ => new(MusicCommand.UnlikeSong)),
+        (Rx(@"like (this|that|it)( song| track| one| tune)?|i( really)? (like|love) (this|that)( song| track| one| tune| music)|(add|save) (this|that|it)( song| track| one)? to my (likes|liked songs|favou?rites)|(favou?rite|heart) (this|that|it)( song| track| one)?"),
+            _ => new(MusicCommand.LikeSong)),
+        (Rx(@"(forget|clear|delete|remove|reset|wipe)( out)? my (music |dj )?taste( in music)?"),
+            _ => new(MusicCommand.ClearTaste)),
+        (Rx(@"(show|list|see|view|check)( me)? my (likes|liked songs|favou?rites|favou?rite songs|(music |dj )?taste( in music)?)|what (songs )?have i liked|whats? my (music |dj )?taste( in music)?|what (music|songs) do i like"),
+            _ => new(MusicCommand.ShowLikes)),
 
         (Rx(@"(vote )?skip( to the next one| to the next song)?( (this|it|that|the|current))?( (song|track|one|tune))?|vote to skip( (this|it|that))?( (song|track|one))?|next( (song|track|one))?|play the next (song|track|one)"),
             _ => new(MusicCommand.Skip)),
@@ -162,6 +184,15 @@ public static partial class MusicCommandReader
             TextTools.ParseTime(seek.Groups["t"].Value) is { } at)
         {
             return new MusicCommandRequest(MusicCommand.Seek, At: at);
+        }
+
+        // A taste is a list ("90s hip hop, synthwave and no country"), which splitting into clauses would cut up: it's
+        // checked whole too. Words that only point ("i like this music") aren't a taste: that's liking the song.
+        if (whole.Length <= 300 && TasteRegex().Match(whole) is { Success: true } said &&
+            MusicWordRegex().Replace(said.Groups["t"].Value, "").Trim() is { Length: > 0 } kind &&
+            !NoTitleRegex().IsMatch(kind))
+        {
+            return new MusicCommandRequest(MusicCommand.SetTaste, Taste: said.Groups["t"].Value.Trim());
         }
 
         foreach (var rawClause in ClauseSplitRegex().Split(text))
@@ -221,6 +252,15 @@ public static partial class MusicCommandReader
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex SpacesRegex();
+
+    /// <summary>Telling DJ mode what you like ("t"): "my music taste is …", "set my taste to …", "dj, I like …", or
+    /// "I'm into … music".</summary>
+    [GeneratedRegex(@"^(?:my (?:music |dj )?taste(?: in music)? is|(?:set|change|update|save) my (?:music |dj )?taste(?: to| as)?|(?:for |tell )?dj(?: mode)?,? (?:that )?(?:i (?:like|love|prefer|listen to|am into)|im into|we (?:like|love|prefer|listen to|are into)|were into)) (?<t>.+)$|^(?:i (?:like|love|prefer|listen to|am into)|im into) (?<t>.+ music)$", RegexOptions.ExplicitCapture)]
+    private static partial Regex TasteRegex();
+
+    /// <summary>"music", "songs" and the like, which on their own don't say what kind.</summary>
+    [GeneratedRegex(@"\b(?:music|kind of|type of|sort of|stuff|songs?)\b")]
+    private static partial Regex MusicWordRegex();
 
     /// <summary>"this song", "it", "the current one", "everything": pointing at songs rather than naming one.</summary>
     [GeneratedRegex(@"^(?:(?:this|that|the|it|current|playing|last|next|one|ones|song|songs|track|tracks|tune|tunes|thing|things|stuff|plug|all|everything|them|those|these|every|of)\s*)+$")]

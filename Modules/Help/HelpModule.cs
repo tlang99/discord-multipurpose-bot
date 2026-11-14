@@ -90,6 +90,7 @@ public class HelpModule : InteractionModuleBase<SocketInteractionContext>
                 "`/pause` · `/resume` · `/stop` (the queue's kept; a vote with 3+ in voice) · `/loop`\n" +
                 "`/nowplaying` · `/queue` · `/remove` · `/remove-mine` · `/playnext` · `/shuffle-mine`\n" +
                 "`/volume` · `/seek` · `/restart` · `/previous` · `/history` · `/playagain`\n" +
+                "`/like` · `/likes` · `/taste` - tell DJ mode what you like, for while you're listening\n" +
                 "Or use the buttons on the pinned music menu. Controlling playback works from the bot's voice channel.");
         }
 

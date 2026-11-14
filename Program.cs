@@ -167,6 +167,7 @@ builder.Services.AddHttpClient<ModBot.Modules.Music.AlbumArt>(client =>
 builder.Services.AddSingleton<ModBot.Modules.Music.DjPicker>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicQueueService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ModBot.Modules.Music.MusicQueueService>());
+builder.Services.AddSingleton<ModBot.Modules.Music.DjTastes>();
 builder.Services.AddSingleton<ModBot.Modules.Music.MusicControls>();
 
 // Voice commands: listening in a voice channel for "hey ModBot", with speech-to-text on this machine (voice/README.md).

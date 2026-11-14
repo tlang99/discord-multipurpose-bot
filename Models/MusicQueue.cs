@@ -32,6 +32,25 @@ public class MusicQueueState
     /// <summary>The songs played most recently, newest first (the one playing now, if any, is first), for "play that
     /// again", going back, and the menu's History list.</summary>
     public List<QueuedSong> History { get; set; } = [];
+
+    /// <summary>What each person has told DJ mode they like, and the songs they've liked: what it goes by while
+    /// they're listening (see <see cref="Modules.Music.DjRules"/>).</summary>
+    public List<ListenerTaste> Tastes { get; set; } = [];
+
+    /// <summary>Titles of DJ mode's picks that got skipped, newest first, so it steers away from songs like them.</summary>
+    public List<string> DjSkipped { get; set; } = [];
+}
+
+/// <summary>One person's taste in music, for DJ mode, in this server.</summary>
+public class ListenerTaste
+{
+    public ulong UserId { get; set; }
+
+    /// <summary>In their own words ("90s hip hop, no country"); blank if they haven't said.</summary>
+    public string Taste { get; set; } = string.Empty;
+
+    /// <summary>Songs they've liked, newest first.</summary>
+    public List<QueuedSong> Liked { get; set; } = [];
 }
 
 public class QueuedSong

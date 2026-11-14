@@ -50,6 +50,12 @@ public class MusicQueueService : IHostedService
     /// <summary>The <see cref="MinePick"/> choice for all of them.</summary>
     public const string AllMine = "all";
 
+    /// <summary>Likes the song playing (or unlikes it), for DJ mode.</summary>
+    public const string LikeButton = ButtonPrefix + ":like";
+
+    /// <summary>The private list /likes opens: picking a song unlikes it.</summary>
+    public const string LikesPick = ButtonPrefix + ":likes-pick";
+
     private readonly IMusicQueueStore _store;
     private readonly IGuildSettingsStore _settings;
     private readonly MusicService _music;
@@ -456,6 +462,12 @@ public class MusicQueueService : IHostedService
         if (skipped is not var (next, _))
         {
             return MusicReply.Fail("That song already finished.");
+        }
+
+        // A DJ pick skipped: noted before the next pick, so DJ mode steers away from songs like it.
+        if (song is not null && IsDjPick(song, user.Guild))
+        {
+            await _store.MutateAsync(user.Guild.Id, state => DjRules.RecordSkipped(state, song));
         }
 
         // Skipped the last one: with DJ mode on, it picks something else rather than going quiet.
@@ -1022,7 +1034,7 @@ public class MusicQueueService : IHostedService
 
     /// <summary>Whether the server has DJ mode on: the one check for both holding the model for a pick and making
     /// one.</summary>
-    private async Task<bool> IsDjOnAsync(ulong guildId)
+    public async Task<bool> IsDjOnAsync(ulong guildId)
         => (await _serverSettings.GetAsync(guildId)).IsEnabled(ServerFeature.MusicDj);
 
     /// <summary>DJ mode, when the server has it on: the queue's run out, so the chatbot picks a song like the recent
@@ -1048,15 +1060,15 @@ public class MusicQueueService : IHostedService
             return;
         }
 
-        QueuedSong? pick;
+        DjPick? pick;
         LavalinkTrack? track;
         try
         {
             // Picking takes the model a few seconds: done outside the playback lock, then played only if nothing
-            // else started (or got queued) meanwhile.
-            var history = (await _store.GetAsync(guild.Id)).History;
-            pick = await _dj.PickAsync(guild.Id, history, (guild.CurrentUser.Id, DjName));
-            if (pick is null || !LavalinkTrack.TryParse(pick.Track, null, out track))
+            // else started (or got queued) meanwhile. It goes by the people who can hear it.
+            pick = await _dj.PickAsync(guild.Id, await _store.GetAsync(guild.Id),
+                Listeners(guild, player.VoiceChannelId), (guild.CurrentUser.Id, DjName));
+            if (pick is null || !LavalinkTrack.TryParse(pick.Song.Track, null, out track))
             {
                 return;
             }
@@ -1077,14 +1089,15 @@ public class MusicQueueService : IHostedService
                 return false;
             }
 
-            await player.PlayAsync(new QueueTrackItem(track, pick), enqueue: false);
+            await player.PlayAsync(new QueueTrackItem(track, pick.Song), enqueue: false);
             return true;
         });
 
         if (played)
         {
-            NoteOnMenu(guild.Id, $"🎧 DJ mode put on {MusicFormatting.SongLink(pick)}: the queue ran out. Add a " +
-                                 "song and it plays next.");
+            var whose = pick.LikedBy is { } likedBy ? $", one of <@{likedBy}>'s liked songs" : "";
+            NoteOnMenu(guild.Id, $"🎧 DJ mode put on {MusicFormatting.SongLink(pick.Song)}{whose}: the queue ran " +
+                                 "out. Add a song and it plays next.");
         }
     }
 
@@ -1378,9 +1391,9 @@ public class MusicQueueService : IHostedService
             : state.LoopQueue ? LoopMode.Queue
             : LoopMode.Off;
 
-    /// <summary>The menu's buttons, spread evenly over the rows. While playing (4, 4, 3): the playback controls, then
-    /// how it plays (loop, shuffle, volume), then the queue (add, history, your songs). With nothing playing (4, 4):
-    /// Play and the queue buttons, then how it plays.</summary>
+    /// <summary>The menu's buttons, spread evenly over the rows. While playing (4, 4, 4): the playback controls, then
+    /// how it plays (loop, shuffle, volume), then the queue (add, history, your songs) and Like for the song that's
+    /// on. With nothing playing (4, 4): Play and the queue buttons, then how it plays.</summary>
     private static IEnumerable<ActionRowBuilder> BuildButtons(MusicQueueState state, MusicPlayer? player)
     {
         var queue = new ActionRowBuilder();
@@ -1403,6 +1416,10 @@ public class MusicQueueService : IHostedService
         queue.WithButton("Add song", AddButton, ButtonStyle.Success, new Emoji("➕"))
             .WithButton("History", HistoryButton, ButtonStyle.Secondary, new Emoji("🕘"))
             .WithButton("Mine", MineButton, ButtonStyle.Secondary, new Emoji("🗑️"));
+        if (player?.CurrentItem is not null)
+        {
+            queue.WithButton("Like", LikeButton, ButtonStyle.Secondary, new Emoji("❤️"));
+        }
 
         var loop = LoopOf(state, player);
         var sound = new ActionRowBuilder()

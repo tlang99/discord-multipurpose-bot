@@ -67,6 +67,25 @@ public sealed class ChatActionParserTests : IDisposable
     }
 
     [Fact]
+    public async Task The_model_can_save_a_taste_in_the_persons_words()
+    {
+        var chat = new FakeChat("""{"action":"music_control","command":"set_taste","taste":"chill lofi"}""");
+
+        var action = await Parser(chat).ParseAsync("honestly i'm mostly a chill lofi person when i game");
+
+        Assert.Equal(new MusicControlAction(new MusicCommandRequest(MusicCommand.SetTaste, Taste: "chill lofi"),
+            FromModel: true), action);
+    }
+
+    [Fact]
+    public async Task A_taste_with_nothing_in_it_is_unclear()
+    {
+        var chat = new FakeChat("""{"action":"music_control","command":"set_taste","taste":" "}""");
+
+        Assert.IsType<UnclearMusicAction>(await Parser(chat).ParseAsync("remember my kind of stuff"));
+    }
+
+    [Fact]
     public async Task Looser_wording_goes_to_the_model_and_is_marked_as_its_pick()
     {
         // The fake answers both calls (the request check and the pick) with the same JSON.

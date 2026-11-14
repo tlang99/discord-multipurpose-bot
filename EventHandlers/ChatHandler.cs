@@ -446,7 +446,7 @@ public partial class ChatHandler
                         request.Heard = music is { Success: true, Pending: false } && action is MusicControlAction
                         {
                             Request.Command: not (MusicCommand.NowPlaying or MusicCommand.ShowQueue or
-                            MusicCommand.ShowMenu),
+                            MusicCommand.ShowMenu or MusicCommand.ShowLikes),
                         };
                         // The log says whether it went through, so a refusal ("say it plainly", "join the
                         // channel") can be told from a stop that worked.
@@ -678,6 +678,8 @@ public partial class ChatHandler
         // Looping the queue stays on until someone turns it off, so a wrong guess would repeat songs for days.
         [MusicCommand.LoopSong] = "loop this song",
         [MusicCommand.LoopQueue] = "loop the queue",
+        // A saved taste can't be got back once it's forgotten.
+        [MusicCommand.ClearTaste] = "forget my music taste",
     };
 
     /// <summary>
@@ -758,6 +760,16 @@ public partial class ChatHandler
                 return await _musicControls.SeekAsync(asker, TimeSpan.Zero);
             case MusicCommand.ShowHistory:
                 return await _musicControls.HistoryAsync(asker);
+            case MusicCommand.LikeSong:
+                return await _musicControls.Tastes.LikeAsync(asker, like: true);
+            case MusicCommand.UnlikeSong:
+                return await _musicControls.Tastes.LikeAsync(asker, like: false);
+            case MusicCommand.ShowLikes:
+                return await _musicControls.Tastes.ShowAsync(asker);
+            case MusicCommand.SetTaste:
+                return await _musicControls.Tastes.SetTasteAsync(asker, request.Taste);
+            case MusicCommand.ClearTaste:
+                return await _musicControls.Tastes.SetTasteAsync(asker, null);
 
             case MusicCommand.PlayAgain or MusicCommand.Previous:
             {
